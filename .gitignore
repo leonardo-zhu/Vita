@@ -3,3 +3,9 @@
 # 中国食物成分数据：仅限本人私有本地构建，不得提交（见 docs/reference-food-library.md §1.1）
 private-data/
 Resources/ReferenceFood/reference-foods.json
+
+# Xcode：工程由 project.yml 经 xcodegen 生成
+Vita.xcodeproj/
+xcuserdata/
+DerivedData/
+build/
