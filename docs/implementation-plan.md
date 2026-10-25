@@ -7,6 +7,7 @@
 - 创建最低部署版本为 iOS 17 的 SwiftUI 工程，配置 SwiftLint（可选）与 XCTest。
 - 建立 Feature / Domain / Data / Platform 分层，初始化 SwiftData container、Keychain 和依赖注入。
 - 加入文档中定义的领域值类型和迁移策略。
+- iOS 工程位于 `ios/`；加入内置默认配置与 `ConfigProvider` 协议（内存实现用于测试），模型调用统一走 `LLMClient`，不内置上游 Provider 直连。
 
 验收：冷启动可创建空数据库；单元测试可使用内存 store。
 
@@ -46,7 +47,8 @@
 
 ## Phase 5：Agent 接入与体验打磨
 
-- 以 `LLMClient` 接入选定 Provider，启用结构化输出/工具调用。
+- 以 `LLMClient` 接入 Conduit（Responses API，无状态），启用工具调用；前置：Conduit M1 可用（令牌鉴权、别名路由）。
+- 完成远程配置拉取、验签、校验与本地调试覆盖（见 Vita Admin 设计）；Admin 与诊断日志按其分期 M1–M3 推进，不阻塞本阶段的真实对话验收。
 - 为工具参数、模型输出、超时和网络错误增加校验与可恢复提示。
 - 实现 Chat / Data 双层导航、按日 Session、Onboarding。
 

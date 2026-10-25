@@ -1,20 +1,23 @@
 # Vita 架构决策记录（ADR）
 
-本文记录当前技术基线中的决定。`已采纳` 表示可按此继续设计。目前所有决策均已采纳或修订采纳，没有待确认项；若新增 `待确认` 决策，表示已给出推荐方案，但不应在编码时把它当成不可变约束。
+本文记录当前技术基线中的决定。`已采纳` 表示可按此继续设计。目前 ADR-012、ADR-014 为待确认，其余均已采纳或修订采纳；若新增 `待确认` 决策，表示已给出推荐方案，但不应在编码时把它当成不可变约束。
 
 | ID | 决策 | 状态 | 结论与理由 |
 | --- | --- | --- | --- |
 | ADR-001 | 客户端技术栈 | 已采纳 | 使用 Swift + SwiftUI + Swift Concurrency。产品为个人 iPhone 应用，HealthKit 与本地优先体验均适合原生实现。 |
 | ADR-002 | 本地持久化 | 已采纳 | 使用 SwiftData，外层保留 Repository / Service 边界。MVP 的数据量小、关系明确；隔离持久化 API 使未来切换 SQLite/GRDB 不影响业务层。 |
-| ADR-003 | 服务端 | 已采纳 | MVP 不建设业务后端、账号或云同步。所有业务数据留在设备；模型请求是唯一的可选网络出口。 |
+| ADR-003 | 服务端 | 已修订采纳 | MVP 不建设业务后端、用户账号或云同步。所有业务数据留在设备。~~模型请求是唯一的可选网络出口。~~ 网络出口为三个：经 Conduit 的模型请求、远程配置拉取、可关闭的诊断日志上报（见 ADR-012 / 013 / 014）；配套服务 Vita Admin 与 Conduit 不存储业务数据。 |
 | ADR-004 | Agent 写入权限 | 已采纳 | LLM 不拥有直接写入业务库或 HealthKit 的能力。它只能查询、澄清和生成变更提案；客户端确认后由确定性服务执行写入。 |
-| ADR-005 | Agent Provider | 已采纳 | 首个实现使用火山方舟 OpenAI 兼容 Responses API，用户自己的 Ark API Key 存入 Keychain，客户端以 `URLSession` 实现 Responses + SSE + function calling；不引入第三方 Swift OpenAI SDK。`LLMClient` 协议保留，未来可加 BFF 或其他兼容 Provider。详情见《模型 Provider 集成规范》。 |
+| ADR-005 | Agent Provider | 已采纳，部分被 ADR-013 取代 | 首个实现使用~~火山方舟~~ OpenAI 兼容 Responses API，~~用户自己的 Ark API Key 存入 Keychain，~~ 客户端以 `URLSession` 实现 Responses + SSE + function calling；不引入第三方 Swift OpenAI SDK。`LLMClient` 协议保留，~~未来可加 BFF 或其他兼容 Provider~~（Conduit 即该网关，见 ADR-013）。详情见《模型 Provider 集成规范》。 |
 | ADR-006 | 公共营养库 | 已修订采纳 | 面向中国日常食材时，使用用户本人私有提供的《中国食物成分表》衍生数据作为本地个人构建输入；它不提交到仓库、不公开分发、不用于 TestFlight/App Store 或他人设备。USDA FoodData Central 是可自由内置的补充来源，用于中国库未覆盖的通用/国际食材。品牌食品仍进入个人 Nutrition DB。详情见《公共营养参考库规范》。 |
 | ADR-007 | 最低系统版本 | 已采纳 | 最低部署版本为 iOS 17；开发使用当前 Xcode / iOS SDK。SwiftData 自 iOS 17 可用，Vita MVP 不依赖 iOS 18 及以上的专属能力。 |
 | ADR-008 | Pending 持久化 | 已采纳 | Pending 是本地临时实体，不是正式 Consumption Record。用独立存储保存、带过期时间和 Session 日期；确认前不生成正式记录，也不触发 HealthKit 写入。 |
 | ADR-009 | HealthKit 同步 | 已采纳 | 保存 Vita Record 与每个已写入 HK Sample UUID 的映射，并以 outbox 串行执行写入、替换和删除，避免日总量重复累积。 |
 | ADR-010 | 审计 | 已采纳 | 保留本地技术审计日志，记录操作、结果、对象 ID 和错误；不提供用户回滚 UI，也不默认保存完整自由文本提示词。 |
 | ADR-011 | 摄入时间默认与 HealthKit 写入 | 已采纳 | 用户完全未表达时间时，默认以录入当下的本地时刻作为摄入时刻，并标记为 `defaultedEntryTime`；明确表达的“午餐/晚上/仅日期”保留原始精度。后者同步 HealthKit 时使用代表性时间并写入精度 metadata；Vita 自身不把代表性时间显示为用户陈述的事实。 |
+| ADR-012 | 远程配置与 Vita Admin | 待确认 | 采用三层配置（本地调试覆盖 > 已验签远程配置 > 内置默认值）。配置由 Vita Admin（`admin/`，Next.js）编辑、校验、签名发布为静态 JSON，客户端拉取的分发面始终是静态文件，Admin 不在请求路径上。远程配置只能改 prompt、模型别名与运行参数，不能改确认门、工具 schema、Conduit 地址与写入规则。详情见《Vita Admin 设计》。 |
+| ADR-013 | 模型网关 Conduit | 已采纳 | 客户端所有模型调用统一经独立项目 Conduit（`/v1/responses`，无状态子集），不直连上游、不内置 Provider 档案、不持有上游 Key；以 Conduit 令牌鉴权，现阶段为 Conduit 管理有效期与额度的固定令牌，分发前改为设备注册。取舍：没有直连逃生口，Conduit 可用性即 Agent 可用性。详情见《Conduit 项目设计》与《模型 Provider 集成规范》。 |
+| ADR-014 | 诊断日志上报 | 待确认 | 客户端可向 Vita Admin 上报诊断日志，仅含元数据（错误码、配置版本、耗时、token 数、轮换的匿名安装 ID），可在设置页关闭，默认值待定。当前阶段不上传对话、饮食、健康数据和图片；将来如需备份或数据收集，须另立 ADR、独立同意开关、独立存储与保留期。 |
 
 ## 实现前置条件
 

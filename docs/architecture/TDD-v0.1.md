@@ -23,7 +23,7 @@ Application Services
 Domain + Repositories
  ├─ SwiftData：个人业务数据、Pending、审计、同步映射
  ├─ Bundle JSON：公共营养参考库（只读）
- ├─ Keychain：模型 API Key
+ ├─ Keychain：Conduit 访问令牌（客户端不持有上游模型 Key）
  └─ App Support：营养标签原图
         │
 Platform adapters
@@ -42,18 +42,27 @@ Platform adapters
 
 ### 1.2 推荐模块布局
 
+仓库顶层按子系统分目录；iOS 工程全部位于 `ios/`：
+
 ```text
-Vita/
-  App/                 app 入口、依赖装配、导航
-  Features/            Chat、Data、Nutrition、Goals、Onboarding
-  Domain/               实体、值对象、Repository 协议、计算规则
-  Application/          各类 Service 与 use case
-  Data/                 SwiftData models、repository、JSON decoder
-  Platform/             HealthKit、LLM、Keychain、OCR、文件存储
+ios/
+  project.yml            XcodeGen 配置
+  Vita/
+    App/                 app 入口、依赖装配、导航
+    Features/            Chat、Data、Nutrition、Goals、Onboarding
+    Domain/              实体、值对象、Repository 协议、计算规则
+    Application/         各类 Service 与 use case
+    Data/                SwiftData models、repository、JSON decoder
+    Platform/            HealthKit、LLM、Keychain、OCR、文件存储
   Resources/ReferenceFood/  已授权的只读数据集
-VitaTests/
-VitaUITests/
+  VitaTests/
+  VitaUITests/
+admin/                   Vita Admin（Next.js）：配置发布与诊断日志，见 vita-admin.md
+shared/config-schema/    远程配置的 JSON Schema 与测试用例，iOS 与 Admin 共用
+docs/
 ```
+
+模型网关 Conduit 是独立仓库，见 [Conduit 项目设计](llm-gateway-project.md)。
 
 ## 2. 技术选型与运行边界
 
@@ -63,10 +72,17 @@ VitaUITests/
 | 并发 | Swift Concurrency（`async/await`、actors） | HealthKit、模型网络与持久化操作可取消且不会阻塞 UI。 |
 | 业务存储 | SwiftData | 单人小数据量、离线优先；通过 Repository 隔离。 |
 | 健康平台 | HealthKit | PRD 指定的唯一直接外部健康入口。 |
-| 模型接入 | 火山方舟 Responses API + provider-neutral `LLMClient` | 首个客户端用 `URLSession` 对接 OpenAI 兼容协议；领域逻辑不绑定具体模型或 SDK。 |
+| 模型接入 | 经 Conduit 网关的 Responses API + provider-neutral `LLMClient` | 客户端用 `URLSession` 对接 Conduit 的 `/v1/responses`；上游 Provider 由 Conduit 管理；领域逻辑不绑定具体模型或 SDK。 |
+| 远程配置 | `ConfigProvider` + 已签名静态 JSON | prompt、模型别名、超时等可远程调整，强制规则留在代码里；见 [Vita Admin 设计](vita-admin.md)。 |
 | 图片解析 | 本地 OCR + 可选模型解析 | 先抽取文本，再将结构化候选送入确认流程；原图不应默认上传。 |
 
-MVP 不需要账号、自己的 API 后端、实时协作或云端数据库。首个远端模型为火山方舟；发送的内容是用户主动发给 Agent 的文本及为完成该请求所需的最小化本地数据摘要；个人食品库、健康数据和原图不可被“整库自动上传”。集成细节见 [模型 Provider 集成规范](../contracts/llm-provider.md)。
+MVP 不需要用户账号、业务数据后端、实时协作或云端数据库。业务数据不进入任何服务端。客户端有三个网络出口：
+
+1. **模型请求：** 全部发往独立网关 Conduit（目前上游为火山方舟）。发送的内容是用户主动发给 Agent 的文本及为完成该请求所需的最小化本地数据摘要；个人食品库、健康数据和原图不可被“整库自动上传”。集成细节见 [模型 Provider 集成规范](../contracts/llm-provider.md)。
+2. **远程配置拉取：** 只读下发，请求不携带用户标识，见 [Vita Admin 设计](vita-admin.md)。
+3. **诊断日志上报：** 可在设置页关闭，只含元数据，不含对话、饮食、健康数据和图片。
+
+Vita Admin 与 Conduit 是配套服务，不存储业务数据。当前阶段不上传用户内容；将来如需备份或数据收集，须新 ADR 与用户显式同意。
 
 ## 3. 领域模型
 
@@ -269,11 +285,13 @@ Vita UI 继续展示原始时间精度，不将代表性时间倒灌为业务事
 
 查询只做 canonical name 与别名规范化后的精确匹配：统一空白、全半角、常见单位尾缀与已维护别名。结果超过一条即返回候选并要求澄清，不做 embedding、向量检索或隐式模糊选择。
 
-公共库采用来源感知的优先级：对中国日常食材，已获有效使用/分发授权的《中国食物成分表》或中国食物成分数据中心数据优先；USDA FoodData Central 用于中国库未覆盖的通用/国际食材，并在其中以 Foundation Foods 优先、SR Legacy 补充。USDA 数据为 CC0/public domain。中国数据仅限用户本人的私有本地构建：不提交进 Git、不公开分发、不用于 TestFlight/App Store；若范围改变须重新核验授权。Branded Foods、FNDDS 与复合菜不进入公共库。详细的选择、转换、署名与校验规范见 [公共营养参考库规范](../reference-food-library.md)；资源目录说明位于 `Resources/ReferenceFood/README.md`。
+公共库采用来源感知的优先级：对中国日常食材，已获有效使用/分发授权的《中国食物成分表》或中国食物成分数据中心数据优先；USDA FoodData Central 用于中国库未覆盖的通用/国际食材，并在其中以 Foundation Foods 优先、SR Legacy 补充。USDA 数据为 CC0/public domain。中国数据仅限用户本人的私有本地构建：不提交进 Git、不公开分发、不用于 TestFlight/App Store；若范围改变须重新核验授权。Branded Foods、FNDDS 与复合菜不进入公共库。详细的选择、转换、署名与校验规范见 [公共营养参考库规范](../reference-food-library.md)；资源目录说明位于 `ios/Resources/ReferenceFood/README.md`。
 
 ## 8. 隐私、安全与可靠性
 
-- 业务库、标签原图和审计日志存于 app sandbox；API Key 只存 Keychain，不写入 SwiftData、日志、测试 fixture 或截图。
+- 业务库、标签原图和审计日志存于 app sandbox；Conduit 令牌只存 Keychain，不写入 SwiftData、日志、测试 fixture 或截图。客户端不持有上游模型 Key。
+- 远程配置只能改变 prompt、模型别名与运行参数，不能改变确认门、工具 schema、Conduit 地址或写入规则；配置先验签再解析，失败回退到缓存或内置默认值。
+- 诊断日志上报默认只含元数据（错误码、配置版本、耗时、token 数、轮换的匿名安装 ID），可关闭；不含任何用户内容。
 - 模型请求采用最小上下文：当前 Session 摘要、必要的个人食品候选和用户当前消息。健康原始数据只在生成目标/回答确有必要时传递，并标注来源。
 - 网络错误、模型输出无效、工具参数不合格、HealthKit 权限撤销均是可显示且可恢复的状态，不能转化成静默写入。
 - 图片解析应优先本地 OCR。若后来选择把图像发送给模型 Provider，必须在发送前提供一次明确、可理解的同意说明。

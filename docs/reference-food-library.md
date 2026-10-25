@@ -72,7 +72,7 @@ Branded Foods 对应具体品牌与包装，应由用户 Nutrition DB 的 Food P
 
 ## 3. 资源格式
 
-构建产物为 `Resources/ReferenceFood/reference-foods.json`，随 App bundle 只读加载，不在运行时请求任何上游数据 API。每条记录使用 Vita 的稳定 ID；上游来源 ID 仅作为溯源字段，不能作为产品逻辑中唯一且永久的 ID。
+构建产物为 `ios/Resources/ReferenceFood/reference-foods.json`，随 App bundle 只读加载，不在运行时请求任何上游数据 API。每条记录使用 Vita 的稳定 ID；上游来源 ID 仅作为溯源字段，不能作为产品逻辑中唯一且永久的 ID。
 
 ```json
 {
