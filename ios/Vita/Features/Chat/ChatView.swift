@@ -1,4 +1,5 @@
 import Observation
+import PhotosUI
 import SwiftUI
 
 @MainActor
@@ -52,16 +53,35 @@ final class ChatModel {
     func runFakeAgent(_ step: FakeAgent.Step) {
         do {
             let day = try services.dayData.day(sessionDate)
-            let handler = ProposalToolHandler(pending: services.pending, now: now, timeZone: timeZone)
-            let call = try FakeAgent.call(step, day: day, replacing: pending?.id)
-            let result = handler.handle(tool: call.tool, arguments: call.arguments, sessionDate: sessionDate)
-            if let error = result.error {
-                message = "\(error.code)：\(error.message)"
-            }
+            send(try FakeAgent.call(step, day: day, products: try services.foods.products(), replacing: pending?.id))
         } catch {
             message = "\(error)"
         }
         reload()
+    }
+
+    /// 模拟 `attachNutritionLabel` 之后模型的下一步：本地识别图片，再按候选值提出新建食品。
+    func scanLabel(_ imageData: Data) async {
+        do {
+            let scan = try await services.labels.scan(imageData)
+            send(try FakeAgent.foodFromLabel(scan, day: try services.dayData.day(sessionDate)))
+        } catch FakeAgent.FakeAgentError.incompleteLabel(let warnings) {
+            message = "标签没有识别完整：" + warnings.joined(separator: "；")
+        } catch {
+            message = "识别失败：\(error)"
+        }
+        reload()
+    }
+
+    private func send(_ call: FakeAgent.Call) {
+        let handler = ProposalToolHandler(
+            pending: services.pending, referenceFoods: services.container.referenceFoods,
+            labels: services.labels, now: now, timeZone: timeZone
+        )
+        let result = handler.handle(tool: call.tool, arguments: call.arguments, sessionDate: sessionDate)
+        if let error = result.error {
+            message = "\(error.code)：\(error.message)"
+        }
     }
     #endif
 }
@@ -70,6 +90,8 @@ final class ChatModel {
 struct ChatView: View {
     @State private var model: ChatModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var isPickingPhoto = false
+    @State private var pickedPhoto: PhotosPickerItem?
 
     init(services: AppServices) {
         _model = State(initialValue: ChatModel(services: services))
@@ -99,6 +121,16 @@ struct ChatView: View {
                     Text(model.message ?? "")
                 }
         }
+        .photosPicker(isPresented: $isPickingPhoto, selection: $pickedPhoto, matching: .images)
+        .onChange(of: pickedPhoto) {
+            guard let item = pickedPhoto else { return }
+            pickedPhoto = nil
+            #if DEBUG
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) { await model.scanLabel(data) }
+            }
+            #endif
+        }
         .onAppear { model.reload() }
         .onChange(of: scenePhase) { if scenePhase == .active { model.reload() } }
     }
@@ -106,8 +138,16 @@ struct ChatView: View {
     #if DEBUG
     private var fakeAgentMenu: some View {
         Menu("假 Agent", systemImage: "ladybug") {
-            ForEach(FakeAgent.Step.allCases, id: \.self) { step in
-                Button(step.title) { model.runFakeAgent(step) }
+            Section("营养标签") {
+                Button("扫描样例营养标签", systemImage: "doc.text.viewfinder") {
+                    Task { await model.scanLabel(SampleLabelImage.render()) }
+                }
+                Button("从相册选择营养标签", systemImage: "photo") { isPickingPhoto = true }
+            }
+            Section("记录") {
+                ForEach(FakeAgent.Step.allCases, id: \.self) { step in
+                    Button(step.title) { model.runFakeAgent(step) }
+                }
             }
         }
     }

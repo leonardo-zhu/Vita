@@ -2,10 +2,11 @@
 import Foundation
 
 /// 调试用假 Agent：生成与真实模型相同格式的工具调用，走完整的解析、校验与 Pending 流程。
-/// 只用 AI 估算，避免依赖尚未构建的公共参考库。
+/// 记录类提议只用 AI 估算，避免依赖尚未构建的公共参考库。
 enum FakeAgent {
     enum Step: CaseIterable {
         case createSnack, appendBanana, replaceFirstItem, removeLastItem, deleteLastRecord, correctPending
+        case createFood, newVersionOfFirstFood, drinkHalfOfFirstFood
 
         var title: String {
             switch self {
@@ -15,6 +16,9 @@ enum FakeAgent {
             case .removeLastItem: "提议：移除最后一条的末项"
             case .deleteLastRecord: "提议：删除最后一条记录"
             case .correctPending: "修正当前卡片：酸奶改两杯"
+            case .createFood: "提议：新建个人食品（手动提供）"
+            case .newVersionOfFirstFood: "提议：第一个食品换新标签"
+            case .drinkHalfOfFirstFood: "提议：喝了第一个食品半盒"
             }
         }
     }
@@ -26,9 +30,11 @@ enum FakeAgent {
 
     enum FakeAgentError: Error {
         case noRecord
+        case noFood
+        case incompleteLabel([String])
     }
 
-    static func call(_ step: Step, day: DayData, replacing: UUID?) throws -> Call {
+    static func call(_ step: Step, day: DayData, products: [FoodProductSummary], replacing: UUID?) throws -> Call {
         let last = day.records.last
         var payload: [String: Any]
         var tool = "proposeRecordChange"
@@ -60,7 +66,70 @@ enum FakeAgent {
             guard let last else { throw FakeAgentError.noRecord }
             tool = "proposeRecordDeletion"
             payload = ["recordId": last.id.uuidString]
+        case .createFood:
+            tool = "proposeFoodChange"
+            payload = [
+                "intent": "createProduct",
+                "product": ["name": "高蛋白牛奶", "brandOrSupplier": "样例乳业", "package": ["amount": 250, "unit": "ml"]],
+                "version": [
+                    "source": "manualEntry",
+                    "basis": ["amount": 100, "unit": "ml"],
+                    "values": ["energyKcal": 72, "proteinG": 6, "fatG": 3.2, "carbohydrateG": 4.8],
+                    "note": "用户口述包装上的数值",
+                ],
+            ]
+        case .newVersionOfFirstFood:
+            guard let product = products.first, let basis = product.activeVersion?.basis else { throw FakeAgentError.noFood }
+            tool = "proposeFoodChange"
+            var nutrients = basis.nutrients
+            nutrients.proteinG += 1
+            payload = [
+                "intent": "addVersion",
+                "productId": product.id.uuidString,
+                "expectedActiveVersionId": product.activeVersion?.id.uuidString ?? NSNull(),
+                "version": [
+                    "source": "manualEntry",
+                    "basis": ["amount": basis.quantity.amount, "unit": basis.quantity.unit.rawValue],
+                    "values": numbers(nutrients),
+                    "note": "包装改版，蛋白质 +1g",
+                ],
+            ]
+        case .drinkHalfOfFirstFood:
+            guard let product = products.first, let package = product.package, let version = product.activeVersion else { throw FakeAgentError.noFood }
+            payload = [
+                "intent": "create",
+                "record": [
+                    "items": [[
+                        "displayName": product.name,
+                        "originalAmountText": "半盒",
+                        "quantity": ["amount": package.amount / 2, "unit": package.unit.rawValue],
+                        "amountSource": "packageConversion",
+                        "nutrition": ["source": "personalFoodVersion", "foodVersionId": version.id.uuidString],
+                    ]],
+                ],
+            ]
         }
+        return try envelope(tool: tool, day: day, payload: payload)
+    }
+
+    /// 识别完营养标签后，模型会用候选值提出新建食品；这里直接照搬候选值。
+    static func foodFromLabel(_ scan: LabelScanResult, day: DayData) throws -> Call {
+        guard let basis = scan.candidate.complete else { throw FakeAgentError.incompleteLabel(scan.candidate.warnings) }
+        let payload: [String: Any] = [
+            "intent": "createProduct",
+            "product": ["name": "扫描的食品", "note": "来自营养标签识别"],
+            "version": [
+                "source": "nutritionLabel",
+                "labelScanId": scan.scanID.uuidString,
+                "basis": ["amount": basis.quantity.amount, "unit": basis.quantity.unit.rawValue],
+                "values": numbers(basis.nutrients),
+                "note": scan.candidate.warnings.joined(separator: "；"),
+            ],
+        ]
+        return try envelope(tool: "proposeFoodChange", day: day, payload: payload)
+    }
+
+    private static func envelope(tool: String, day: DayData, payload: [String: Any]) throws -> Call {
         let envelope: [String: Any] = [
             "requestId": UUID().uuidString,
             "sessionDate": day.date.isoString,
@@ -68,6 +137,10 @@ enum FakeAgent {
             "payload": payload,
         ]
         return Call(tool: tool, arguments: try JSONSerialization.data(withJSONObject: envelope))
+    }
+
+    private static func numbers(_ values: NutrientValues) -> [String: Any] {
+        ["energyKcal": values.energyKcal, "proteinG": values.proteinG, "fatG": values.fatG, "carbohydrateG": values.carbohydrateG]
     }
 
     private static func estimate(_ name: String, _ amount: String, kcal: Int, protein: Int, basis: String) -> [String: Any] {
