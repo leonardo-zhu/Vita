@@ -1,6 +1,6 @@
 import Foundation
 
-enum Nutrient: String, CaseIterable, Sendable {
+enum Nutrient: String, CaseIterable, Codable, Sendable {
     case energyKcal, proteinG, fatG, carbohydrateG
 
     func value(in values: NutrientValues) -> Decimal {

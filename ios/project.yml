@@ -17,13 +17,21 @@ targets:
       - path: Vita
         excludes:
           - Info.plist
+          - Vita.entitlements
       # 公共营养参考库构建产物（reference-foods.json，Git 忽略）；不存在时 App 以空库运行。
       - path: Resources/ReferenceFood
         excludes:
           - "*.md"
+    entitlements:
+      path: Vita/Vita.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.leonardo.vita
+        INFOPLIST_KEY_NSHealthShareUsageDescription: Vita 读取身高、体重、体脂率、出生日期、性别、睡眠和活动能量，用来生成每日目标并展示健康数据。
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: Vita 把你确认过的饮食记录（能量、蛋白质、脂肪、碳水）写入 Apple 健康。
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Vita/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Vita
