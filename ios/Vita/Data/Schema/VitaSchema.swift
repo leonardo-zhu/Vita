@@ -14,6 +14,7 @@ enum VitaSchemaV1: VersionedSchema {
             DailyGoal.self,
             PendingAction.self,
             NutritionLabelScan.self,
+            HealthSyncOperation.self, HealthSyncMapping.self, ManualBodyMetricsEntry.self,
         ]
     }
 }

@@ -65,13 +65,17 @@ final class RecordService {
     private let now: () -> Date
     private let timeZone: () -> TimeZone
     private let sourceLabels: SourceLabeler
+    /// 在同一事务里登记 HealthKit 同步（TDD §4.1）。
+    private weak var observer: (any RecordChangeObserver)?
 
     init(
         context: ModelContext,
         referenceFoods: ReferenceFoodCatalog,
         now: @escaping () -> Date = Date.init,
-        timeZone: @escaping () -> TimeZone = { .current }
+        timeZone: @escaping () -> TimeZone = { .current },
+        observer: (any RecordChangeObserver)? = nil
     ) {
+        self.observer = observer
         self.context = context
         self.referenceFoods = referenceFoods
         self.now = now
@@ -98,6 +102,11 @@ final class RecordService {
     ) throws -> UUID {
         try perform(change.auditOperation, target: change.targetRecordID, requestID: requestID) {
             let recordID = try self.prepare(change, on: date, expectedRevision: expectedRevision).commit()
+            if case .deleteRecord = change {
+                try self.observer?.recordChanged(recordID, deleted: true)
+            } else {
+                try self.observer?.recordChanged(recordID, deleted: false)
+            }
             try alongside(recordID)
             return recordID
         }

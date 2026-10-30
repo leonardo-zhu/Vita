@@ -23,6 +23,8 @@ struct DayData: Equatable, Sendable, Identifiable {
         var note: String?
         var revision: Int
         var items: [Item]
+        /// 在 Apple 健康里的同步状态；没有需要同步的内容时为空。
+        var healthSync: SyncState?
 
         var totals: NutrientValues {
             items.filter(\.includeInSummary).reduce(.zero) { $0 + $1.snapshot.values }
@@ -44,8 +46,10 @@ final class DayDataService {
     private let referenceFoods: ReferenceFoodCatalog
     private let goals: GoalService
     private let sourceLabels: SourceLabeler
+    private let syncState: (UUID) -> SyncState?
 
-    init(context: ModelContext, referenceFoods: ReferenceFoodCatalog, goals: GoalService) {
+    init(context: ModelContext, referenceFoods: ReferenceFoodCatalog, goals: GoalService, syncState: @escaping (UUID) -> SyncState? = { _ in nil }) {
+        self.syncState = syncState
         self.context = context
         self.referenceFoods = referenceFoods
         self.goals = goals
@@ -74,7 +78,8 @@ final class DayDataService {
             mealLabel: record.mealLabel,
             note: record.note,
             revision: record.revision,
-            items: try record.orderedItems.map(makeItem)
+            items: try record.orderedItems.map(makeItem),
+            healthSync: syncState(record.id)
         )
     }
 
