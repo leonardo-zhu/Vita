@@ -8,6 +8,13 @@ import SwiftData
 enum SampleData {
     static let launchArgument = "-VitaSeedSampleData"
 
+    /// Xcode Previews 用：内存数据库加今天的样例数据。
+    static func previewServices() -> AppServices {
+        let services = AppServices(container: try! AppContainer.inMemory())
+        try? seedToday(services)
+        return services
+    }
+
     static func seedToday(_ services: AppServices) throws {
         let timeZone = TimeZone.current
         let today = LocalDate(date: Date(), timeZone: timeZone)
