@@ -59,3 +59,46 @@ struct ReferenceFoodCatalogTests {
         }
     }
 }
+
+struct ReferenceBrowseTests {
+    @Test func browseSeparatesExactCandidatesFromPartialMatches() throws {
+        let catalog = try Fixtures.referenceFoods()
+        let chicken = catalog.browse("鸡胸肉")
+        #expect(chicken.exact.map(\.id) == ["vita.reference.chicken-breast.cooked", "vita.reference.chicken-breast.raw"])
+        #expect(chicken.partial.isEmpty)
+
+        // “鸡”不是任何条目的名称或别名：精确查询为空，浏览页仍能列出包含它的条目。
+        let partial = catalog.browse("鸡")
+        #expect(partial.exact.isEmpty)
+        #expect(Set(partial.partial.map(\.id)).isSuperset(of: ["vita.reference.chicken-breast.raw", "vita.reference.egg.whole.raw"]))
+        #expect(catalog.browse("  ").exact.isEmpty && catalog.browse("  ").partial.isEmpty)
+    }
+}
+
+struct ReferenceTierTests {
+    @Test func extendedTierOnlyAnswersWhenCoreHasNoMatch() throws {
+        let fixture = try Fixtures.referenceFoods()
+        var redSkin = try #require(fixture.food(id: "vita.reference.egg.whole.raw"))
+        redSkin.id = "vita.reference.cfct6.111109"
+        redSkin.canonicalName = "鸡蛋（红皮）"
+        redSkin.aliases = ["鸡蛋", "红皮鸡蛋"]
+        redSkin.tier = .extended
+        let catalog = try ReferenceFoodCatalog(foods: fixture.all + [redSkin])
+
+        // “鸡蛋”在精选层有候选，扩展层的同名别名不会混进来。
+        #expect(!catalog.search("鸡蛋").contains { $0.isExtended })
+        // 说得更具体时，精选层没有命中，才由扩展层回答。
+        #expect(catalog.search("红皮鸡蛋").map(\.id) == ["vita.reference.cfct6.111109"])
+        #expect(catalog.coreCount == fixture.count)
+    }
+}
+
+/// 本地构建了正式参考库时，App bundle 里的产物必须能通过 App 端同一套校验。
+struct BundledReferenceLibraryTests {
+    @Test func bundledBuildProductPassesValidation() throws {
+        let catalog = try ReferenceFoodLoader.load(from: .main)
+        guard catalog.count > 0 else { return }
+        #expect(catalog.search("鸡胸肉").count >= 2)
+        #expect(catalog.search("牛奶").count >= 2)
+    }
+}

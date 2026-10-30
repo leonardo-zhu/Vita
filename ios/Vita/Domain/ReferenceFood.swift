@@ -8,6 +8,15 @@ struct ReferenceFood: Equatable, Codable, Sendable, Identifiable {
         var externalId: String
         var retrievedFromRelease: String
         var attribution: String
+        /// 以下为构建脚本补充的溯源信息，测试夹具可以没有。
+        /// 采样地域，如“北京”“US”。
+        var region: String?
+        /// 来源中的原始名称。
+        var description: String?
+        /// 可食部比例（中国数据），营养值按每 100 g 可食部计。
+        var edibleFraction: Decimal?
+        /// 如“energyKcal：计算值”。
+        var notes: [String]?
     }
 
     /// 计算基准，JSON 中为 `{ "quantity": 100, "unit": "g" }`。
@@ -27,6 +36,16 @@ struct ReferenceFood: Equatable, Codable, Sendable, Identifiable {
     var nutrients: NutrientValues
     var densityGPerMl: Decimal?
     var source: Source
+    /// 缺省为精选层。
+    var tier: Tier?
+
+    /// 两层收录：精选层有人工审阅的名称与别名，日常说法优先命中；扩展层是按来源名称自动整理的其余条目，
+    /// 只有精选层没有命中时才参与查询（reference-food-library.md §2）。
+    enum Tier: String, Codable, Sendable {
+        case core, extended
+    }
+
+    var isExtended: Bool { tier == .extended }
 }
 
 enum ReferenceFoodCatalogError: Error, Equatable {
@@ -41,9 +60,14 @@ struct ReferenceFoodCatalog: Sendable {
     static let empty = ReferenceFoodCatalog(validated: [])
 
     private let foodsByID: [String: ReferenceFood]
-    private let idsByName: [String: [String]]
+    private let coreIDsByName: [String: [String]]
+    private let extendedIDsByName: [String: [String]]
+
+    /// 全部条目，按 ID 排序，供浏览页使用。
+    let all: [ReferenceFood]
 
     var count: Int { foodsByID.count }
+    var coreCount: Int { all.filter { !$0.isExtended }.count }
 
     init(foods: [ReferenceFood]) throws {
         for food in foods { try Self.validate(food) }
@@ -61,15 +85,22 @@ struct ReferenceFoodCatalog: Sendable {
 
     private init(validated foods: [ReferenceFood]) {
         var byID: [String: ReferenceFood] = [:]
-        var byName: [String: Set<String>] = [:]
+        var core: [String: Set<String>] = [:]
+        var extended: [String: Set<String>] = [:]
         for food in foods {
             byID[food.id] = food
             for name in [food.canonicalName] + food.aliases {
-                byName[Self.normalize(name), default: []].insert(food.id)
+                if food.isExtended {
+                    extended[Self.normalize(name), default: []].insert(food.id)
+                } else {
+                    core[Self.normalize(name), default: []].insert(food.id)
+                }
             }
         }
         foodsByID = byID
-        idsByName = byName.mapValues { $0.sorted() }
+        coreIDsByName = core.mapValues { $0.sorted() }
+        extendedIDsByName = extended.mapValues { $0.sorted() }
+        all = foods.sorted { $0.id < $1.id }
     }
 
     func food(id: String) -> ReferenceFood? {
@@ -77,9 +108,26 @@ struct ReferenceFoodCatalog: Sendable {
     }
 
     /// `query` 与可选的额外写法 `aliases` 中任一精确命中即返回，按 ID 排序、去重。
+    /// 先查精选层；精选层没有命中时才查扩展层，避免日常说法冒出大量候选。
     func search(_ query: String, aliases: [String] = []) -> [ReferenceFood] {
-        let ids = Set(([query] + aliases).flatMap { idsByName[Self.normalize($0)] ?? [] })
-        return ids.sorted().compactMap { foodsByID[$0] }
+        let names = ([query] + aliases).map(Self.normalize)
+        for index in [coreIDsByName, extendedIDsByName] {
+            let ids = Set(names.flatMap { index[$0] ?? [] })
+            if !ids.isEmpty { return ids.sorted().compactMap { foodsByID[$0] } }
+        }
+        return []
+    }
+
+    /// 浏览页搜索：`exact` 与 Agent 的精确查询结果相同；`partial` 是名称或别名包含查询词、但精确查询不会返回的条目。
+    func browse(_ query: String) -> (exact: [ReferenceFood], partial: [ReferenceFood]) {
+        let key = Self.normalize(query)
+        guard !key.isEmpty else { return ([], []) }
+        let exact = search(query)
+        let exactIDs = Set(exact.map(\.id))
+        let partial = all.filter { food in
+            !exactIDs.contains(food.id) && ([food.canonicalName] + food.aliases).contains { Self.normalize($0).contains(key) }
+        }
+        return (exact, partial)
     }
 
     /// 统一全半角、大小写与空白。不做模糊匹配。
