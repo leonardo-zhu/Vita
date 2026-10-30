@@ -1,9 +1,10 @@
 import Foundation
 import Security
 
-/// 敏感值的键。API Key 只存 Keychain，不进 SwiftData / UserDefaults / 日志（llm-provider.md §3）。
+/// 敏感值的键。Conduit 访问令牌只存 Keychain，不进 SwiftData / UserDefaults / 日志（TDD §8）；
+/// 客户端不持有任何上游模型 Key（ADR-013）。
 enum SecretKey: String, Sendable {
-    case arkAPIKey = "ark.api-key"
+    case conduitToken = "conduit.token"
 }
 
 enum SecretStoreError: Error, Equatable {

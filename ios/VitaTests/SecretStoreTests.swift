@@ -5,22 +5,22 @@ import Testing
 struct SecretStoreTests {
     @Test func inMemoryStoreRoundTrip() throws {
         let store = InMemorySecretStore()
-        #expect(try store.read(.arkAPIKey) == nil)
-        try store.write("k1", for: .arkAPIKey)
-        #expect(try store.read(.arkAPIKey) == "k1")
-        try store.delete(.arkAPIKey)
-        #expect(try store.read(.arkAPIKey) == nil)
+        #expect(try store.read(.conduitToken) == nil)
+        try store.write("k1", for: .conduitToken)
+        #expect(try store.read(.conduitToken) == "k1")
+        try store.delete(.conduitToken)
+        #expect(try store.read(.conduitToken) == nil)
     }
 
     @Test func keychainStoreRoundTripAndOverwrite() throws {
         // 使用独立 service，避免污染真实数据。
         let store = KeychainSecretStore(service: "com.leonardo.vita.tests.\(UUID().uuidString)")
-        defer { try? store.delete(.arkAPIKey) }
-        #expect(try store.read(.arkAPIKey) == nil)
-        try store.write("first", for: .arkAPIKey)
-        try store.write("second", for: .arkAPIKey)
-        #expect(try store.read(.arkAPIKey) == "second")
-        try store.delete(.arkAPIKey)
-        #expect(try store.read(.arkAPIKey) == nil)
+        defer { try? store.delete(.conduitToken) }
+        #expect(try store.read(.conduitToken) == nil)
+        try store.write("first", for: .conduitToken)
+        try store.write("second", for: .conduitToken)
+        #expect(try store.read(.conduitToken) == "second")
+        try store.delete(.conduitToken)
+        #expect(try store.read(.conduitToken) == nil)
     }
 }
