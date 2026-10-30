@@ -53,6 +53,8 @@
 
 验收：同一 Record 多次修改后 HealthKit 只有最新版 Sample；无写入权限时本地记录仍正确且显示待解决同步状态。
 
+状态（2026-10-31）：完成。`HealthKitDataStore` 只请求 PRD 所列 7 项读取与 4 项膳食写入，测试用 `FakeHealthDataStore`（可注入失败与权限状态）。`HealthService` 读取各项并区分有数据 / 无数据 / 读取失败，缺失项由 `submitManualBodyMetrics` 补录兜底（只用于目标，不写回 HealthKit）。`GoalRecommendationPolicy` 实现 Mifflin–St Jeor、TDEE（活动能量或 ×1.375 估算）、能量 90% 与蛋白 1.8 g/kg；`commitInitialGoals` 保存建议作为 evidence，`updateGoal` 只改给出的项并返回旧值与新值。`HealthSyncService` 在 Record 同一事务里登记 outbox，同步时先删映射里的旧 Sample 再写新 Sample，每条记录只执行最新一次操作；删除失败保留映射，未授权保持待同步，被拒绝标为需要用户处理。Data 页新增健康卡片、目标设定与记录同步标记。“还可以吃”= 目标 − 已摄入，活动消耗只作参考，避免与 TDEE 重复计算。场景 4 已覆盖。工具层（`getHealthSnapshot`、`getGoalRecommendation`、`updateGoal`）的模型接入随 Phase 5。
+
 ## Phase 5：Agent 接入与体验打磨
 
 - 以 `LLMClient` 接入 Conduit（Responses API，无状态），启用工具调用；前置：Conduit M1 可用（令牌鉴权、别名路由）——2026-10-29 已上线，开始时在 Conduit 的应用 Vita 下配别名（如 `vita-chat`）、每台设备建一把密钥。
