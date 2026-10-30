@@ -11,6 +11,8 @@
 
 验收：冷启动可创建空数据库；单元测试可使用内存 store。
 
+状态（2026-10-30）：完成。内置默认配置在 `ios/Vita/Resources/DefaultConfig.json`，`ConfigProvider` 按字段合并三层并记录来源（`LayeredConfigProvider` 兼作测试用内存实现）；Conduit 地址由 `project.yml` 的 `CONDUIT_BASE_URL` 按 Debug / Release 设置，目前两者都指向唯一的生产实例；Keychain 存 Conduit 令牌（`conduit.token`）。远程配置 schema 见 `shared/config-schema/config.schema.json`。
+
 ## Phase 1：本地领域与 Data
 
 - 实现 Session、ChatMessage、Record、Item、Food Product / Version、Goal 与公共参考库读取。
@@ -19,6 +21,8 @@
 - 实现时间精度、单位标准化与 Revision 校验。
 
 验收：不依赖模型即可通过 fixture 创建、修改、删除记录；当天总营养和目标完成度正确更新。
+
+状态（2026-10-30）：完成。写入经 `RecordService`（create / appendItems / replaceItem / removeItem / delete，单事务、revision 校验、成功与失败都记审计）；目标经 `GoalService`（只追加）；只读 Data 页（日期切换、摄入与目标、记录详情）。参考库 fixture 在 `ios/VitaTests/Fixtures/`，正式构建产物不存在时 App 以空库运行。Debug 构建可用启动参数 `-VitaSeedSampleData` 在今天写入样例数据。Food Product / Version 只建了模型，创建与版本流程留在 Phase 3；ChatMessage 只有模型，读写随 Phase 5。必测场景 1、2、6 已有单元测试。
 
 ## Phase 2：确认式记录流程
 

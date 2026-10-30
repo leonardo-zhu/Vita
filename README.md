@@ -2,8 +2,6 @@
 
 Vita 是一个本地优先的个人 AI 健康助理。当前 MVP 以自然语言记录饮食、营养追踪、目标管理和 Apple Health / HealthKit 集成为中心。
 
-项目尚未进入编码阶段；仓库当前保存产品与技术基线，供后续评审和实现使用。
-
 ## 文档入口
 
 | 文档 | 用途 | 状态 |
@@ -38,7 +36,7 @@ iOS 工程由 [XcodeGen](https://github.com/yonaskolb/XcodeGen) 根据 `ios/proj
 brew install xcodegen   # 首次
 cd ios
 xcodegen generate
-xcodebuild test -project Vita.xcodeproj -scheme Vita -destination 'platform=iOS Simulator,name=iPhone 17'
+xcodebuild test -project Vita.xcodeproj -scheme Vita -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
 
-代码位于 `ios/Vita/`（App / Features / Domain / Data / Platform；`Application` 层随 Phase 1 加入），测试位于 `ios/VitaTests/`。当前进度：Phase 0 完成。
+代码位于 `ios/Vita/`（App / Features / Domain / Data / Platform；`Application` 层随 Phase 1 加入），测试位于 `ios/VitaTests/`。当前进度：Phase 0、Phase 1 完成。Debug 构建加启动参数 `-VitaSeedSampleData` 可在今天写入样例数据，便于查看 Data 页。
