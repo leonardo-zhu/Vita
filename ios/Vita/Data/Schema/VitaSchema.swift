@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 /// SwiftData schema 版本。后续每个破坏性变更新增一个 VersionedSchema 并在
@@ -11,6 +12,7 @@ enum VitaSchemaV1: VersionedSchema {
             ConsumptionRecord.self, ConsumptionItem.self,
             FoodProduct.self, FoodVersion.self,
             DailyGoal.self,
+            PendingAction.self,
         ]
     }
 }
@@ -24,7 +26,16 @@ enum PersistenceStore {
     /// `inMemory` 供单元测试与预览使用，不落盘。
     static func makeContainer(inMemory: Bool) throws -> ModelContainer {
         let schema = Schema(VitaSchemaV1.models, version: VitaSchemaV1.versionIdentifier)
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory)
+        return try makeContainer(schema: schema, configuration: ModelConfiguration(schema: schema, isStoredInMemoryOnly: inMemory))
+    }
+
+    /// 指定文件位置，供测试模拟“App 重启后从磁盘恢复”。
+    static func makeContainer(url: URL) throws -> ModelContainer {
+        let schema = Schema(VitaSchemaV1.models, version: VitaSchemaV1.versionIdentifier)
+        return try makeContainer(schema: schema, configuration: ModelConfiguration(schema: schema, url: url))
+    }
+
+    private static func makeContainer(schema: Schema, configuration: ModelConfiguration) throws -> ModelContainer {
         return try ModelContainer(
             for: schema,
             migrationPlan: VitaMigrationPlan.self,

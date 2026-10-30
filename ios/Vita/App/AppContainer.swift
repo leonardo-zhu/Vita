@@ -41,6 +41,7 @@ final class AppServices {
     let records: RecordService
     let goals: GoalService
     let dayData: DayDataService
+    let pending: PendingService
 
     init(container: AppContainer, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         let context = container.modelContainer.mainContext
@@ -48,5 +49,6 @@ final class AppServices {
         records = RecordService(context: context, referenceFoods: container.referenceFoods, now: now, timeZone: timeZone)
         goals = GoalService(context: context, now: now)
         dayData = DayDataService(context: context, referenceFoods: container.referenceFoods, goals: goals)
+        pending = PendingService(context: context, records: records, now: now, timeZone: timeZone)
     }
 }
