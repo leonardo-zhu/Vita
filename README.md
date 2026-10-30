@@ -39,4 +39,4 @@ xcodegen generate
 xcodebuild test -project Vita.xcodeproj -scheme Vita -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
 
-代码位于 `ios/Vita/`（App / Features / Domain / Data / Platform；`Application` 层随 Phase 1 加入），测试位于 `ios/VitaTests/`。当前进度：Phase 0、Phase 1 完成。Debug 构建加启动参数 `-VitaSeedSampleData` 可在今天写入样例数据，便于查看 Data 页。
+代码位于 `ios/Vita/`（App / Features / Domain / Data / Platform；`Application` 层随 Phase 1 加入），测试位于 `ios/VitaTests/`。当前进度：Phase 0–2 完成。Debug 构建加启动参数 `-VitaSeedSampleData` 可在今天写入样例数据，便于查看 Data 页。

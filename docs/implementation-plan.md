@@ -32,6 +32,8 @@
 
 验收：同一日期只能有一个活跃 Pending；重启后未过期 Pending 可恢复；跨午夜/30 分钟后自动取消。
 
+状态（2026-10-30）：完成。`PendingService` 负责提案、确认、取消与过期：提案与正式写入共用 `RecordService` 的同一套校验，确认时核对 payload 哈希与 revision，并在同一事务里写入记录、标记 Pending；修正须带 `replacesPendingId`。`ProposalToolHandler` 解析 `proposeRecordChange` / `proposeRecordDeletion` 的参数（格式见 Agent 工具契约），日期不符时返回 `requiresDateSwitch`。Chat 页暂时只显示当天的确认卡（iOS 26 起用 Liquid Glass），Debug 构建右上角“假 Agent”菜单可发出各类提案；单元测试由 `VitaTests/Fixtures/agent-script.fixture.json` 驱动全部分支。必测场景 3、5、7 已覆盖。
+
 ## Phase 3：Nutrition DB 与标签录入
 
 - 实现 Food Product、不可变 Food Version、包装规格和引用快照。
