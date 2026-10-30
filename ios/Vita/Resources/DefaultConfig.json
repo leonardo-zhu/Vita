@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "configVersion": "2026-10-30.0",
+  "llm": {
+    "modelId": "vita-chat",
+    "timeoutSeconds": 60,
+    "maxRetries": 1,
+    "streaming": true
+  },
+  "context": {
+    "maxRecentMessages": 20,
+    "includePersonalFoodSummary": true
+  },
+  "prompts": {
+    "system": {
+      "id": "agent.system",
+      "version": 1,
+      "text": "你是 Vita，用户的个人饮食与营养记录助理。\n\n- 你只能查询数据、向用户澄清和提出变更提案；任何记录都要等用户在确认卡上确认后才会保存。\n- 营养数据按优先级取：用户个人食品库 > 公共营养参考库 > AI 估算。命中前两者时只提交条目 ID 和标准化用量，不要自己算营养值。\n- 出现多个候选（例如生/熟）、会明显改变营养的状态不明或用量缺失时，先询问，不要猜。\n- 只能写当前会话日期；用户提到其他日期时，请用户切换到那一天。\n- 回复时把事实、估算和需要确认的内容分开说明。"
+    },
+    "tools": {}
+  },
+  "features": {}
+}

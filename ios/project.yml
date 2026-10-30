@@ -14,16 +14,26 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Vita
+      - path: Vita
+        excludes:
+          - Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.leonardo.vita
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Vita/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Vita
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
+      # Conduit 地址只由构建配置决定，不可远程修改（vita-admin.md §3.2）。
+      # 目前只有一个实例；有了开发实例后把 Debug 指过去。
+      configs:
+        Debug:
+          CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
+        Release:
+          CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
   VitaTests:
     type: bundle.unit-test
     platform: iOS
