@@ -39,11 +39,11 @@ struct NutritionSnapshot: Equatable, Codable, Sendable {
     var nutritionSource: NutritionSource
     /// Food Version ID 或参考条目 ID；aiEstimated 为空。
     var sourceRef: String?
-    /// 计算基准：每 `basis.quantity` 含多少营养。
-    var basisQuantity: Quantity
-    var basisNutrients: NutrientValues
-    /// 参与计算的标准化用量。
-    var quantityUsed: Quantity
+    /// 计算基准：每 `basisQuantity` 含多少营养。aiEstimated 没有基准。
+    var basisQuantity: Quantity?
+    var basisNutrients: NutrientValues?
+    /// 参与计算的标准化用量（已换算到基准单位）。aiEstimated 且用量无法标准化时为空。
+    var quantityUsed: Quantity?
     var computedBy: NutritionComputedBy
     /// 仅 aiEstimated：模型给出的一句话估算依据。
     var estimateBasis: String?

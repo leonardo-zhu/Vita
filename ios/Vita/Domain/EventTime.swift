@@ -57,6 +57,25 @@ struct EventTime: Equatable, Codable, Sendable {
         self.timeZoneIdentifier = timeZoneIdentifier
     }
 
+    /// 需要具体时刻的场合（排序、HealthKit 写入）使用的时刻（TDD §6.4）：有 timestamp 用它，
+    /// 餐段取代表性时间，仅日期取当日 12:00。只用于计算，不能当作用户陈述的事实展示。
+    var representativeTimestamp: Date {
+        if let timestamp { return timestamp }
+        let (hour, minute): (Int, Int) = switch mealPeriod {
+        case .breakfast: (8, 0)
+        case .lunch: (12, 30)
+        case .dinner: (18, 30)
+        case .snack: (15, 30)
+        case .other, nil: (12, 0)
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: timeZoneIdentifier)!
+        let components = DateComponents(
+            year: localDate.year, month: localDate.month, day: localDate.day, hour: hour, minute: minute
+        )
+        return calendar.date(from: components)!
+    }
+
     /// 用户完全未表达时间时的默认值（ADR-011）：Session 日期 + 当前本地时分秒，
     /// 保证 Record 不跨出所在 Session；历史日期 Session 同样适用。
     static func defaultedEntryTime(
