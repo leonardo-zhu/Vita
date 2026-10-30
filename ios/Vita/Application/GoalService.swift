@@ -17,6 +17,32 @@ final class GoalService {
         self.now = now
     }
 
+    /// 首次（或用户主动要求重新）生成目标：用户在预览卡上确认后由客户端调用，不走 Pending（agent-tools.md）。
+    /// 建议的输入、公式与结果作为 evidence 一并保存，解释目标从何而来。
+    @discardableResult
+    func commitInitialGoals(_ recommendation: GoalRecommendation, effectiveFrom: LocalDate) throws -> GoalSnapshot {
+        try appendGoal(
+            recommendation.targets, origin: .initialRecommendation, effectiveFrom: effectiveFrom,
+            evidenceData: JSONColumn.encode(recommendation)
+        ).current
+    }
+
+    /// 用户明确指令修改目标（`updateGoal`）：只改给出的项，其余沿用当前目标；返回旧值与新值供复述。
+    @discardableResult
+    func updateGoal(_ changes: GoalTargets, effectiveFrom: LocalDate, requestID: UUID? = nil) throws -> (previous: GoalSnapshot?, current: GoalSnapshot) {
+        let current = try activeGoal(on: effectiveFrom)?.targets ?? GoalTargets()
+        let merged = GoalTargets(
+            energyKcal: changes.energyKcal ?? current.energyKcal,
+            proteinG: changes.proteinG ?? current.proteinG,
+            fatG: changes.fatG ?? current.fatG,
+            carbohydrateG: changes.carbohydrateG ?? current.carbohydrateG
+        )
+        guard Nutrient.allCases.allSatisfy({ changes.target(for: $0).map { $0 > 0 } ?? true }) else {
+            throw GoalServiceError.invalidTargets
+        }
+        return try appendGoal(merged, origin: .explicitUserCommand, effectiveFrom: effectiveFrom, requestID: requestID)
+    }
+
     /// 某日生效的目标：`effectiveFrom` 不晚于该日的行中，日期最晚、revision 最高的一行。
     func activeGoal(on date: LocalDate) throws -> GoalSnapshot? {
         // 目标行很少，取全部在内存中比较，避免依赖字符串比较谓词。

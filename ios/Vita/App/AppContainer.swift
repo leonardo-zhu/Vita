@@ -12,6 +12,7 @@ struct AppContainer: Sendable {
     /// 测试默认用内存实现与空识别结果。
     var labelImages: any LabelImageStore = InMemoryLabelImageStore()
     var textRecognizer: any TextRecognizer = StubTextRecognizer(lines: [])
+    var healthStore: any HealthDataStore = FakeHealthDataStore(writeAuthorization: .notDetermined)
 
     static func live() throws -> AppContainer {
         AppContainer(
@@ -21,7 +22,8 @@ struct AppContainer: Sendable {
             environment: try BuildEnvironment.current(),
             referenceFoods: try ReferenceFoodLoader.load(),
             labelImages: try FileLabelImageStore.live(),
-            textRecognizer: VisionTextRecognizer()
+            textRecognizer: VisionTextRecognizer(),
+            healthStore: HealthKitDataStore()
         )
     }
 
@@ -49,13 +51,18 @@ final class AppServices {
     let foods: FoodService
     let pending: PendingService
     let labels: LabelScanService
+    let health: HealthService
+    let healthSync: HealthSyncService
 
     init(container: AppContainer, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         let context = container.modelContainer.mainContext
         self.container = container
-        records = RecordService(context: context, referenceFoods: container.referenceFoods, now: now, timeZone: timeZone)
+        healthSync = HealthSyncService(context: context, store: container.healthStore, now: now)
+        health = HealthService(context: context, store: container.healthStore, now: now, timeZone: timeZone)
+        records = RecordService(context: context, referenceFoods: container.referenceFoods, now: now, timeZone: timeZone, observer: healthSync)
         goals = GoalService(context: context, now: now)
-        dayData = DayDataService(context: context, referenceFoods: container.referenceFoods, goals: goals)
+        let sync = healthSync
+        dayData = DayDataService(context: context, referenceFoods: container.referenceFoods, goals: goals) { sync.state(for: $0) }
         foods = FoodService(context: context, referenceFoods: container.referenceFoods, now: now)
         pending = PendingService(context: context, records: records, foods: foods, now: now, timeZone: timeZone)
         labels = LabelScanService(context: context, images: container.labelImages, recognizer: container.textRecognizer, now: now)
