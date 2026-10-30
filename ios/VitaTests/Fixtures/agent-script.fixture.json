@@ -1,0 +1,347 @@
+[
+  {
+    "note": "新建午餐：熟鸡胸 150g（模型多带的营养值应被忽略）",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "create",
+        "record": {
+          "eventTime": {
+            "precision": "mealPeriod",
+            "mealPeriod": "lunch"
+          },
+          "mealLabel": "午餐",
+          "items": [
+            {
+              "displayName": "鸡胸肉",
+              "originalAmountText": "150 克熟鸡胸",
+              "quantity": {
+                "amount": 150,
+                "unit": "g"
+              },
+              "amountSource": "userStated",
+              "nutrition": {
+                "source": "referenceFood",
+                "referenceFoodId": "vita.reference.chicken-breast.cooked",
+                "values": {
+                  "energyKcal": 9999,
+                  "proteinG": 0,
+                  "fatG": 0,
+                  "carbohydrateG": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "confirm"
+  },
+  {
+    "note": "追加米饭 0.2kg（单位由客户端标准化）",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "appendItems",
+        "recordId": "$LAST_RECORD",
+        "items": [
+          {
+            "displayName": "米饭",
+            "originalAmountText": "一碗约 200g",
+            "quantity": {
+              "amount": 0.2,
+              "unit": "kg"
+            },
+            "amountSource": "userStated",
+            "nutrition": {
+              "source": "referenceFood",
+              "referenceFoodId": "vita.reference.rice.white.cooked",
+              "values": {
+                "energyKcal": 9999,
+                "proteinG": 0,
+                "fatG": 0,
+                "carbohydrateG": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "confirm"
+  },
+  {
+    "note": "把米饭改成 100g",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "replaceItem",
+        "recordId": "$LAST_RECORD",
+        "itemId": "$LAST_ITEM",
+        "item": {
+          "displayName": "米饭",
+          "originalAmountText": "半碗",
+          "quantity": {
+            "amount": 100,
+            "unit": "g"
+          },
+          "amountSource": "userStated",
+          "nutrition": {
+            "source": "referenceFood",
+            "referenceFoodId": "vita.reference.rice.white.cooked",
+            "values": {
+              "energyKcal": 9999,
+              "proteinG": 0,
+              "fatG": 0,
+              "carbohydrateG": 0
+            }
+          }
+        }
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "confirm"
+  },
+  {
+    "note": "提出加餐但先不确认",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "create",
+        "record": {
+          "items": [
+            {
+              "displayName": "香蕉",
+              "originalAmountText": "一根",
+              "quantity": {
+                "amount": 120,
+                "unit": "g"
+              },
+              "amountSource": "aiEstimated",
+              "nutrition": {
+                "source": "referenceFood",
+                "referenceFoodId": "vita.reference.banana.raw"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "none"
+  },
+  {
+    "note": "活跃 Pending 存在时，新的独立写入被拒绝",
+    "tool": "proposeRecordDeletion",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "recordId": "$LAST_RECORD"
+      }
+    },
+    "expect": {
+      "ok": false,
+      "errorCode": "pendingActive"
+    },
+    "then": "none"
+  },
+  {
+    "note": "修正当前 Pending：香蕉改为 AI 估算的一份酸奶，然后取消",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "create",
+        "replacesPendingId": "$PENDING",
+        "record": {
+          "eventTime": {
+            "precision": "approximate",
+            "time": "15:30"
+          },
+          "items": [
+            {
+              "displayName": "酸奶",
+              "originalAmountText": "一杯",
+              "amountSource": "aiEstimated",
+              "nutrition": {
+                "source": "aiEstimated",
+                "values": {
+                  "energyKcal": 140,
+                  "proteinG": 6,
+                  "fatG": 5,
+                  "carbohydrateG": 16
+                },
+                "estimateBasis": "一杯约 200g"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "cancel"
+  },
+  {
+    "note": "“昨天吃了…”：只请求切换日期",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$YESTERDAY",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "create",
+        "record": {
+          "items": []
+        }
+      }
+    },
+    "expect": {
+      "ok": false,
+      "errorCode": "requiresDateSwitch"
+    },
+    "then": "none"
+  },
+  {
+    "note": "模型不能自称 defaultedEntryTime",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "create",
+        "record": {
+          "eventTime": {
+            "precision": "defaultedEntryTime"
+          },
+          "items": [
+            {
+              "displayName": "鸡蛋",
+              "originalAmountText": "一个",
+              "quantity": {
+                "amount": 50,
+                "unit": "g"
+              },
+              "amountSource": "userStated",
+              "nutrition": {
+                "source": "referenceFood",
+                "referenceFoodId": "vita.reference.egg.whole.raw",
+                "values": {
+                  "energyKcal": 9999,
+                  "proteinG": 0,
+                  "fatG": 0,
+                  "carbohydrateG": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expect": {
+      "ok": false,
+      "errorCode": "invalidField"
+    },
+    "then": "none"
+  },
+  {
+    "note": "移除最后一项（鸡胸肉还在）",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "removeItem",
+        "recordId": "$LAST_RECORD",
+        "itemId": "$LAST_ITEM"
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "confirm"
+  },
+  {
+    "note": "未表达时间：客户端注入录入时刻",
+    "tool": "proposeRecordChange",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "intent": "create",
+        "record": {
+          "items": [
+            {
+              "displayName": "鸡蛋",
+              "originalAmountText": "2 个鸡蛋、共 108g",
+              "quantity": {
+                "amount": 108,
+                "unit": "g"
+              },
+              "amountSource": "userMeasured",
+              "nutrition": {
+                "source": "referenceFood",
+                "referenceFoodId": "vita.reference.egg.whole.raw",
+                "values": {
+                  "energyKcal": 9999,
+                  "proteinG": 0,
+                  "fatG": 0,
+                  "carbohydrateG": 0
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "confirm"
+  },
+  {
+    "note": "删除午餐（第一条）",
+    "tool": "proposeRecordDeletion",
+    "arguments": {
+      "requestId": "$UUID",
+      "sessionDate": "$DATE",
+      "expectedRevision": "$REV",
+      "payload": {
+        "recordId": "$FIRST_RECORD"
+      }
+    },
+    "expect": {
+      "ok": true
+    },
+    "then": "confirm"
+  }
+]

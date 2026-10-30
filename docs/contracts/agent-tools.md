@@ -55,6 +55,41 @@
 
 当用户完全未表达事件时间时，客户端（不是模型）注入“Session 日期 + 当前本地时分秒”，并标记 `defaultedEntryTime`。用户明确表达餐段、模糊时间或仅日期时，不得以当前时间覆盖。
 
+#### 参数格式（Phase 2 定稿）
+
+`proposeRecordChange` 的 `payload`：
+
+```json
+{
+  "intent": "create",
+  "recordId": "uuid（非 create 时必填）",
+  "itemId": "uuid（replaceItem / removeItem 必填）",
+  "record": {
+    "eventTime": { "precision": "mealPeriod", "mealPeriod": "lunch" },
+    "mealLabel": "午餐",
+    "items": [
+      {
+        "displayName": "鸡蛋",
+        "originalAmountText": "2 个鸡蛋、共 108g",
+        "quantity": { "amount": 108, "unit": "g" },
+        "amountSource": "userMeasured",
+        "nutrition": { "source": "referenceFood", "referenceFoodId": "vita.reference.egg.whole.raw" },
+        "includeInSummary": true
+      }
+    ]
+  },
+  "items": ["appendItems 用"],
+  "item": "replaceItem 用",
+  "replacesPendingId": "修正当前 Pending 时填"
+}
+```
+
+- `eventTime` 省略表示用户没表达时间，由客户端注入 `defaultedEntryTime`；模型不能自己声明该精度。`exact` / `approximate` 用 `time: "HH:mm"`，日期与时区取当前 Session。
+- `quantity.unit` 可用 g / kg / mg / 斤 / 两 / ml / L 及中文写法，由客户端标准化为 g / ml；计数单位（个、碗）须由模型换算或省略用量走估算。
+- `nutrition.source` 为 `referenceFood` / `personalFoodVersion` 时只看 ID，附带的 `values` 一律忽略；`aiEstimated` 必须带 `values` 与 `estimateBasis`。
+- `proposeRecordDeletion` 的 `payload` 为 `{ "recordId", "replacesPendingId"? }`。
+- 结果为 `{ ok, pendingId?, requestedDate?, error?: { code, message } }`。错误码：`requiresDateSwitch`、`pendingActive`、`pendingNotFound`、`revisionConflict`、`recordNotFound`、`itemNotFound`、`emptyRecord`、`invalidItem`、`missingField`、`invalidField`、`malformedArguments`、`unknownTool`。
+
 ### `proposeFoodChange`
 
 输入为 Food Product 与不可变 Food Version 草稿，并包含标签图片本地引用（如有）及其解析置信信息。创建 Product 或 Version 都需要 Pending 确认。AI 纯估算项目不得作为输入来源创建 Food Version。
