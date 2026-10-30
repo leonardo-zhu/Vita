@@ -17,6 +17,10 @@ targets:
       - path: Vita
         excludes:
           - Info.plist
+      # 公共营养参考库构建产物（reference-foods.json，Git 忽略）；不存在时 App 以空库运行。
+      - path: Resources/ReferenceFood
+        excludes:
+          - "*.md"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.leonardo.vita
