@@ -3,7 +3,7 @@ import SwiftData
 
 /// Data 页与 Agent 读工具使用的只读视图，Presentation 不直接接触 SwiftData（TDD §1.1）。
 struct DayData: Equatable, Sendable {
-    struct Item: Equatable, Sendable, Identifiable {
+    struct Item: Equatable, Codable, Sendable, Identifiable {
         var id: UUID
         var displayName: String
         var groupName: String?
@@ -41,11 +41,13 @@ final class DayDataService {
     private let context: ModelContext
     private let referenceFoods: ReferenceFoodCatalog
     private let goals: GoalService
+    private let sourceLabels: SourceLabeler
 
     init(context: ModelContext, referenceFoods: ReferenceFoodCatalog, goals: GoalService) {
         self.context = context
         self.referenceFoods = referenceFoods
         self.goals = goals
+        self.sourceLabels = SourceLabeler(context: context, referenceFoods: referenceFoods)
     }
 
     /// 读取某日数据；没有 Session 时返回空日，不因读取而创建 Session。
@@ -84,19 +86,7 @@ final class DayDataService {
             amountSource: item.amountSource,
             includeInSummary: item.includeInSummary,
             snapshot: try item.snapshot(),
-            sourceLabel: try sourceLabel(for: item)
+            sourceLabel: try sourceLabels.label(referenceFoodID: item.referenceFoodID, foodVersionID: item.foodVersionID)
         )
-    }
-
-    private func sourceLabel(for item: ConsumptionItem) throws -> String? {
-        if let referenceID = item.referenceFoodID {
-            // 参考库后来移除了该条目时，仍可凭快照解释数值，只是没有名称。
-            guard let food = referenceFoods.food(id: referenceID) else { return referenceID }
-            return "\(food.canonicalName) · \(food.source.provider)"
-        }
-        if let versionID = item.foodVersionID, let version = try context.foodVersion(id: versionID) {
-            return version.product.map { [$0.name, $0.brandOrSupplier].compactMap { $0 }.joined(separator: " · ") }
-        }
-        return nil
     }
 }

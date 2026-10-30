@@ -61,6 +61,7 @@ final class RecordService {
     private let referenceFoods: ReferenceFoodCatalog
     private let now: () -> Date
     private let timeZone: () -> TimeZone
+    private let sourceLabels: SourceLabeler
 
     init(
         context: ModelContext,
@@ -72,77 +73,158 @@ final class RecordService {
         self.referenceFoods = referenceFoods
         self.now = now
         self.timeZone = timeZone
+        self.sourceLabels = SourceLabeler(context: context, referenceFoods: referenceFoods)
+    }
+
+    // MARK: - 变更入口
+
+    /// 只校验、不写入，返回变更后的预览。Pending 创建时用它确认提案可以执行（agent-tools.md）。
+    func preview(_ change: RecordChange, on date: LocalDate, expectedRevision: Int) throws -> ChangePreview {
+        try prepare(change, on: date, expectedRevision: expectedRevision).preview
+    }
+
+    /// 执行变更。`alongside` 与变更处于同一事务，供确认 Pending 时一并更新其状态（TDD §4.1）。
+    /// 返回受影响的 Record ID（删除时为被删的 ID）。
+    @discardableResult
+    func apply(
+        _ change: RecordChange,
+        on date: LocalDate,
+        expectedRevision: Int,
+        requestID: UUID? = nil,
+        alongside: (UUID) throws -> Void = { _ in }
+    ) throws -> UUID {
+        try perform(change.auditOperation, target: change.targetRecordID, requestID: requestID) {
+            let recordID = try self.prepare(change, on: date, expectedRevision: expectedRevision).commit()
+            try alongside(recordID)
+            return recordID
+        }
     }
 
     @discardableResult
     func createRecord(on date: LocalDate, expectedRevision: Int, draft: RecordDraft, requestID: UUID? = nil) throws -> UUID {
-        try perform("record.create", requestID: requestID) {
-            let session = try self.context.session(on: date)
-            try Self.check(expectedRevision, against: session?.revision ?? 0)
-            guard draft.eventTime.localDate == date else { throw RecordServiceError.eventTimeOutsideSession }
-            let items = try self.resolve(draft.items)
-
-            let timestamp = self.now()
-            let target = session ?? {
-                let created = DaySession(localDate: date, timeZoneIdentifier: self.timeZone().identifier, now: timestamp)
-                self.context.insert(created)
-                return created
-            }()
-            let record = ConsumptionRecord(eventTime: draft.eventTime, mealLabel: draft.mealLabel, note: draft.note, now: timestamp)
-            self.context.insert(record)
-            record.session = target
-            self.insert(items, into: record, startingAt: 0, now: timestamp)
-            self.bump(target, now: timestamp)
-            return record.id
-        }
+        try apply(.create(draft), on: date, expectedRevision: expectedRevision, requestID: requestID)
     }
 
     func appendItems(_ drafts: [ItemDraft], to recordID: UUID, on date: LocalDate, expectedRevision: Int, requestID: UUID? = nil) throws {
-        try perform("record.appendItems", target: recordID, requestID: requestID) {
-            let (session, record) = try self.locate(recordID, on: date, expectedRevision: expectedRevision)
-            guard !drafts.isEmpty else { throw RecordServiceError.emptyRecord }
-            let items = try self.resolve(drafts)
-            let timestamp = self.now()
-            let next = (record.items.map(\.position).max() ?? -1) + 1
-            self.insert(items, into: record, startingAt: next, now: timestamp)
-            self.touch(record, now: timestamp)
-            self.bump(session, now: timestamp)
-        }
+        try apply(.appendItems(recordID: recordID, items: drafts), on: date, expectedRevision: expectedRevision, requestID: requestID)
     }
 
     func replaceItem(_ itemID: UUID, with draft: ItemDraft, in recordID: UUID, on date: LocalDate, expectedRevision: Int, requestID: UUID? = nil) throws {
-        try perform("record.replaceItem", target: recordID, requestID: requestID) {
-            let (session, record) = try self.locate(recordID, on: date, expectedRevision: expectedRevision)
-            guard let item = record.items.first(where: { $0.id == itemID }) else { throw RecordServiceError.itemNotFound }
-            let resolved = try self.resolve([draft])[0]
-            let timestamp = self.now()
-            item.apply(draft, snapshot: resolved.snapshot, foodProductID: resolved.foodProductID, now: timestamp)
-            self.touch(record, now: timestamp)
-            self.bump(session, now: timestamp)
-        }
+        try apply(.replaceItem(recordID: recordID, itemID: itemID, item: draft), on: date, expectedRevision: expectedRevision, requestID: requestID)
     }
 
     /// 移除最后一项会留下空 Record，须改用 `deleteRecord`。
     func removeItem(_ itemID: UUID, from recordID: UUID, on date: LocalDate, expectedRevision: Int, requestID: UUID? = nil) throws {
-        try perform("record.removeItem", target: recordID, requestID: requestID) {
-            let (session, record) = try self.locate(recordID, on: date, expectedRevision: expectedRevision)
-            guard let item = record.items.first(where: { $0.id == itemID }) else { throw RecordServiceError.itemNotFound }
-            guard record.items.count > 1 else { throw RecordServiceError.emptyRecord }
-            let timestamp = self.now()
-            record.items.removeAll { $0.id == itemID }
-            self.context.delete(item)
-            self.touch(record, now: timestamp)
-            self.bump(session, now: timestamp)
-        }
+        try apply(.removeItem(recordID: recordID, itemID: itemID), on: date, expectedRevision: expectedRevision, requestID: requestID)
     }
 
     func deleteRecord(_ recordID: UUID, on date: LocalDate, expectedRevision: Int, requestID: UUID? = nil) throws {
-        try perform("record.delete", target: recordID, requestID: requestID) {
-            let (session, record) = try self.locate(recordID, on: date, expectedRevision: expectedRevision)
-            session.records.removeAll { $0.id == recordID }
-            self.context.delete(record)
-            self.bump(session, now: self.now())
+        try apply(.deleteRecord(recordID: recordID), on: date, expectedRevision: expectedRevision, requestID: requestID)
+    }
+
+    // MARK: - 校验与执行
+
+    /// 校验全部在这里完成且不修改任何实体；`commit` 只做已校验的修改，不再失败。
+    private struct Prepared {
+        var preview: ChangePreview
+        var commit: () -> UUID
+    }
+
+    private func prepare(_ change: RecordChange, on date: LocalDate, expectedRevision: Int) throws -> Prepared {
+        switch change {
+        case .create(let draft):
+            let session = try context.session(on: date)
+            try Self.check(expectedRevision, against: session?.revision ?? 0)
+            guard draft.eventTime.localDate == date else { throw RecordServiceError.eventTimeOutsideSession }
+            let items = try resolve(draft.items)
+            let preview = ChangePreview(
+                kind: .create, recordLabel: draft.mealLabel, eventTime: draft.eventTime,
+                items: try items.map(previewItem), removedItemNames: []
+            )
+            return Prepared(preview: preview) {
+                let timestamp = self.now()
+                let target = session ?? {
+                    let created = DaySession(localDate: date, timeZoneIdentifier: self.timeZone().identifier, now: timestamp)
+                    self.context.insert(created)
+                    return created
+                }()
+                let record = ConsumptionRecord(eventTime: draft.eventTime, mealLabel: draft.mealLabel, note: draft.note, now: timestamp)
+                self.context.insert(record)
+                record.session = target
+                self.insert(items, into: record, startingAt: 0, now: timestamp)
+                self.bump(target, now: timestamp)
+                return record.id
+            }
+
+        case .appendItems(let recordID, let drafts):
+            let (session, record) = try locate(recordID, on: date, expectedRevision: expectedRevision)
+            let items = try resolve(drafts)
+            let preview = try recordPreview(.appendItems, record, items: try items.map(previewItem), removed: [])
+            return Prepared(preview: preview) {
+                let timestamp = self.now()
+                let next = (record.items.map(\.position).max() ?? -1) + 1
+                self.insert(items, into: record, startingAt: next, now: timestamp)
+                self.touch(record, now: timestamp)
+                self.bump(session, now: timestamp)
+                return record.id
+            }
+
+        case .replaceItem(let recordID, let itemID, let draft):
+            let (session, record) = try locate(recordID, on: date, expectedRevision: expectedRevision)
+            guard let item = record.items.first(where: { $0.id == itemID }) else { throw RecordServiceError.itemNotFound }
+            let resolved = try resolve([draft])[0]
+            let preview = try recordPreview(.replaceItem, record, items: [try previewItem(resolved)], removed: [item.displayName])
+            return Prepared(preview: preview) {
+                let timestamp = self.now()
+                item.apply(draft, snapshot: resolved.snapshot, foodProductID: resolved.foodProductID, now: timestamp)
+                self.touch(record, now: timestamp)
+                self.bump(session, now: timestamp)
+                return record.id
+            }
+
+        case .removeItem(let recordID, let itemID):
+            let (session, record) = try locate(recordID, on: date, expectedRevision: expectedRevision)
+            guard let item = record.items.first(where: { $0.id == itemID }) else { throw RecordServiceError.itemNotFound }
+            guard record.items.count > 1 else { throw RecordServiceError.emptyRecord }
+            let preview = try recordPreview(.removeItem, record, items: [], removed: [item.displayName])
+            return Prepared(preview: preview) {
+                let timestamp = self.now()
+                record.items.removeAll { $0.id == itemID }
+                self.context.delete(item)
+                self.touch(record, now: timestamp)
+                self.bump(session, now: timestamp)
+                return record.id
+            }
+
+        case .deleteRecord(let recordID):
+            let (session, record) = try locate(recordID, on: date, expectedRevision: expectedRevision)
+            let preview = try recordPreview(.deleteRecord, record, items: [], removed: record.orderedItems.map(\.displayName))
+            return Prepared(preview: preview) {
+                session.records.removeAll { $0.id == recordID }
+                self.context.delete(record)
+                self.bump(session, now: self.now())
+                return recordID
+            }
         }
+    }
+
+    private func recordPreview(_ kind: ChangePreview.Kind, _ record: ConsumptionRecord, items: [DayData.Item], removed: [String]) throws -> ChangePreview {
+        ChangePreview(kind: kind, recordLabel: record.mealLabel, eventTime: try record.eventTime(), items: items, removedItemNames: removed)
+    }
+
+    private func previewItem(_ resolved: ResolvedItem) throws -> DayData.Item {
+        let draft = resolved.draft
+        let label: String? = switch draft.nutrition {
+        case .referenceFood(let id): try sourceLabels.label(referenceFoodID: id, foodVersionID: nil)
+        case .personalFoodVersion(let id): try sourceLabels.label(referenceFoodID: nil, foodVersionID: id)
+        case .aiEstimated: nil
+        }
+        return DayData.Item(
+            id: UUID(), displayName: draft.displayName, groupName: draft.groupName,
+            originalAmountText: draft.originalAmountText, quantity: draft.quantity,
+            amountSource: draft.amountSource, includeInSummary: draft.includeInSummary,
+            snapshot: resolved.snapshot, sourceLabel: label
+        )
     }
 
     // MARK: - 事务
