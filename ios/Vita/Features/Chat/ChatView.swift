@@ -33,6 +33,8 @@ final class ChatModel {
         guard let pending else { return }
         do {
             try services.pending.confirm(pending.id)
+            // 正式写入后把这次变化同步到 Apple 健康；失败不影响本地记录。
+            Task { await services.healthSync.run() }
         } catch PendingServiceError.revisionConflict {
             message = "当天数据在提案后有变化，这张卡片已作废，请重新提出。"
         } catch PendingServiceError.expired {

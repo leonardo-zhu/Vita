@@ -17,15 +17,19 @@ final class DayDataModel {
     }
 
     private let service: DayDataService
+    private let health: HealthService
     private let timeZone: () -> TimeZone
     private let now: () -> Date
 
     var date: LocalDate
     var mode: Mode = .day
     private(set) var state: State = .loading
+    /// 所选日期的健康数据；异步读取，读完之前为空。
+    private(set) var snapshot: HealthSnapshot?
 
-    init(service: DayDataService, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
+    init(service: DayDataService, health: HealthService, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         self.service = service
+        self.health = health
         self.now = now
         self.timeZone = timeZone
         self.date = LocalDate(date: now(), timeZone: timeZone())
@@ -42,6 +46,15 @@ final class DayDataModel {
         } catch {
             state = .failed(String(describing: error))
         }
+    }
+
+    func loadHealth() async {
+        snapshot = await health.snapshot(on: date)
+    }
+
+    func connectHealth() async {
+        try? await health.requestAuthorization()
+        await loadHealth()
     }
 
     func shift(_ direction: Int) {
@@ -72,8 +85,11 @@ struct DataView: View {
 
     init(services: AppServices) {
         self.services = services
-        _model = State(initialValue: DayDataModel(service: services.dayData))
+        _model = State(initialValue: DayDataModel(service: services.dayData, health: services.health))
     }
+
+    @State private var isSettingGoal = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -99,11 +115,21 @@ struct DataView: View {
                 }
             }
             .sheet(isPresented: $isPickingDate) { datePicker }
+            .sheet(isPresented: $isSettingGoal) {
+                GoalSetupView(services: services, date: model.date) {
+                    isSettingGoal = false
+                    model.reload()
+                }
+            }
         }
         .tint(VitaTheme.intake)
         .onAppear { model.reload() }
         .onChange(of: model.date) { model.reload() }
         .onChange(of: model.mode) { model.reload() }
+        .task(id: model.date) { await model.loadHealth() }
+        // 进入页面与回到前台时补同步，并刷新同步标记。
+        .task { await syncHealth() }
+        .onChange(of: scenePhase) { if scenePhase == .active { Task { await syncHealth() } } }
     }
 
     private var datePager: some View {
@@ -129,13 +155,25 @@ struct DataView: View {
         case .failed(let message):
             ContentUnavailableView("无法读取数据", systemImage: "exclamationmark.triangle", description: Text(message))
         case .day(let day):
-            DayDashboard(day: day)
+            DayDashboard(
+                day: day,
+                snapshot: model.snapshot,
+                healthAvailable: services.health.isAvailable,
+                onSetGoal: { isSettingGoal = true },
+                onConnectHealth: { Task { await model.connectHealth(); await syncHealth() } },
+                onRetrySync: { Task { await syncHealth() } }
+            )
         case .week(let week):
             WeekOverview(week: week, today: model.today) { date in
                 model.date = date
                 model.mode = .day
             }
         }
+    }
+
+    private func syncHealth() async {
+        await services.healthSync.run()
+        model.reload()
     }
 
     private var libraryLink: some View {
@@ -180,19 +218,44 @@ struct DataView: View {
 
 private struct DayDashboard: View {
     let day: DayData
+    let snapshot: HealthSnapshot?
+    let healthAvailable: Bool
+    let onSetGoal: () -> Void
+    let onConnectHealth: () -> Void
+    let onRetrySync: () -> Void
+
+    private var needsSyncAttention: Bool {
+        day.records.contains { $0.healthSync == .requiresUserResolution || $0.healthSync == .failedRetryable }
+    }
 
     var body: some View {
         VStack(spacing: 16) {
-            EnergyCard(summary: day.summary)
+            EnergyCard(summary: day.summary, activeEnergy: snapshot?.activeEnergyKcal.value, onSetGoal: onSetGoal)
             MacroCard(summary: day.summary)
+            if needsSyncAttention { syncAttention }
             MealsSection(day: day)
+            HealthSection(snapshot: snapshot, isAvailable: healthAvailable, onConnect: onConnectHealth)
         }
+    }
+
+    /// 同步遇到问题时明确告诉用户，不静默失效（PRD §3.3 权限处理）。
+    private var syncAttention: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            CardHeader(title: "部分记录没有同步到 Apple 健康", systemImage: "heart.slash", tint: VitaTheme.caution)
+            Text("记录已保存在 Vita。若关闭了写入权限，请到“设置 › 健康 › 数据访问与设备 › Vita”打开后重试。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button("重试同步", action: onRetrySync).glassButton()
+        }
+        .vitaCard(padding: 20)
     }
 }
 
-/// 主卡：还可以吃多少。活动消耗随 Phase 4 的 HealthKit 读取加入等式。
+/// 主卡：还可以吃多少，并列出目标、已摄入与当日活动消耗。
 private struct EnergyCard: View {
     let summary: DaySummary
+    let activeEnergy: Decimal?
+    let onSetGoal: () -> Void
 
     private var consumed: Decimal { summary.totals.energyKcal }
     private var target: Decimal? { summary.goal?.targets.energyKcal }
@@ -227,18 +290,18 @@ private struct EnergyCard: View {
                 }
             }
             if let target {
+                // 目标已按每日总消耗（含活动）推算，运动消耗只作参考，不再加进“还可以吃”，避免重复计算。
                 HStack(spacing: 0) {
                     EquationTerm(value: target, label: "目标")
-                    EquationSign("+")
-                    // 运动消耗来自 HealthKit 活动能量，Phase 4 接入后再计入。
-                    EquationTerm(value: nil, label: "运动消耗")
-                    EquationSign("−")
                     EquationTerm(value: consumed, label: "已摄入")
+                    EquationTerm(value: activeEnergy, label: "运动消耗")
                 }
+                Button("调整目标", action: onSetGoal).font(.footnote)
             } else {
-                Text("还没有每日目标。完成目标设定后，这里会显示还可以吃多少。")
+                Text("还没有每日目标。根据身高、体重等数据生成后，这里会显示还可以吃多少。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Button("生成每日目标", action: onSetGoal).glassButton(prominent: true)
             }
             if summary.estimatedItemCount > 0 {
                 Label("其中 \(summary.estimatedItemCount) 项为 AI 估算", systemImage: "sparkles")
@@ -286,15 +349,6 @@ private struct EquationTerm: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-private struct EquationSign: View {
-    let sign: String
-    init(_ sign: String) { self.sign = sign }
-
-    var body: some View {
-        Text(sign).font(.headline).foregroundStyle(.tertiary)
     }
 }
 
@@ -373,6 +427,7 @@ private struct MealCard: View {
         let slot = MealSlot(record.eventTime)
         VStack(alignment: .leading, spacing: 12) {
             CardHeader(title: record.mealLabel ?? slot.period.label, systemImage: slot.symbol, tint: slot.tint) {
+                if let sync = record.healthSync { HealthSyncBadge(state: sync) }
                 Text(DisplayFormat.energy(record.totals.energyKcal))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()

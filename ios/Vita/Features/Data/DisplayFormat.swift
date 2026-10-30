@@ -33,6 +33,19 @@ enum DisplayFormat {
         return day.formatted(.dateTime.month().day().weekday(.abbreviated).locale(locale))
     }
 
+    static func number(_ value: Decimal, digits: Int) -> String {
+        value.formatted(.number.precision(.fractionLength(digits)).rounded(rule: .toNearestOrAwayFromZero))
+    }
+
+    /// “今天”“昨天”或“10月26日”，用于健康数据的测量时间。
+    static func relativeDay(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "今天" }
+        if calendar.isDateInYesterday(date) { return "昨天" }
+        let local = LocalDate(date: date, timeZone: .current)
+        return shortDate(local)
+    }
+
     /// 如“10月26日”。
     static func shortDate(_ date: LocalDate) -> String {
         "\(date.month)月\(date.day)日"

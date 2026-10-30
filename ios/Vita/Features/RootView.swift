@@ -11,6 +11,8 @@ struct RootView: View {
             DataView(services: services)
                 .tabItem { Label("Data", systemImage: "chart.bar") }
         }
+        // 界面只有中文：系统控件（日期选择器等）也按中文显示，不跟随系统语言。
+        .environment(\.locale, DisplayFormat.locale)
     }
 }
 
