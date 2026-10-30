@@ -30,6 +30,37 @@ enum ProposalArguments {
         var replacesPendingId: UUID?
     }
 
+    struct FoodChangePayload: Decodable {
+        enum Intent: String, Decodable { case createProduct, addVersion }
+
+        var intent: Intent
+        var productId: UUID?
+        /// addVersion 时模型看到的生效版本，用来发现提案后产品已被更新。
+        var expectedActiveVersionId: UUID?
+        var product: ProductArgs?
+        var version: VersionArgs
+        var replacesPendingId: UUID?
+    }
+
+    struct ProductArgs: Decodable {
+        var name: String
+        var brandOrSupplier: String?
+        var package: QuantityArgs?
+        var note: String?
+    }
+
+    /// `source` 只接受 nutritionLabel / manualEntry / referenceDerived；AI 估算不能沉淀为食品版本。
+    struct VersionArgs: Decodable {
+        var source: String
+        /// nutritionLabel：`attachNutritionLabel` 返回的识别 ID。
+        var labelScanId: UUID?
+        /// referenceDerived：起点条目；营养值由客户端从参考库复制，模型给的忽略。
+        var referenceFoodId: String?
+        var basis: QuantityArgs?
+        var values: NutrientValues?
+        var note: String?
+    }
+
     struct RecordArgs: Decodable {
         var eventTime: EventTimeArgs?
         var mealLabel: String?
@@ -77,6 +108,8 @@ enum ProposalToolError: Error, Equatable {
     case invalidField(String)
     /// 模型以为的日期与当前界面日期不同。
     case dateMismatch(requested: String)
+    /// 想把 AI 估算或其他未知来源存成食品版本。
+    case estimateNotAllowed
 }
 
 /// 返回给模型的结构化结果。错误只给机器码与一句可解释的说明，不含内部细节。
@@ -100,14 +133,24 @@ struct ToolResult: Equatable, Encodable, Sendable {
 /// 处理 `proposeRecordChange` / `proposeRecordDeletion`。只会创建或替换 Pending，不写正式数据。
 @MainActor
 final class ProposalToolHandler {
-    static let toolNames: Set<String> = ["proposeRecordChange", "proposeRecordDeletion"]
+    static let toolNames: Set<String> = ["proposeRecordChange", "proposeRecordDeletion", "proposeFoodChange"]
 
     private let pending: PendingService
+    private let referenceFoods: ReferenceFoodCatalog
+    private let labels: LabelScanService?
     private let now: () -> Date
     private let timeZone: () -> TimeZone
 
-    init(pending: PendingService, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
+    init(
+        pending: PendingService,
+        referenceFoods: ReferenceFoodCatalog = .empty,
+        labels: LabelScanService? = nil,
+        now: @escaping () -> Date = Date.init,
+        timeZone: @escaping () -> TimeZone = { .current }
+    ) {
         self.pending = pending
+        self.referenceFoods = referenceFoods
+        self.labels = labels
         self.now = now
         self.timeZone = timeZone
     }
@@ -116,16 +159,20 @@ final class ProposalToolHandler {
     func handle(tool: String, arguments: Data, sessionDate: LocalDate) -> ToolResult {
         do {
             let (envelope, change, replacing) = try decode(tool: tool, arguments: arguments, sessionDate: sessionDate)
-            let snapshot = try pending.propose(
-                change, on: sessionDate, expectedRevision: envelope.expectedRevision,
-                replacing: replacing, requestID: envelope.requestID
-            )
+            let snapshot = switch change {
+            case .record(let change):
+                try pending.propose(change, on: sessionDate, expectedRevision: envelope.expectedRevision, replacing: replacing, requestID: envelope.requestID)
+            case .food(let change):
+                try pending.propose(food: change, on: sessionDate, replacing: replacing, requestID: envelope.requestID)
+            }
             return ToolResult(ok: true, pendingId: snapshot.id)
         } catch let error as ProposalToolError {
             return Self.result(for: error)
         } catch let error as PendingServiceError {
             return Self.result(for: error)
         } catch let error as RecordServiceError {
+            return Self.result(for: error)
+        } catch let error as FoodServiceError {
             return Self.result(for: error)
         } catch {
             return .failure("internal", "客户端暂时无法处理这个提案。")
@@ -139,17 +186,21 @@ final class ProposalToolHandler {
         var requestID: UUID
     }
 
-    private func decode(tool: String, arguments: Data, sessionDate: LocalDate) throws -> (EnvelopeInfo, RecordChange, UUID?) {
+    private func decode(tool: String, arguments: Data, sessionDate: LocalDate) throws -> (EnvelopeInfo, PendingChange, UUID?) {
         let decoder = JSONDecoder()
         do {
             switch tool {
             case "proposeRecordChange":
                 let envelope = try decoder.decode(ProposalArguments.Envelope<ProposalArguments.RecordChangePayload>.self, from: arguments)
                 let info = try Self.info(envelope, sessionDate: sessionDate)
-                return (info, try change(from: envelope.payload, sessionDate: sessionDate), envelope.payload.replacesPendingId)
+                return (info, .record(try change(from: envelope.payload, sessionDate: sessionDate)), envelope.payload.replacesPendingId)
             case "proposeRecordDeletion":
                 let envelope = try decoder.decode(ProposalArguments.Envelope<ProposalArguments.RecordDeletionPayload>.self, from: arguments)
-                return (try Self.info(envelope, sessionDate: sessionDate), .deleteRecord(recordID: envelope.payload.recordId), envelope.payload.replacesPendingId)
+                return (try Self.info(envelope, sessionDate: sessionDate), .record(.deleteRecord(recordID: envelope.payload.recordId)), envelope.payload.replacesPendingId)
+            case "proposeFoodChange":
+                let envelope = try decoder.decode(ProposalArguments.Envelope<ProposalArguments.FoodChangePayload>.self, from: arguments)
+                let info = try Self.info(envelope, sessionDate: sessionDate)
+                return (info, .food(try foodChange(from: envelope.payload)), envelope.payload.replacesPendingId)
             default:
                 throw ProposalToolError.unknownTool(tool)
             }
@@ -190,6 +241,61 @@ final class ProposalToolHandler {
             )
         case .removeItem:
             return .removeItem(recordID: try require(payload.recordId, "payload.recordId"), itemID: try require(payload.itemId, "payload.itemId"))
+        }
+    }
+
+    private func foodChange(from payload: ProposalArguments.FoodChangePayload) throws -> FoodChange {
+        let version = try versionDraft(payload.version)
+        switch payload.intent {
+        case .createProduct:
+            guard let product = payload.product else { throw ProposalToolError.missingField("payload.product") }
+            let package: Quantity?
+            do {
+                package = try product.package.map { try UnitNormalizer.normalize(amount: $0.amount, unit: $0.unit) }
+            } catch {
+                throw ProposalToolError.invalidField("payload.product.package")
+            }
+            return .createProduct(
+                FoodProductDraft(name: product.name, brandOrSupplier: product.brandOrSupplier, package: package, note: product.note),
+                version: version
+            )
+        case .addVersion:
+            guard let productID = payload.productId else { throw ProposalToolError.missingField("payload.productId") }
+            return .addVersion(productID: productID, expectedActiveVersionID: payload.expectedActiveVersionId, version: version)
+        }
+    }
+
+    private func versionDraft(_ args: ProposalArguments.VersionArgs) throws -> FoodVersionDraft {
+        switch args.source {
+        case FoodVersionSource.referenceDerived.rawValue:
+            guard let id = args.referenceFoodId else { throw ProposalToolError.missingField("payload.version.referenceFoodId") }
+            guard let food = referenceFoods.food(id: id) else { throw ProposalToolError.invalidField("payload.version.referenceFoodId") }
+            return FoodVersionDraft(
+                basis: FoodVersionBasis(quantity: food.base.asQuantity, nutrients: food.nutrients),
+                sourceKind: .referenceDerived, derivedFromReferenceID: id, sourceNote: args.note
+            )
+        case FoodVersionSource.nutritionLabel.rawValue, FoodVersionSource.manualEntry.rawValue:
+            let kind = FoodVersionSource(rawValue: args.source)!
+            guard let basisArgs = args.basis else { throw ProposalToolError.missingField("payload.version.basis") }
+            guard let values = args.values else { throw ProposalToolError.missingField("payload.version.values") }
+            let basis: Quantity
+            do {
+                basis = try UnitNormalizer.normalize(amount: basisArgs.amount, unit: basisArgs.unit)
+            } catch {
+                throw ProposalToolError.invalidField("payload.version.basis")
+            }
+            var labelReference: String?
+            if kind == .nutritionLabel {
+                guard let scanID = args.labelScanId else { throw ProposalToolError.missingField("payload.version.labelScanId") }
+                guard let reference = try labels?.imageReference(forScan: scanID) else { throw ProposalToolError.invalidField("payload.version.labelScanId") }
+                labelReference = reference
+            }
+            return FoodVersionDraft(
+                basis: FoodVersionBasis(quantity: basis, nutrients: values),
+                sourceKind: kind, labelImageReference: labelReference, sourceNote: args.note
+            )
+        default:
+            throw ProposalToolError.estimateNotAllowed
         }
     }
 
@@ -279,6 +385,8 @@ final class ProposalToolHandler {
         case .missingField(let field): .failure("missingField", "缺少字段 \(field)。")
         case .invalidField(let field): .failure("invalidField", "字段 \(field) 的值不合法。")
         case .dateMismatch(let requested): .failure("requiresDateSwitch", "请让用户切换到 \(requested) 再记录。", requestedDate: requested)
+        case .estimateNotAllowed:
+            .failure("estimateNotAllowed", "AI 估算不能保存为个人食品。只有营养标签、用户提供的数值或公共参考库可以作为来源。")
         }
     }
 
@@ -288,6 +396,15 @@ final class ProposalToolHandler {
             .failure("pendingActive", "当天已有一张待确认卡片（\(id.uuidString)）。修正它请带上 replacesPendingId；否则请等用户确认或取消。")
         case .notFound: .failure("pendingNotFound", "要替换的待确认卡片不存在或已结束。")
         default: .failure("pendingUnavailable", "待确认卡片不可用，请重新提出。")
+        }
+    }
+
+    private static func result(for error: FoodServiceError) -> ToolResult {
+        switch error {
+        case .activeVersionChanged: .failure("revisionConflict", "这个食品在提案后已更新，请重新读取后再提出。")
+        case .productNotFound: .failure("productNotFound", "个人食品库中没有这个产品。")
+        case .unknownLabel: .failure("unknownLabel", "找不到对应的营养标签识别结果。")
+        default: .failure("invalidFood", "食品数据不合格：\(error.auditCode)。")
         }
     }
 

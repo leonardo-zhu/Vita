@@ -90,7 +90,7 @@ struct ScriptedAgentTests {
         """
         let result = handler.handle(tool: "proposeRecordChange", arguments: Data(json.utf8), sessionDate: Fixtures.day)
         let pending = try services.pending.pending(try #require(result.pendingId))
-        let item = try #require(pending.preview?.items.first)
+        let item = try #require(pending.recordPreview?.items.first)
         #expect(item.quantity == Quantity(amount: 250, unit: .milliliter))
         // 250ml × 1.03 g/ml = 257.5g；61 kcal/100g → 157.075 kcal。
         #expect(item.snapshot.quantityUsed == Quantity(amount: dec("257.5"), unit: .gram))

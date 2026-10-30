@@ -13,6 +13,7 @@ enum VitaSchemaV1: VersionedSchema {
             FoodProduct.self, FoodVersion.self,
             DailyGoal.self,
             PendingAction.self,
+            NutritionLabelScan.self,
         ]
     }
 }

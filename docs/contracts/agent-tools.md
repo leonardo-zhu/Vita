@@ -94,6 +94,32 @@
 
 输入为 Food Product 与不可变 Food Version 草稿，并包含标签图片本地引用（如有）及其解析置信信息。创建 Product 或 Version 都需要 Pending 确认。AI 纯估算项目不得作为输入来源创建 Food Version。
 
+#### 参数格式（Phase 3 定稿）
+
+```json
+{
+  "intent": "createProduct",
+  "productId": "uuid（addVersion 必填）",
+  "expectedActiveVersionId": "uuid（addVersion：模型看到的生效版本）",
+  "product": { "name": "某品牌纯牛奶", "brandOrSupplier": "某乳业", "package": { "amount": 250, "unit": "ml" }, "note": null },
+  "version": {
+    "source": "nutritionLabel",
+    "labelScanId": "uuid（nutritionLabel 必填，来自 attachNutritionLabel）",
+    "referenceFoodId": "referenceDerived 必填",
+    "basis": { "amount": 100, "unit": "ml" },
+    "values": { "energyKcal": 65, "proteinG": 3.2, "fatG": 3.6, "carbohydrateG": 4.8 },
+    "note": "可选"
+  },
+  "replacesPendingId": "修正当前 Pending 时填"
+}
+```
+
+- `source` 只接受 `nutritionLabel` / `manualEntry` / `referenceDerived`，其他（包括 `aiEstimated`）返回 `estimateNotAllowed`。
+- `referenceDerived` 的基准与营养值由客户端从参考库复制，模型给的忽略。
+- `nutritionLabel` 的 `values` 由模型根据识别候选给出（可修正识别错误），图片引用由客户端按 `labelScanId` 查得，模型拿不到也不能伪造本地路径。
+- 提案后产品的生效版本已变化时，确认会失败并作废（`revisionConflict`）。
+- 新增错误码：`estimateNotAllowed`、`productNotFound`、`unknownLabel`、`invalidFood`。
+
 ### `updateGoal`
 
 输入为一个或多个明确数值目标、单位和用户命令证据。客户端仅接受完整明确指令；建议性语言应由模型在聊天中澄清后再调用。成功后递增 Goal revision 并记录审计日志。

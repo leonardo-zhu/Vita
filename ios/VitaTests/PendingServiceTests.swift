@@ -37,7 +37,7 @@ struct PendingServiceTests {
     @Test func proposalWritesNothingUntilConfirmed() throws {
         let pending = try services.pending.propose(try lunch(), on: Fixtures.day, expectedRevision: 0)
         #expect(pending.status == .readyForConfirmation)
-        #expect(pending.preview?.totals.energyKcal == 500)
+        #expect(pending.recordPreview?.totals.energyKcal == 500)
         #expect(try records() == 0)
         #expect(try services.dayData.day(Fixtures.day).summary.totals == .zero)
 

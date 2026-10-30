@@ -46,14 +46,25 @@ final class FoodVersion {
     var basisData: Data
     var sourceKindRaw: String
     var labelImageReference: String?
+    var derivedFromReferenceID: String?
     var sourceNote: String?
     var createdAt: Date
     var retiredAt: Date?
 
-    init(id: UUID = UUID(), basis: FoodVersionBasis, sourceKind: FoodVersionSource, sourceNote: String? = nil, now: Date) {
+    init(
+        id: UUID = UUID(),
+        basis: FoodVersionBasis,
+        sourceKind: FoodVersionSource,
+        labelImageReference: String? = nil,
+        derivedFromReferenceID: String? = nil,
+        sourceNote: String? = nil,
+        now: Date
+    ) {
         self.id = id
         self.basisData = JSONColumn.encode(basis)
         self.sourceKindRaw = sourceKind.rawValue
+        self.labelImageReference = labelImageReference
+        self.derivedFromReferenceID = derivedFromReferenceID
         self.sourceNote = sourceNote
         self.createdAt = now
     }

@@ -34,6 +34,8 @@ enum ItemRejection: Error, Equatable {
     case unknownFoodVersion(UUID)
     case retiredFoodVersion(UUID)
     case invalidEstimate
+    /// 用量来源是“按包装换算”，但引用的不是带包装规格的个人食品，或单位与包装不符。
+    case packageUnavailable
     case calculation(NutritionCalculationError)
 
     var code: String {
@@ -46,6 +48,7 @@ enum ItemRejection: Error, Equatable {
         case .unknownFoodVersion: "unknownFoodVersion"
         case .retiredFoodVersion: "retiredFoodVersion"
         case .invalidEstimate: "invalidEstimate"
+        case .packageUnavailable: "packageUnavailable"
         case .calculation: "calculation"
         }
     }
@@ -302,6 +305,10 @@ final class RecordService {
             throw ItemRejection.emptyAmountText
         }
         if draft.quantity == nil, draft.amountSource != .aiEstimated { throw ItemRejection.amountSourceInconsistent }
+        // “一盒、半瓶”只能按个人食品的包装规格换算（PRD §3.2.1 package_size）。
+        if draft.amountSource == .packageConversion {
+            guard case .personalFoodVersion = draft.nutrition else { throw ItemRejection.packageUnavailable }
+        }
 
         do {
             switch draft.nutrition {
@@ -319,6 +326,11 @@ final class RecordService {
                 guard let quantity = draft.quantity else { throw ItemRejection.quantityRequired }
                 guard let version = try context.foodVersion(id: versionID) else { throw ItemRejection.unknownFoodVersion(versionID) }
                 guard version.retiredAt == nil else { throw ItemRejection.retiredFoodVersion(versionID) }
+                if draft.amountSource == .packageConversion {
+                    guard let package = try version.product?.package(), package.unit == quantity.unit else {
+                        throw ItemRejection.packageUnavailable
+                    }
+                }
                 let basis = try version.basis()
                 let snapshot = try NutritionCalculator.snapshot(
                     source: .personalFoodVersion, sourceRef: versionID.uuidString,

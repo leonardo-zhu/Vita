@@ -9,6 +9,9 @@ struct AppContainer: Sendable {
     let config: any ConfigProvider
     let environment: BuildEnvironment
     let referenceFoods: ReferenceFoodCatalog
+    /// 测试默认用内存实现与空识别结果。
+    var labelImages: any LabelImageStore = InMemoryLabelImageStore()
+    var textRecognizer: any TextRecognizer = StubTextRecognizer(lines: [])
 
     static func live() throws -> AppContainer {
         AppContainer(
@@ -16,7 +19,9 @@ struct AppContainer: Sendable {
             secrets: KeychainSecretStore(),
             config: LayeredConfigProvider(builtin: try VitaConfig.loadBuiltin()),
             environment: try BuildEnvironment.current(),
-            referenceFoods: try ReferenceFoodLoader.load()
+            referenceFoods: try ReferenceFoodLoader.load(),
+            labelImages: try FileLabelImageStore.live(),
+            textRecognizer: VisionTextRecognizer()
         )
     }
 
@@ -41,7 +46,9 @@ final class AppServices {
     let records: RecordService
     let goals: GoalService
     let dayData: DayDataService
+    let foods: FoodService
     let pending: PendingService
+    let labels: LabelScanService
 
     init(container: AppContainer, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         let context = container.modelContainer.mainContext
@@ -49,6 +56,8 @@ final class AppServices {
         records = RecordService(context: context, referenceFoods: container.referenceFoods, now: now, timeZone: timeZone)
         goals = GoalService(context: context, now: now)
         dayData = DayDataService(context: context, referenceFoods: container.referenceFoods, goals: goals)
-        pending = PendingService(context: context, records: records, now: now, timeZone: timeZone)
+        foods = FoodService(context: context, referenceFoods: container.referenceFoods, now: now)
+        pending = PendingService(context: context, records: records, foods: foods, now: now, timeZone: timeZone)
+        labels = LabelScanService(context: context, images: container.labelImages, recognizer: container.textRecognizer, now: now)
     }
 }
