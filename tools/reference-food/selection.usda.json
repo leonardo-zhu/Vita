@@ -1,0 +1,1064 @@
+{
+  "_comment": "公共营养参考库的 USDA 条目清单（docs/reference-food-library.md）。只记 Vita ID、中文名、别名、类别、状态与 FDC 来源 ID；营养值在构建时从本地 USDA 发布包读取，不写在这里。expectDescription 用于发现 FDC ID 指向变化。密度只给经确认的液体（牛奶约 1.03、植物油约 0.91–0.92）；其他液体缺省，按 ml 输入时须澄清或估算。",
+  "foods": [
+    {
+      "id": "vita.reference.chicken-breast.raw",
+      "canonicalName": "鸡胸肉（生）",
+      "aliases": [
+        "鸡胸肉",
+        "鸡胸",
+        "生鸡胸肉"
+      ],
+      "category": "poultry",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2646170
+      },
+      "expectDescription": "Chicken, breast, boneless, skinless, raw"
+    },
+    {
+      "id": "vita.reference.chicken-breast.roasted",
+      "canonicalName": "鸡胸肉（烤熟）",
+      "aliases": [
+        "鸡胸肉",
+        "鸡胸",
+        "熟鸡胸肉",
+        "烤鸡胸"
+      ],
+      "category": "poultry",
+      "preparationState": "roasted",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 171477
+      },
+      "expectDescription": "Chicken, broilers or fryers, breast, meat only, cooked, roasted"
+    },
+    {
+      "id": "vita.reference.chicken-thigh.skinless.raw",
+      "canonicalName": "鸡腿肉（去皮，生）",
+      "aliases": [
+        "鸡腿肉",
+        "去皮鸡腿肉"
+      ],
+      "category": "poultry",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2646171
+      },
+      "expectDescription": "Chicken, thigh, boneless, skinless, raw"
+    },
+    {
+      "id": "vita.reference.egg.whole.raw",
+      "canonicalName": "鸡蛋（生）",
+      "aliases": [
+        "鸡蛋",
+        "生鸡蛋"
+      ],
+      "category": "egg",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 171287
+      },
+      "expectDescription": "Egg, whole, raw, fresh"
+    },
+    {
+      "id": "vita.reference.egg.whole.boiled",
+      "canonicalName": "鸡蛋（水煮）",
+      "aliases": [
+        "鸡蛋",
+        "水煮蛋",
+        "白煮蛋",
+        "煮鸡蛋"
+      ],
+      "category": "egg",
+      "preparationState": "boiled",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 173424
+      },
+      "expectDescription": "Egg, whole, cooked, hard-boiled"
+    },
+    {
+      "id": "vita.reference.egg.white.raw",
+      "canonicalName": "蛋清（生）",
+      "aliases": [
+        "蛋清",
+        "蛋白",
+        "鸡蛋清"
+      ],
+      "category": "egg",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 172183
+      },
+      "expectDescription": "Egg, white, raw, fresh"
+    },
+    {
+      "id": "vita.reference.pork-tenderloin.raw",
+      "canonicalName": "猪里脊（生）",
+      "aliases": [
+        "猪里脊",
+        "里脊肉",
+        "小里脊"
+      ],
+      "category": "pork",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2646169
+      },
+      "expectDescription": "Pork, loin, tenderloin, boneless, raw"
+    },
+    {
+      "id": "vita.reference.pork-loin.raw",
+      "canonicalName": "猪大排肉（去骨，生）",
+      "aliases": [
+        "猪通脊",
+        "大里脊",
+        "猪大排"
+      ],
+      "category": "pork",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2646168
+      },
+      "expectDescription": "Pork, loin, boneless, raw"
+    },
+    {
+      "id": "vita.reference.beef.ground-90.raw",
+      "canonicalName": "牛肉馅（90% 瘦，生）",
+      "aliases": [
+        "牛肉馅",
+        "牛肉末"
+      ],
+      "category": "beef",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2514743
+      },
+      "expectDescription": "Beef, ground, 90% lean meat / 10% fat, raw"
+    },
+    {
+      "id": "vita.reference.beef.top-round.raw",
+      "canonicalName": "牛后腿肉（生）",
+      "aliases": [
+        "牛瘦肉",
+        "牛后腿",
+        "牛腿肉"
+      ],
+      "category": "beef",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2646173
+      },
+      "expectDescription": "Beef, round, top round, boneless, choice, raw"
+    },
+    {
+      "id": "vita.reference.salmon.atlantic.farmed.raw",
+      "canonicalName": "三文鱼（养殖，生）",
+      "aliases": [
+        "三文鱼",
+        "大西洋鲑"
+      ],
+      "category": "fish",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2684441
+      },
+      "expectDescription": "Fish, salmon, Atlantic, farm raised, raw"
+    },
+    {
+      "id": "vita.reference.cod.atlantic.raw",
+      "canonicalName": "鳕鱼（生）",
+      "aliases": [
+        "鳕鱼",
+        "大西洋鳕鱼"
+      ],
+      "category": "fish",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2684444
+      },
+      "expectDescription": "Fish, cod, Atlantic, wild caught, raw"
+    },
+    {
+      "id": "vita.reference.tilapia.raw",
+      "canonicalName": "罗非鱼（生）",
+      "aliases": [
+        "罗非鱼"
+      ],
+      "category": "fish",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2684442
+      },
+      "expectDescription": "Fish, tilapia, farm raised, raw"
+    },
+    {
+      "id": "vita.reference.shrimp.farmed.raw",
+      "canonicalName": "虾（养殖，生）",
+      "aliases": [
+        "虾",
+        "虾仁",
+        "鲜虾"
+      ],
+      "category": "seafood",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2684443
+      },
+      "expectDescription": "Crustaceans, shrimp, farm raised, raw"
+    },
+    {
+      "id": "vita.reference.tuna.light.canned-water",
+      "canonicalName": "金枪鱼罐头（水浸，沥干）",
+      "aliases": [
+        "金枪鱼罐头",
+        "水浸金枪鱼"
+      ],
+      "category": "fish",
+      "preparationState": "canned",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 334194
+      },
+      "expectDescription": "Fish, tuna, light, canned in water, drained solids"
+    },
+    {
+      "id": "vita.reference.rice.white.cooked",
+      "canonicalName": "米饭（白米，熟）",
+      "aliases": [
+        "米饭",
+        "白米饭",
+        "白饭"
+      ],
+      "category": "grain",
+      "preparationState": "cooked",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 168878
+      },
+      "expectDescription": "Rice, white, long-grain, regular, enriched, cooked"
+    },
+    {
+      "id": "vita.reference.rice.white.raw",
+      "canonicalName": "大米（生）",
+      "aliases": [
+        "大米",
+        "白米",
+        "生米"
+      ],
+      "category": "grain",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 168877
+      },
+      "expectDescription": "Rice, white, long-grain, regular, raw, enriched"
+    },
+    {
+      "id": "vita.reference.rice.brown.cooked",
+      "canonicalName": "糙米饭（熟）",
+      "aliases": [
+        "糙米饭"
+      ],
+      "category": "grain",
+      "preparationState": "cooked",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 169704
+      },
+      "expectDescription": "Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program)"
+    },
+    {
+      "id": "vita.reference.oats.rolled",
+      "canonicalName": "燕麦片（传统，生）",
+      "aliases": [
+        "燕麦片",
+        "燕麦",
+        "纯燕麦片"
+      ],
+      "category": "grain",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346396
+      },
+      "expectDescription": "Oats, whole grain, rolled, old fashioned"
+    },
+    {
+      "id": "vita.reference.flour.wheat.all-purpose",
+      "canonicalName": "小麦面粉（中筋）",
+      "aliases": [
+        "面粉",
+        "中筋面粉"
+      ],
+      "category": "grain",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 790018
+      },
+      "expectDescription": "Flour, wheat, all-purpose, unenriched, unbleached"
+    },
+    {
+      "id": "vita.reference.bread.white",
+      "canonicalName": "白面包（吐司）",
+      "aliases": [
+        "白吐司",
+        "白面包",
+        "吐司"
+      ],
+      "category": "grain",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 174924
+      },
+      "expectDescription": "Bread, white, commercially prepared (includes soft bread crumbs)"
+    },
+    {
+      "id": "vita.reference.bread.whole-wheat",
+      "canonicalName": "全麦面包",
+      "aliases": [
+        "全麦面包",
+        "全麦吐司"
+      ],
+      "category": "grain",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 172688
+      },
+      "expectDescription": "Bread, whole-wheat, commercially prepared"
+    },
+    {
+      "id": "vita.reference.noodles.egg.cooked",
+      "canonicalName": "鸡蛋面（熟）",
+      "aliases": [
+        "鸡蛋面"
+      ],
+      "category": "grain",
+      "preparationState": "cooked",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 169732
+      },
+      "expectDescription": "Noodles, egg, enriched, cooked"
+    },
+    {
+      "id": "vita.reference.quinoa.cooked",
+      "canonicalName": "藜麦（熟）",
+      "aliases": [
+        "藜麦",
+        "藜麦饭"
+      ],
+      "category": "grain",
+      "preparationState": "cooked",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 168917
+      },
+      "expectDescription": "Quinoa, cooked"
+    },
+    {
+      "id": "vita.reference.potato.peeled.raw",
+      "canonicalName": "土豆（去皮，生）",
+      "aliases": [
+        "土豆",
+        "马铃薯"
+      ],
+      "category": "tuber",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346401
+      },
+      "expectDescription": "Potatoes, russet, without skin, raw"
+    },
+    {
+      "id": "vita.reference.sweet-potato.orange.raw",
+      "canonicalName": "红薯（橙心，去皮，生）",
+      "aliases": [
+        "红薯",
+        "地瓜",
+        "番薯"
+      ],
+      "category": "tuber",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346404
+      },
+      "expectDescription": "Sweet potatoes, orange flesh, without skin, raw"
+    },
+    {
+      "id": "vita.reference.corn.sweet.raw",
+      "canonicalName": "甜玉米粒（生）",
+      "aliases": [
+        "甜玉米",
+        "玉米粒"
+      ],
+      "category": "grain",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2710826
+      },
+      "expectDescription": "Corn, sweet, yellow and white kernels,  fresh, raw"
+    },
+    {
+      "id": "vita.reference.tofu.firm.raw",
+      "canonicalName": "老豆腐（北豆腐）",
+      "aliases": [
+        "豆腐",
+        "老豆腐",
+        "北豆腐"
+      ],
+      "category": "legume",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 172475
+      },
+      "expectDescription": "Tofu, raw, firm, prepared with calcium sulfate"
+    },
+    {
+      "id": "vita.reference.tofu.soft.raw",
+      "canonicalName": "嫩豆腐（南豆腐）",
+      "aliases": [
+        "豆腐",
+        "嫩豆腐",
+        "南豆腐"
+      ],
+      "category": "legume",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 172449
+      },
+      "expectDescription": "Tofu, soft, prepared with calcium sulfate and magnesium chloride (nigari)"
+    },
+    {
+      "id": "vita.reference.black-beans.cooked",
+      "canonicalName": "黑豆（煮熟）",
+      "aliases": [
+        "黑豆"
+      ],
+      "category": "legume",
+      "preparationState": "cooked",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 173735
+      },
+      "expectDescription": "Beans, black, mature seeds, cooked, boiled, without salt"
+    },
+    {
+      "id": "vita.reference.milk.whole",
+      "canonicalName": "牛奶（全脂）",
+      "aliases": [
+        "牛奶",
+        "全脂牛奶",
+        "纯牛奶"
+      ],
+      "category": "dairy",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 746782
+      },
+      "expectDescription": "Milk, whole, 3.25% milkfat, with added vitamin D",
+      "densityGPerMl": 1.03
+    },
+    {
+      "id": "vita.reference.milk.reduced-fat-2",
+      "canonicalName": "牛奶（低脂 2%）",
+      "aliases": [
+        "牛奶",
+        "低脂牛奶"
+      ],
+      "category": "dairy",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 746778
+      },
+      "expectDescription": "Milk, reduced fat, fluid, 2% milkfat, with added vitamin A and vitamin D",
+      "densityGPerMl": 1.03
+    },
+    {
+      "id": "vita.reference.milk.nonfat",
+      "canonicalName": "牛奶（脱脂）",
+      "aliases": [
+        "牛奶",
+        "脱脂牛奶"
+      ],
+      "category": "dairy",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 746776
+      },
+      "expectDescription": "Milk, nonfat, fluid, with added vitamin A and vitamin D (fat free or skim)",
+      "densityGPerMl": 1.03
+    },
+    {
+      "id": "vita.reference.yogurt.plain.whole",
+      "canonicalName": "原味酸奶（全脂）",
+      "aliases": [
+        "原味酸奶",
+        "全脂酸奶"
+      ],
+      "category": "dairy",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2259793
+      },
+      "expectDescription": "Yogurt, plain, whole milk"
+    },
+    {
+      "id": "vita.reference.yogurt.greek.nonfat",
+      "canonicalName": "希腊酸奶（原味，脱脂）",
+      "aliases": [
+        "希腊酸奶",
+        "脱脂希腊酸奶"
+      ],
+      "category": "dairy",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 330137
+      },
+      "expectDescription": "Yogurt, Greek, plain, nonfat"
+    },
+    {
+      "id": "vita.reference.soymilk.unsweetened",
+      "canonicalName": "无糖豆浆",
+      "aliases": [
+        "无糖豆浆",
+        "豆浆"
+      ],
+      "category": "legume",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 175215
+      },
+      "expectDescription": "Soymilk (all flavors), unsweetened, with added calcium, vitamins A and D"
+    },
+    {
+      "id": "vita.reference.cheese.mozzarella.part-skim",
+      "canonicalName": "马苏里拉奶酪（部分脱脂）",
+      "aliases": [
+        "马苏里拉",
+        "马苏里拉奶酪"
+      ],
+      "category": "dairy",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 329370
+      },
+      "expectDescription": "Cheese, mozzarella, low moisture, part-skim"
+    },
+    {
+      "id": "vita.reference.broccoli.raw",
+      "canonicalName": "西兰花（生）",
+      "aliases": [
+        "西兰花",
+        "西蓝花",
+        "绿花菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 747447
+      },
+      "expectDescription": "Broccoli, raw"
+    },
+    {
+      "id": "vita.reference.cauliflower.raw",
+      "canonicalName": "菜花（生）",
+      "aliases": [
+        "菜花",
+        "花菜",
+        "白花菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2685573
+      },
+      "expectDescription": "Cauliflower, raw"
+    },
+    {
+      "id": "vita.reference.tomato.raw",
+      "canonicalName": "番茄（生）",
+      "aliases": [
+        "番茄",
+        "西红柿"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 170457
+      },
+      "expectDescription": "Tomatoes, red, ripe, raw, year round average"
+    },
+    {
+      "id": "vita.reference.cucumber.raw",
+      "canonicalName": "黄瓜（带皮，生）",
+      "aliases": [
+        "黄瓜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346406
+      },
+      "expectDescription": "Cucumber, with peel, raw"
+    },
+    {
+      "id": "vita.reference.spinach.raw",
+      "canonicalName": "菠菜（生）",
+      "aliases": [
+        "菠菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 168462
+      },
+      "expectDescription": "Spinach, raw"
+    },
+    {
+      "id": "vita.reference.carrot.raw",
+      "canonicalName": "胡萝卜（生）",
+      "aliases": [
+        "胡萝卜",
+        "红萝卜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2258586
+      },
+      "expectDescription": "Carrots, mature, raw"
+    },
+    {
+      "id": "vita.reference.cabbage.green.raw",
+      "canonicalName": "圆白菜（生）",
+      "aliases": [
+        "圆白菜",
+        "卷心菜",
+        "包菜",
+        "洋白菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346407
+      },
+      "expectDescription": "Cabbage, green, raw"
+    },
+    {
+      "id": "vita.reference.napa-cabbage.raw",
+      "canonicalName": "大白菜（生）",
+      "aliases": [
+        "大白菜",
+        "白菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 169979
+      },
+      "expectDescription": "Cabbage, chinese (pe-tsai), raw"
+    },
+    {
+      "id": "vita.reference.bok-choy.raw",
+      "canonicalName": "小白菜（青梗菜，生）",
+      "aliases": [
+        "小白菜",
+        "青菜",
+        "上海青",
+        "青梗菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2685572
+      },
+      "expectDescription": "Cabbage, bok choy, raw"
+    },
+    {
+      "id": "vita.reference.lettuce.romaine.raw",
+      "canonicalName": "生菜（罗马生菜）",
+      "aliases": [
+        "生菜",
+        "罗马生菜"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 746769
+      },
+      "expectDescription": "Lettuce, cos or romaine, raw"
+    },
+    {
+      "id": "vita.reference.onion.yellow.raw",
+      "canonicalName": "洋葱（生）",
+      "aliases": [
+        "洋葱"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 790646
+      },
+      "expectDescription": "Onions, yellow, raw"
+    },
+    {
+      "id": "vita.reference.bell-pepper.red.raw",
+      "canonicalName": "红甜椒（生）",
+      "aliases": [
+        "红椒",
+        "红甜椒",
+        "红彩椒"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 170108
+      },
+      "expectDescription": "Peppers, sweet, red, raw"
+    },
+    {
+      "id": "vita.reference.eggplant.raw",
+      "canonicalName": "茄子（生）",
+      "aliases": [
+        "茄子"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2685577
+      },
+      "expectDescription": "Eggplant, raw"
+    },
+    {
+      "id": "vita.reference.celery.raw",
+      "canonicalName": "芹菜（生）",
+      "aliases": [
+        "芹菜",
+        "西芹"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346405
+      },
+      "expectDescription": "Celery, raw"
+    },
+    {
+      "id": "vita.reference.green-beans.raw",
+      "canonicalName": "四季豆（生）",
+      "aliases": [
+        "四季豆",
+        "豆角",
+        "菜豆"
+      ],
+      "category": "vegetable",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346400
+      },
+      "expectDescription": "Beans, snap, green, raw"
+    },
+    {
+      "id": "vita.reference.mushroom.white.raw",
+      "canonicalName": "白蘑菇（口蘑，生）",
+      "aliases": [
+        "白蘑菇",
+        "口蘑",
+        "蘑菇"
+      ],
+      "category": "mushroom",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 169251
+      },
+      "expectDescription": "Mushrooms, white, raw"
+    },
+    {
+      "id": "vita.reference.mushroom.shiitake.raw",
+      "canonicalName": "鲜香菇（生）",
+      "aliases": [
+        "香菇",
+        "鲜香菇"
+      ],
+      "category": "mushroom",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 169242
+      },
+      "expectDescription": "Mushrooms, shiitake, raw"
+    },
+    {
+      "id": "vita.reference.banana.raw",
+      "canonicalName": "香蕉",
+      "aliases": [
+        "香蕉"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 173944
+      },
+      "expectDescription": "Bananas, raw"
+    },
+    {
+      "id": "vita.reference.apple.fuji.raw",
+      "canonicalName": "苹果（富士，带皮）",
+      "aliases": [
+        "苹果",
+        "富士苹果"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 1750340
+      },
+      "expectDescription": "Apples, fuji, with skin, raw"
+    },
+    {
+      "id": "vita.reference.orange.navel.raw",
+      "canonicalName": "橙子（脐橙）",
+      "aliases": [
+        "橙子",
+        "脐橙",
+        "橙"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 746771
+      },
+      "expectDescription": "Oranges, raw, navels"
+    },
+    {
+      "id": "vita.reference.grapes.red.raw",
+      "canonicalName": "红提（无籽葡萄）",
+      "aliases": [
+        "葡萄",
+        "红提",
+        "提子"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346412
+      },
+      "expectDescription": "Grapes, red, seedless, raw"
+    },
+    {
+      "id": "vita.reference.strawberry.raw",
+      "canonicalName": "草莓",
+      "aliases": [
+        "草莓"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346409
+      },
+      "expectDescription": "Strawberries, raw"
+    },
+    {
+      "id": "vita.reference.blueberry.raw",
+      "canonicalName": "蓝莓",
+      "aliases": [
+        "蓝莓"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346411
+      },
+      "expectDescription": "Blueberries, raw"
+    },
+    {
+      "id": "vita.reference.kiwi.green.raw",
+      "canonicalName": "猕猴桃（绿心）",
+      "aliases": [
+        "猕猴桃",
+        "奇异果"
+      ],
+      "category": "fruit",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 327046
+      },
+      "expectDescription": "Kiwifruit, green, raw"
+    },
+    {
+      "id": "vita.reference.peanut.raw",
+      "canonicalName": "花生（生）",
+      "aliases": [
+        "花生",
+        "花生米",
+        "生花生"
+      ],
+      "category": "nut",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2515376
+      },
+      "expectDescription": "Peanuts, raw"
+    },
+    {
+      "id": "vita.reference.almond.raw",
+      "canonicalName": "杏仁（巴旦木，生）",
+      "aliases": [
+        "巴旦木",
+        "杏仁",
+        "扁桃仁"
+      ],
+      "category": "nut",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346393
+      },
+      "expectDescription": "Nuts, almonds, whole, raw"
+    },
+    {
+      "id": "vita.reference.walnut.raw",
+      "canonicalName": "核桃仁（生）",
+      "aliases": [
+        "核桃",
+        "核桃仁"
+      ],
+      "category": "nut",
+      "preparationState": "raw",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 2346394
+      },
+      "expectDescription": "Nuts, walnuts, English, halves, raw"
+    },
+    {
+      "id": "vita.reference.oil.olive",
+      "canonicalName": "橄榄油",
+      "aliases": [
+        "橄榄油"
+      ],
+      "category": "oil",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 171413
+      },
+      "expectDescription": "Oil, olive, salad or cooking",
+      "densityGPerMl": 0.91
+    },
+    {
+      "id": "vita.reference.oil.soybean",
+      "canonicalName": "大豆油",
+      "aliases": [
+        "大豆油",
+        "豆油"
+      ],
+      "category": "oil",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 171411
+      },
+      "expectDescription": "Oil, soybean, salad or cooking",
+      "densityGPerMl": 0.92
+    },
+    {
+      "id": "vita.reference.soy-sauce.brewed",
+      "canonicalName": "酱油（酿造）",
+      "aliases": [
+        "酱油",
+        "生抽"
+      ],
+      "category": "condiment",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 174277
+      },
+      "expectDescription": "Soy sauce made from soy and wheat (shoyu)"
+    },
+    {
+      "id": "vita.reference.sugar.granulated",
+      "canonicalName": "白砂糖",
+      "aliases": [
+        "白砂糖",
+        "白糖",
+        "砂糖"
+      ],
+      "category": "condiment",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-foundation",
+        "fdcId": 746784
+      },
+      "expectDescription": "Sugars, granulated"
+    },
+    {
+      "id": "vita.reference.honey",
+      "canonicalName": "蜂蜜",
+      "aliases": [
+        "蜂蜜"
+      ],
+      "category": "condiment",
+      "preparationState": "asSold",
+      "source": {
+        "dataset": "usda-sr-legacy",
+        "fdcId": 169640
+      },
+      "expectDescription": "Honey"
+    }
+  ]
+}

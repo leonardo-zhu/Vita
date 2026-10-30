@@ -9,3 +9,6 @@ ios/Vita.xcodeproj/
 xcuserdata/
 DerivedData/
 build/
+
+# Python 构建脚本的字节码缓存
+__pycache__/
