@@ -38,6 +38,24 @@ struct LocalDate: Hashable, Comparable, Codable, Sendable, CustomStringConvertib
         self.day = c.day!
     }
 
+    /// 日历意义上的前后若干天，与时区无关。
+    func adding(days: Int) -> LocalDate {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let start = calendar.date(from: DateComponents(year: year, month: month, day: day))!
+        return LocalDate(date: calendar.date(byAdding: .day, value: days, to: start)!, timeZone: calendar.timeZone)
+    }
+
+    /// 所在自然周（周一到周日）的周一。
+    var startOfWeek: LocalDate {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let date = calendar.date(from: DateComponents(year: year, month: month, day: day))!
+        // weekday：周日 = 1 … 周六 = 7。
+        let offset = (calendar.component(.weekday, from: date) + 5) % 7
+        return adding(days: -offset)
+    }
+
     var isoString: String {
         String(format: "%04d-%02d-%02d", year, month, day)
     }

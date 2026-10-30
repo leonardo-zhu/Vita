@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 /// Data 页与 Agent 读工具使用的只读视图，Presentation 不直接接触 SwiftData（TDD §1.1）。
-struct DayData: Equatable, Sendable {
+struct DayData: Equatable, Sendable, Identifiable {
     struct Item: Equatable, Codable, Sendable, Identifiable {
         var id: UUID
         var displayName: String
@@ -34,6 +34,8 @@ struct DayData: Equatable, Sendable {
     var revision: Int
     var records: [Record]
     var summary: DaySummary
+
+    var id: LocalDate { date }
 }
 
 @MainActor
@@ -88,5 +90,30 @@ final class DayDataService {
             snapshot: try item.snapshot(),
             sourceLabel: try sourceLabels.label(referenceFoodID: item.referenceFoodID, foodVersionID: item.foodVersionID)
         )
+    }
+}
+
+/// 一周（周一到周日）的数据，用于周视图的趋势。
+struct WeekData: Equatable, Sendable {
+    var days: [DayData]
+
+    var start: LocalDate { days[0].date }
+    var end: LocalDate { days[days.count - 1].date }
+
+    /// 有记录的天数；平均值只按这些天算，没记录的日子不拉低平均。
+    var recordedDays: [DayData] { days.filter { !$0.records.isEmpty } }
+
+    func average(_ nutrient: Nutrient) -> Decimal? {
+        let recorded = recordedDays
+        guard !recorded.isEmpty else { return nil }
+        let total = recorded.reduce(Decimal(0)) { $0 + nutrient.value(in: $1.summary.totals) }
+        return total / Decimal(recorded.count)
+    }
+}
+
+extension DayDataService {
+    func week(containing date: LocalDate) throws -> WeekData {
+        let monday = date.startOfWeek
+        return WeekData(days: try (0..<7).map { try day(monday.adding(days: $0)) })
     }
 }

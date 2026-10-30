@@ -2,6 +2,9 @@ import Foundation
 
 /// 展示规则（TDD §4.2）：能量取整数 kcal，宏量营养素一位小数；存储值不受影响。
 enum DisplayFormat {
+    /// 界面只有中文，日期与时刻按中文格式展示，不跟随系统语言。
+    static let locale = Locale(identifier: "zh_Hans_CN")
+
     static func energy(_ value: Decimal) -> String {
         value.formatted(.number.precision(.fractionLength(0)).rounded(rule: .toNearestOrAwayFromZero)) + " kcal"
     }
@@ -27,7 +30,12 @@ enum DisplayFormat {
         guard let day = Calendar(identifier: .gregorian).date(from: DateComponents(year: date.year, month: date.month, day: date.day)) else {
             return date.isoString
         }
-        return day.formatted(.dateTime.month().day().weekday(.abbreviated))
+        return day.formatted(.dateTime.month().day().weekday(.abbreviated).locale(locale))
+    }
+
+    /// 如“10月26日”。
+    static func shortDate(_ date: LocalDate) -> String {
+        "\(date.month)月\(date.day)日"
     }
 
     /// 按原始精度展示，不把餐段或“仅日期”显示成具体时刻（ADR-011）。
@@ -35,6 +43,7 @@ enum DisplayFormat {
         func clock(_ date: Date) -> String {
             var style = Date.FormatStyle(date: .omitted, time: .shortened)
             style.timeZone = TimeZone(identifier: time.timeZoneIdentifier) ?? .current
+            style.locale = locale
             return date.formatted(style)
         }
         switch time.precision {
@@ -77,6 +86,24 @@ extension AmountSource {
         case .userStated: "用户告知"
         case .packageConversion: "按包装换算"
         case .aiEstimated: "AI 估算"
+        }
+    }
+}
+
+extension FoodVersionSource {
+    var label: String {
+        switch self {
+        case .nutritionLabel: "来自营养标签"
+        case .manualEntry: "用户手动提供"
+        case .referenceDerived: "以公共参考库为起点"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .nutritionLabel: "doc.text.viewfinder"
+        case .manualEntry: "hand.raised"
+        case .referenceDerived: "books.vertical"
         }
     }
 }

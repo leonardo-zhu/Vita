@@ -22,6 +22,11 @@ enum SampleData {
         guard day.records.isEmpty else { return }
 
         let context = services.container.modelContainer.mainContext
+        // 跨天再次写入样例时复用已有的样例食品，不重复建产品。
+        if let existing = try context.fetch(FetchDescriptor<FoodProduct>()).first(where: { $0.name == "纯牛奶" && $0.brandOrSupplier == "样例品牌" }),
+           let versionID = existing.activeVersionID {
+            return try seedRecords(services, on: today, timeZone: timeZone, milkVersionID: versionID)
+        }
         let milk = FoodProduct(name: "纯牛奶", brandOrSupplier: "样例品牌", package: Quantity(amount: 250, unit: .milliliter), now: Date())
         let version = FoodVersion(
             basis: FoodVersionBasis(
@@ -36,7 +41,10 @@ enum SampleData {
         version.product = milk
         milk.activeVersionID = version.id
         try context.save()
+        try seedRecords(services, on: today, timeZone: timeZone, milkVersionID: version.id)
+    }
 
+    private static func seedRecords(_ services: AppServices, on today: LocalDate, timeZone: TimeZone, milkVersionID: UUID) throws {
         if try services.goals.activeGoal(on: today) == nil {
             try services.goals.appendGoal(
                 GoalTargets(energyKcal: 1800, proteinG: 130, fatG: 60, carbohydrateG: 180),
@@ -51,7 +59,7 @@ enum SampleData {
             items: [
                 ItemDraft(
                     displayName: "纯牛奶", originalAmountText: "一盒", quantity: Quantity(amount: 250, unit: .milliliter),
-                    amountSource: .packageConversion, nutrition: .personalFoodVersion(version.id), includeInSummary: true
+                    amountSource: .packageConversion, nutrition: .personalFoodVersion(milkVersionID), includeInSummary: true
                 ),
                 ItemDraft(
                     displayName: "水煮蛋", originalAmountText: "2 个，共 108g", quantity: Quantity(amount: 108, unit: .gram),

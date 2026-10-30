@@ -8,7 +8,7 @@ struct RootView: View {
         TabView {
             ChatView(services: services)
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
-            DataView(service: services.dayData)
+            DataView(services: services)
                 .tabItem { Label("Data", systemImage: "chart.bar") }
         }
     }
