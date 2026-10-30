@@ -47,7 +47,7 @@
 
 ## Phase 5：Agent 接入与体验打磨
 
-- 以 `LLMClient` 接入 Conduit（Responses API，无状态），启用工具调用；前置：Conduit M1 可用（令牌鉴权、别名路由）。
+- 以 `LLMClient` 接入 Conduit（Responses API，无状态），启用工具调用；前置：Conduit M1 可用（令牌鉴权、别名路由）——2026-10-29 已上线，开始时在 Conduit 的应用 Vita 下配别名（如 `vita-chat`）、每台设备建一把密钥。
 - 完成远程配置拉取、验签、校验与本地调试覆盖（见 Vita Admin 设计）；Admin 与诊断日志按其分期 M1–M3 推进，不阻塞本阶段的真实对话验收。
 - 为工具参数、模型输出、超时和网络错误增加校验与可恢复提示。
 - 实现 Chat / Data 双层导航、按日 Session、Onboarding。

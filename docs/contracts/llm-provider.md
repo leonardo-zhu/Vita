@@ -25,6 +25,8 @@ Content-Type: application/json
 
 Conduit 对客户端暴露 Responses API 的无状态子集（见 §5、§6）。上游是否原生支持 Responses、是否需要协议转换，是 Conduit 的内部事务。
 
+生产地址 `https://conduit.r4s.leonardo-zhu.me`（2026-10-29 上线，`CONDUIT_BASE_URL` 不带 `/v1`）。还没有单独的开发实例，Debug 构建指向哪里见 Vita Admin 设计 §12 第 8 条。Conduit 已实现的范围见 [Conduit 项目设计](../architecture/llm-gateway-project.md) §0。
+
 Vita 不依赖某个社区 Swift OpenAI SDK，而是用 iOS 标准库 `URLSession`、`Codable` 和 Swift Concurrency 写一个小型、受测试覆盖的协议适配器。
 
 这是刻意选择：官方 OpenAI SDK 当前列出 Python、JavaScript/TypeScript、.NET、Go、Java 与 Ruby，但没有官方 Swift SDK；第三方 Swift 包也未必完整实现 Responses 事件与工具调用语义。自建的薄适配层比引入一个 API 跟随速度不确定的依赖更可控。
@@ -92,7 +94,7 @@ ChatOrchestrator
 - 一个与多个 `function_call`；
 - `function_call_output` 回传后续答；
 - 结构错误、超时、取消和非 2xx 响应；
-- Conduit 统一错误类型的映射：令牌无效或过期（401）、额度耗尽（429）、上游错误、上游超时，各自对应不同的用户提示；
+- Conduit 统一错误类型的映射：令牌无效或过期（401 `authentication_error`）、额度耗尽（429 `insufficient_quota`）、请求不合法（400 `invalid_request_error`，如带了 `previous_response_id`）、上游停用（503 `upstream_unavailable`）、上游错误（502 `upstream_error`）、上游超时（504 `upstream_timeout`），各自对应不同的用户提示。错误体是 `{ error: { type, code, message } }`；流式过程中出错时以流内 `error` 事件结束；
 - 不能通过模型响应绕过 Pending 确认门；
 - ~~API Key~~ **Conduit 令牌** 不出现在 error、审计或网络诊断日志。
 

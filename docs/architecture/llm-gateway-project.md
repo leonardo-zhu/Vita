@@ -1,10 +1,35 @@
-# Conduit：LLM Gateway 项目设计（草案）
+# Conduit：LLM Gateway 项目设计
 
-**状态：草案，待评审**
-**性质：独立项目的启动文档。** Conduit 是一个独立仓库，Vita 只是它的第一个接入方。
+**状态：首期已上线（2026-10-29，R4S 自托管）。** §1–§14 是最初的设计，保留不改；实际做成什么样、哪些没做，见 §0。
+**性质：独立项目的启动文档。** Conduit 是一个独立仓库（`~/Code/Personal/conduit`，进度见其 `docs/progress.md`），第一个真实接入方是 OpenClaw（2026-10-30），Vita 客户端写好后接入。
 **关联：** [Vita Admin 设计](vita-admin.md)、[模型 Provider 集成规范](../contracts/llm-provider.md)
 
 > 项目名 **Conduit**（管道、导管）：所有应用的模型调用都从这里走。备选名：Prism、Relay、Waypoint。
+
+## 0. 实现现状（2026-10-30）
+
+**怎么做的：** 没有按 §9 拆数据面和控制面，而是一个 Next.js 服务（管理后台 + 网关）加一个 SQLite 库（`node:sqlite`），前端在 NewAPI（AGPL-3.0）的基础上删改。跑在家里的 R4S 上，经 Caddy 对外：`https://conduit.r4s.leonardo-zhu.me`。推到 `master` 由 CI 构建镜像并部署。按 §10 的方案 A 自研，没有用 LiteLLM。
+
+| 设计 | 现状 |
+| --- | --- |
+| §3.1 `/v1/responses` 无状态子集：流式、function calling、图片输入 | ✅ 已做。服务商原生支持 Responses 时直接转发（只去掉 `store`、`metadata` 等字段），只支持 Chat 的由网关转换。`previous_response_id` 返回 400。原生转发的流式和工具调用已由 OpenClaw 实测；网关转换只用模拟上游测过；图片输入没有设体积上限 |
+| §3.1 `/v1/models` | ✅ 返回应用的别名，加上启用服务商的 `标识/模型名` |
+| §3.1 `chat/completions`、Anthropic Messages | ✅ 提前做了：`/v1/chat/completions` 直接转发；`/v1/messages` 只转给填了 Anthropic 兼容地址的服务商，不和 OpenAI 格式互转（还没用真实上游测过） |
+| §3.1 `X-Request-Id` | ✅ 沿用调用方给的值（没给就生成），写进用量记录，在响应头返回 |
+| §3.1 `X-Client-Meta` | ❌ 不读也不记 |
+| §3.1 统一错误类型 | ✅ `{ error: { type, code, message } }`：`authentication_error` 401、`invalid_request_error` 400、`insufficient_quota` 429、`upstream_unavailable` 503、`upstream_error` 502、`upstream_timeout` 504。鉴权失败的具体原因只进服务端日志 |
+| §2 Model Alias | ✅ 别名属于应用，如 `vita-chat`。另加了“直接调用”：`model` 写 `服务商标识/模型名`，不用配别名（代价：任何密钥都能这样调用任何启用的服务商） |
+| §2 Principal | ❌ 没有终端用户维度，只到应用和密钥 |
+| §4.1 令牌 | 部分。叫“API 密钥”，归属应用，只存哈希，明文只显示一次。只有名称、有效期、IP 白名单，能用应用的全部别名。**没有**单独的额度、别名白名单、RPM / TPM、最大并发；吊销就是禁用、删除或重新生成 |
+| §4.2 设备注册（App Attest） | ❌ 分发前再做 |
+| §5 路由与降级 | 部分。一个别名只指向一个服务商的一个模型。**没有**备用链、重试、参数覆盖、熔断。有超时：等响应头 2 分钟，非流式总长 5 分钟，流式 5 分钟没有数据就结束 |
+| §6 配额与成本 | 部分。额度按 token 计，只设在应用上，可每月 1 日重置，不预占。**没有**价格表、预算金额、全局熔断。服务商没返回 usage 时按字符估算并标记 |
+| §7 日志与隐私 | ✅ 只记元数据（request id、应用、密钥、别名、服务商、实际模型、token、首字时间、耗时、状态码、错误、IP），不记内容，请求体不落盘。没有内容日志开关和 `dataClass` 字段。日志不会自动清理 |
+| §8 管理后台 | 大部分。账号密码 + Passkey 登录；服务商（密钥加密存储、只显示末四位、单个测试和一键测试全部）；应用（别名、API 密钥、额度）；使用日志；数据看板；事件提醒（服务商拒绝密钥、限流、连续失败，额度将尽和用尽，错误率突增，推送 Telegram）。**没有**价格表、控制面审计、降级次数和 P95 统计 |
+| §9 存储 | SQLite，不是 PostgreSQL；没有 Redis |
+| §13 里程碑 | M0、M1 完成；M2 只有 token 额度和记账（没有限流、价格表）；M3 完成；M4 没做 |
+
+**§12 待确认里已经定下的：** 3. 部署在 R4S（家里），域名 `conduit.r4s.leonardo-zhu.me`。6. 数据库是同机的 SQLite 文件，没有 Redis。
 
 ## 1. 背景与定位
 
