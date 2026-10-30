@@ -43,6 +43,8 @@
 
 验收：历史 Item 的营养结果不随 Food Version 更新而改变；AI 估算不能被直接保存为个人食品版本。
 
+状态（2026-10-30）：客户端部分完成，正式参考库构建待做。`FoodService` 管理 Food Product 与不可变 Food Version，新建产品与新版本都经 Pending 确认，新版本让旧版本退役，提案后生效版本变化则作废；`packageConversion` 用量必须对应带包装规格的个人食品。`LabelScanService` 实现 `attachNutritionLabel`：原图存 App Support、Vision 本地识别、`NutritionLabelParser` 按坐标拼行并解析 GB 28050 格式（千焦换算千卡、排除饱和/反式脂肪、缺项给出提示）。`proposeFoodChange` 的来源只接受营养标签（须指向本地识别 ID）、用户提供或公共参考库（数值由客户端复制），AI 估算被拒绝。Data 页新增只读的营养库与参考库署名。正式参考库：`tools/reference-food/build.py` 从本地私有数据构建 `reference-foods.json`，中国食物成分表（Sanotsu 矫正版 JSON）优先、USDA FoodData Central（Foundation 2026-10-29 / SR Legacy 2018-04）补充，同一 Vita ID 以中国条目为准；精选层 85 条（中国 62、USDA 23）加中国数据自动整理的扩展层，精选层未命中时才查扩展层。已知缺口：中国数据不含调味品，酱油、白砂糖、蜂蜜暂用 USDA。
+
 ## Phase 4：HealthKit 与目标
 
 - 实现读权限、缺失数据兜底（含 `submitManualBodyMetrics`）、`getGoalRecommendation` 预览 + `commitInitialGoals` 一次性确认，以及 `updateGoal` 明确指令更新（保留旧行，可用指令改回）。
