@@ -38,13 +38,13 @@ struct FileLabelImageStore: LabelImageStore {
 
     func load(_ reference: String) throws -> Data? {
         let file = try url(reference)
-        guard FileManager.default.fileExists(atPath: file.path()) else { return nil }
+        guard FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) else { return nil }
         return try Data(contentsOf: file)
     }
 
     func delete(_ reference: String) throws {
         let file = try url(reference)
-        if FileManager.default.fileExists(atPath: file.path()) { try FileManager.default.removeItem(at: file) }
+        if FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) { try FileManager.default.removeItem(at: file) }
     }
 }
 
