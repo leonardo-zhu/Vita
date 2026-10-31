@@ -1,11 +1,31 @@
 import SwiftUI
 
-/// 目标设定（PRD §3.4）：展示身体数据及来源，缺项手动补录，预览建议的输入、公式与结果，一次确认后写入。
-/// 手动补录只用于生成目标，不写回 Apple 健康。
+/// 目标设定的弹窗：Data 页“生成每日目标 / 调整目标”打开它。内容与 Onboarding 共用 `GoalSetupForm`。
 struct GoalSetupView: View {
     let services: AppServices
     let date: LocalDate
     let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            GoalSetupForm(services: services, date: date, onCommitted: onDone)
+                .background { VitaTheme.background }
+                .navigationTitle("每日目标")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消", action: onDone) }
+                }
+        }
+        .tint(VitaTheme.intake)
+    }
+}
+
+/// 目标设定（PRD §3.4）：展示身体数据及来源，缺项手动补录，预览建议的输入、公式与结果，一次确认后写入。
+/// 手动补录只用于生成目标，不写回 Apple 健康。确认按钮固定在底部。
+struct GoalSetupForm: View {
+    let services: AppServices
+    let date: LocalDate
+    let onCommitted: () -> Void
 
     @State private var snapshot: HealthSnapshot?
     @State private var editing: MissingMetric?
@@ -16,51 +36,49 @@ struct GoalSetupView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    metricsCard
-                    if case .ready(let recommendation) = result {
-                        RecommendationCard(recommendation: recommendation)
-                    } else if case .missing(let missing) = result {
-                        Text(missing.contains(.bodyMass) ? "体重是生成目标的必要数据，请补录后再生成。" : "还缺少 \(missing.map(\.label).joined(separator: "、"))，补录后即可生成。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                    }
-                    Text("这是按通用公式给出的默认建议，不是医疗建议。之后可以随时在对话里说“把蛋白质目标改成 150g”来调整。")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                metricsCard
+                if case .ready(let recommendation) = result {
+                    RecommendationCard(recommendation: recommendation)
+                } else if case .missing(let missing) = result {
+                    Text(missing.contains(.bodyMass) ? "体重是生成目标的必要数据，请补录后再生成。" : "还缺少 \(missing.map(\.label).joined(separator: "、"))，补录后即可生成。")
+                        .font(VitaType.secondary)
+                        .foregroundStyle(.secondary)
                         .padding(.horizontal, 4)
                 }
-                .padding(16)
+                Text("这是按通用公式给出的默认建议，不是医疗建议。之后可以随时在对话里说“把蛋白质目标改成 150g”来调整。")
+                    .font(VitaType.meta)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 4)
             }
-            .background { VitaTheme.background }
-            .navigationTitle("每日目标")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消", action: onDone) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("确认目标", action: commit).disabled(readyRecommendation == nil)
-                }
-            }
-            .sheet(item: $editing) { metric in
-                ManualMetricForm(metric: metric) { metrics in
-                    do {
-                        try services.health.submitManualBodyMetrics(metrics)
-                        editing = nil
-                        Task { await reload() }
-                    } catch {
-                        message = "数值不在合理范围内。"
-                    }
-                }
-                .presentationDetents([.medium])
-            }
-            .alert("提示", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
-                Button("好", role: .cancel) {}
-            } message: { Text(message ?? "") }
+            .padding(16)
         }
-        .tint(VitaTheme.intake)
+        .safeAreaInset(edge: .bottom) {
+            Button(action: commit) {
+                Text("确认目标").font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+            }
+            .controlSize(.large)
+            .glassButton(prominent: true)
+            .disabled(readyRecommendation == nil)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+        .sheet(item: $editing) { metric in
+            ManualMetricForm(metric: metric) { metrics in
+                do {
+                    try services.health.submitManualBodyMetrics(metrics)
+                    editing = nil
+                    Task { await reload() }
+                } catch {
+                    message = "数值不在合理范围内。"
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .alert("提示", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: { Text(message ?? "") }
         .task { await reload() }
     }
 
@@ -78,7 +96,7 @@ struct GoalSetupView: View {
                             await reload()
                         }
                     }
-                    .font(.subheadline)
+                    .font(VitaType.body)
                 }
             }
             if let snapshot {
@@ -92,7 +110,7 @@ struct GoalSetupView: View {
                     Text(snapshot.activeEnergyKcal.value.map { DisplayFormat.number($0, digits: 0) + " 千卡" } ?? "没有数据，按轻度活动估算")
                         .foregroundStyle(snapshot.activeEnergyKcal.value == nil ? .secondary : .primary)
                 }
-                .font(.subheadline)
+                .font(VitaType.body)
             } else {
                 ProgressView().frame(maxWidth: .infinity)
             }
@@ -108,7 +126,7 @@ struct GoalSetupView: View {
         guard let recommendation = readyRecommendation else { return }
         do {
             try services.goals.commitInitialGoals(recommendation, effectiveFrom: date)
-            onDone()
+            onCommitted()
         } catch {
             message = "保存目标失败：\(error)"
         }

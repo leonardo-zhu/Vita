@@ -140,6 +140,7 @@ struct ChatView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isPickingDate = false
     @State private var isShowingSettings = false
+    @AppStorage(OnboardingState.key) private var onboardingCompleted = false
     @FocusState private var inputFocused: Bool
 
     init(services: AppServices) {
@@ -169,7 +170,7 @@ struct ChatView: View {
                 }
                 .sheet(isPresented: $isPickingDate) { datePicker }
                 .sheet(isPresented: $isShowingSettings, onDismiss: model.reload) {
-                    SettingsView(services: services)
+                    SettingsView(services: services) { onboardingCompleted = false }
                 }
         }
         .tint(VitaTheme.intake)
