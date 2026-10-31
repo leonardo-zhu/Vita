@@ -119,38 +119,81 @@ private struct RecordPreviewContent: View {
     }
 }
 
-/// 新建个人食品或新版本：列出基准营养值与来源，新版本时对比旧值。
+/// 新建个人食品或新版本：与记录卡同样的标题行（图标、品名、类型标签），来源做成小标签，
+/// 营养值排成四列；新版本时在新值下方划掉旧值。
 private struct FoodPreviewContent: View {
     let preview: FoodChangePreview
 
+    private var tint: Color { preview.kind == .createProduct ? VitaTheme.fat : VitaTheme.protein }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(preview.kind == .createProduct ? "新建个人食品" : "更新营养数据（新版本）").font(.headline)
-            Text([preview.productName, preview.brandOrSupplier, preview.package.map { "包装 " + DisplayFormat.quantity($0) }].compactMap { $0 }.joined(separator: " · "))
-                .font(.subheadline)
+        HStack(spacing: 10) {
+            Image(systemName: "takeoutbag.and.cup.and.straw.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tint)
+                .frame(width: 34, height: 34)
+                .background(tint.opacity(0.14), in: .circle)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(preview.productName).font(VitaType.title).lineLimit(2)
+                let detail = [preview.brandOrSupplier, preview.package.map { "包装 " + DisplayFormat.quantity($0) }].compactMap { $0 }
+                if !detail.isEmpty {
+                    Text(detail.joined(separator: " · ")).font(VitaType.meta).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(preview.kind == .createProduct ? "存入食品库" : "更新营养数据")
+                .font(VitaType.meta.weight(.semibold))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(tint.opacity(0.12), in: .capsule)
+        }
+        HStack(spacing: 8) {
+            Label(preview.version.sourceKind.label, systemImage: preview.version.sourceKind.symbol)
+                .font(VitaType.meta)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.primary.opacity(0.05), in: .capsule)
+            Spacer()
+            Text("每 " + DisplayFormat.quantity(preview.version.basis.quantity))
+                .font(VitaType.meta.weight(.medium))
                 .foregroundStyle(.secondary)
         }
-        Label(preview.version.sourceKind.label, systemImage: preview.version.sourceKind.symbol)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        Text("每 " + DisplayFormat.quantity(preview.version.basis.quantity))
-            .font(.subheadline.weight(.semibold))
-        ForEach(Nutrient.allCases, id: \.self) { nutrient in
-            HStack {
-                Text(nutrient.label)
-                Spacer()
-                if let previous = preview.previousBasis {
-                    Text(DisplayFormat.nutrient(nutrient, nutrient.value(in: previous.nutrients)))
-                        .strikethrough()
-                        .foregroundStyle(.secondary)
+        HStack(spacing: 0) {
+            ForEach(Nutrient.allCases, id: \.self) { nutrient in
+                VStack(spacing: 3) {
+                    Text(Self.value(nutrient, preview.version.basis.nutrients))
+                        .font(.headline)
+                        .monospacedDigit()
+                    if let previous = preview.previousBasis {
+                        Text(Self.value(nutrient, previous.nutrients))
+                            .font(VitaType.meta)
+                            .strikethrough()
+                            .foregroundStyle(.tertiary)
+                            .monospacedDigit()
+                    }
+                    HStack(spacing: 4) {
+                        Circle().fill(VitaTheme.color(for: nutrient)).frame(width: 6, height: 6)
+                        Text(Self.unitLabel(nutrient)).font(VitaType.meta).foregroundStyle(.secondary)
+                    }
                 }
-                Text(DisplayFormat.nutrient(nutrient, nutrient.value(in: preview.version.basis.nutrients)))
+                .frame(maxWidth: .infinity)
             }
-            .monospacedDigit()
         }
+        .padding(.vertical, 10)
+        .background(Color.primary.opacity(0.04), in: .rect(cornerRadius: 14))
         if let note = preview.version.sourceNote {
-            Text(note).font(.caption).foregroundStyle(.secondary)
+            Text(note).font(VitaType.meta).foregroundStyle(.secondary)
         }
+    }
+
+    private static func value(_ nutrient: Nutrient, _ values: NutrientValues) -> String {
+        DisplayFormat.number(nutrient.value(in: values), digits: nutrient == .energyKcal ? 0 : 1)
+    }
+
+    private static func unitLabel(_ nutrient: Nutrient) -> String {
+        nutrient == .energyKcal ? "千卡" : nutrient.label + " g"
     }
 }
 
