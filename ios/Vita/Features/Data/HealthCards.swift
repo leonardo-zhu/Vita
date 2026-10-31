@@ -13,12 +13,15 @@ struct HealthSection: View {
             Text("健康").font(.title3.weight(.semibold)).padding(.horizontal, 4)
             if !isAvailable {
                 Text("这台设备不支持 Apple 健康。")
-                    .font(.footnote)
+                    .font(VitaType.body)
                     .foregroundStyle(.secondary)
                     .vitaCard()
             } else if let snapshot, !snapshot.authorizationRequested {
                 connectCard
+            } else if let snapshot, snapshot.accessLikelyDenied {
+                deniedCard
             } else if let snapshot {
+                if snapshot.writeDenied { writeDeniedNotice }
                 LazyVGrid(columns: columns, spacing: 12) {
                     MetricCard(title: "体重", symbol: "scalemass.fill", tint: VitaTheme.protein,
                                reading: snapshot.bodyMassKg, format: { DisplayFormat.number($0, digits: 1) }, unit: "kg",
@@ -39,15 +42,36 @@ struct HealthSection: View {
     }
 
     private var connectCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            CardHeader(title: "连接 Apple 健康", systemImage: "heart.fill", tint: .pink)
-            Text("读取体重、身高、体脂、睡眠和活动能量，用来生成目标并在这里展示；确认过的饮食记录会写回 Apple 健康。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Button("连接", action: onConnect)
-                .glassButton(prominent: true)
+        InvitationCard(
+            symbol: "heart.fill",
+            tint: .pink,
+            title: "连接 Apple 健康",
+            message: "读取体重、睡眠和活动，并把确认的饮食写回健康。",
+            actionTitle: "连接 Apple 健康",
+            action: onConnect
+        )
+    }
+
+    /// 点了“不允许”：iOS 不会再次弹出授权框，只能去健康 App 里打开（PRD §3.3 权限处理）。
+    private var deniedCard: some View {
+        InvitationCard(
+            symbol: "heart.slash.fill",
+            tint: VitaTheme.caution,
+            title: "没有 Apple 健康权限",
+            message: "到“\(HealthApp.permissionPath)”里打开需要的项目。",
+            actionTitle: "打开健康 App",
+            action: HealthApp.open
+        )
+    }
+
+    private var writeDeniedNotice: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "heart.slash").foregroundStyle(VitaTheme.caution)
+            Text("没有允许写入，饮食记录不会同步到 Apple 健康。").font(VitaType.secondary).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button("打开健康", action: HealthApp.open).font(VitaType.secondary.weight(.semibold))
         }
-        .vitaCard(padding: 20)
+        .vitaCard(padding: 14)
     }
 }
 
@@ -63,23 +87,23 @@ private struct MetricCard<Value: Equatable & Codable & Sendable>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: symbol)
-                .font(.subheadline.weight(.medium))
+                .font(VitaType.body.weight(.medium))
                 .foregroundStyle(tint)
             switch reading {
             case .value(let value, let source, let measuredAt):
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(format(value)).font(.title2.weight(.semibold)).monospacedDigit()
-                    Text(unit).font(.caption).foregroundStyle(.secondary)
+                    Text(unit).font(VitaType.meta).foregroundStyle(.secondary)
                 }
                 Text([footnote, source == .manual ? "手动补录" : measuredAt.map(DisplayFormat.relativeDay)].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption)
+                    .font(VitaType.meta)
                     .foregroundStyle(.secondary)
             case .noData:
                 Text("--").font(.title2.weight(.semibold)).foregroundStyle(.tertiary)
-                Text("暂无数据").font(.caption).foregroundStyle(.secondary)
+                Text("暂无数据").font(VitaType.meta).foregroundStyle(.secondary)
             case .failed:
                 Text("--").font(.title2.weight(.semibold)).foregroundStyle(.tertiary)
-                Text("读取失败").font(.caption).foregroundStyle(VitaTheme.caution)
+                Text("读取失败").font(VitaType.meta).foregroundStyle(VitaTheme.caution)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

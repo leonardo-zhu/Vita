@@ -97,7 +97,78 @@ struct ProgressRing: View {
                 .trim(from: 0, to: min(max(fraction, 0), 1))
                 .stroke(fraction > 1 ? VitaTheme.caution : tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                // 圆角线帽在进度为 0 时仍会画出一个点。
+                .opacity(fraction > 0 ? 1 : 0)
         }
         .animation(.smooth, value: fraction)
+    }
+}
+
+/// 卡片里的字号层级，所有卡片共用，避免同类文字大小不一。
+enum VitaType {
+    /// 卡片标题。
+    static let title = Font.headline
+    /// 卡片里的说明文字。
+    static let body = Font.subheadline
+    /// 次要说明、行内按钮。
+    static let secondary = Font.footnote
+    /// 数字下方的标签、时间等元信息。
+    static let meta = Font.caption
+}
+
+/// 引导卡：左侧图标块，右侧一两行标题与说明，需要用户行动时下方放通栏主按钮。
+/// 用于连接健康、生成目标、权限被拒、空记录等状态，保持同一种左对齐版式。
+struct InvitationCard: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let message: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(
+                        LinearGradient(colors: [tint.opacity(0.75), tint], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: .rect(cornerRadius: 14)
+                    )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(VitaType.title)
+                    Text(message)
+                        .font(VitaType.body)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let actionTitle, let action {
+                Button(action: action) {
+                    Text(actionTitle).font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .glassButton(prominent: true)
+                .tint(tint)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(VitaTheme.card, in: .rect(cornerRadius: 28))
+        .shadow(color: .black.opacity(0.05), radius: 16, y: 6)
+    }
+}
+
+/// Apple 健康的权限不在 Vita 自己的设置页里（那里只有“无线数据”），只能在健康 App 或系统设置的健康分区里改。
+enum HealthApp {
+    /// 告诉用户在哪里改权限；健康 App 的路径在各版本 iOS 上最稳定。
+    static let permissionPath = "健康 App › 右上角头像 › 隐私 › App › Vita"
+
+    static func open() {
+        if let url = URL(string: "x-apple-health://") {
+            UIApplication.shared.open(url)
+        }
     }
 }

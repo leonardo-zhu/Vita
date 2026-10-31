@@ -33,6 +33,7 @@ final class HealthService {
         var snapshot = HealthSnapshot.empty
         if store.isAvailable {
             snapshot.authorizationRequested = await store.hasRequestedAuthorization()
+            snapshot.writeDenied = store.writeAuthorization() == .denied
             snapshot.bodyMassKg = await read { try await self.store.latestBodyMassKg() }
             snapshot.heightCm = await read { try await self.store.latestHeightCm() }
             snapshot.bodyFatFraction = await read { try await self.store.latestBodyFatFraction() }

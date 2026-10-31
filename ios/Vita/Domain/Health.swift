@@ -44,10 +44,19 @@ struct HealthSnapshot: Equatable, Codable, Sendable {
     var sleepHours: HealthReading<Decimal>
     /// 是否已向用户请求过 HealthKit 授权；未请求时各项都是 noData。
     var authorizationRequested: Bool
+    /// 用户拒绝了写入。iOS 不告诉 App 读取是否被拒，写入被拒是唯一能确定的“没有授权”信号。
+    var writeDenied: Bool = false
+
+    /// 请求过授权但什么都读不到，且写入被拒：基本可以判定用户没有允许，应引导去设置而不是显示一排空数据。
+    var accessLikelyDenied: Bool {
+        authorizationRequested && writeDenied
+            && bodyMassKg.source != .healthKit && heightCm.source != .healthKit && bodyFatFraction.value == nil
+            && activeEnergyKcal.value == nil && sleepHours.value == nil
+    }
 
     static let empty = HealthSnapshot(
         bodyMassKg: .noData, heightCm: .noData, bodyFatFraction: .noData, dateOfBirth: .noData,
-        sex: .noData, activeEnergyKcal: .noData, sleepHours: .noData, authorizationRequested: false
+        sex: .noData, activeEnergyKcal: .noData, sleepHours: .noData, authorizationRequested: false, writeDenied: false
     )
 
     /// 体重指数；需要体重与身高。
