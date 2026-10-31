@@ -212,6 +212,68 @@ struct ChatOrchestratorTests {
         #expect(input[2] == .assistant("是全脂还是脱脂？"))
     }
 
+    @Test func labelPhotoSendsRecognizedTextNotTheImage() async throws {
+        let client = ScriptedLLMClient([
+            .success([.textDelta("这是什么牌子的？"), done]),
+            .success([.textDelta("好的"), done]),
+        ])
+        var container = try AppContainer.inMemory(referenceFoods: try Fixtures.referenceFoods())
+        container.llmClient = client
+        container.textRecognizer = StubTextRecognizer(lines: [
+            RecognizedTextLine(text: "营养成分表", x: 0.1, y: 0.95, width: 0.5, height: 0.04),
+            RecognizedTextLine(text: "项目", x: 0.05, y: 0.85, width: 0.2, height: 0.04),
+            RecognizedTextLine(text: "每100毫升", x: 0.4, y: 0.85, width: 0.25, height: 0.04),
+            RecognizedTextLine(text: "能量", x: 0.05, y: 0.75, width: 0.2, height: 0.04),
+            RecognizedTextLine(text: "272千焦", x: 0.4, y: 0.75, width: 0.25, height: 0.04),
+            RecognizedTextLine(text: "蛋白质", x: 0.05, y: 0.65, width: 0.2, height: 0.04),
+            RecognizedTextLine(text: "3.2克", x: 0.4, y: 0.65, width: 0.25, height: 0.04),
+        ])
+        let services = AppServices(container: container, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
+        let orchestrator = ChatOrchestrator(services: services, client: client, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
+
+        let image = Data("fake-jpeg-bytes".utf8)
+        let scan = try await services.labels.scan(image)
+        _ = try await orchestrator.send("", on: Fixtures.day, labelScan: scan.scanID)
+
+        guard case .user(let sent) = client.requests[0].input.last else { Issue.record("no user input"); return }
+        #expect(sent.contains("labelScanId: \(scan.scanID.uuidString)"))
+        #expect(sent.contains("能量"))
+        #expect(sent.contains("每100毫升"))
+        // 原图与本地路径都不交给模型。
+        #expect(!sent.contains("fake-jpeg-bytes"))
+        #expect(!sent.contains(scan.imageReference))
+
+        let history = try services.chatHistory.messages(on: Fixtures.day)
+        #expect(history.first?.cardRef == .label(scan.scanID))
+
+        // 下一轮重放历史时识别结果还在，模型仍拿得到 labelScanId。
+        _ = try await orchestrator.send("是伊利纯牛奶", on: Fixtures.day)
+        guard case .user(let replayed) = client.requests[1].input.first else { Issue.record("no history"); return }
+        #expect(replayed.contains("labelScanId: \(scan.scanID.uuidString)"))
+        #expect(ChatCardRef(rawValue: ChatCardRef.label(scan.scanID).rawValue) == .label(scan.scanID))
+    }
+
+    /// 个人库不做字符串匹配：整库进上下文，搜索工具也返回整库，由模型做语义匹配（PRD §3.1）。
+    @Test func personalLibraryIsGivenWholeToTheModel() async throws {
+        let (services, orchestrator, client) = try make([
+            .success([call("c1", "searchPersonalFoods", #"{"query":"原味的那个脆片"}"#), done]),
+            .success([.textDelta("好的"), done]),
+        ])
+        let version = FoodVersionDraft(
+            basis: FoodVersionBasis(quantity: Quantity(amount: 100, unit: .gram), nutrients: NutrientValues(energyKcal: 411, proteinG: 10.5, fatG: 15.2, carbohydrateG: 62)),
+            sourceKind: .manualEntry
+        )
+        _ = try services.foods.apply(.createProduct(FoodProductDraft(name: "燕麦脆（原味）", brandOrSupplier: nil, package: Quantity(amount: 300, unit: .gram), note: nil), version: version))
+        let productID = try #require(try services.foods.products().first?.id)
+
+        _ = try await orchestrator.send("下午吃了半包原味的那个脆片", on: Fixtures.day)
+        #expect(client.requests[0].instructions.contains("燕麦脆（原味）［productId \(productID.uuidString)］"))
+        let output = client.requests[1].input.compactMap { item -> String? in
+            if case .functionOutput(_, let output) = item { output } else { nil }
+        }.first ?? ""
+        #expect(output.contains(productID.uuidString))
+    }
+
     @Test func toolDescriptionsCanBeOverriddenButNotAdded() {
         let definitions = AgentToolCatalog.definitions(descriptions: [
             "getGoals": ToolPrompt(version: 2, description: "新描述"),

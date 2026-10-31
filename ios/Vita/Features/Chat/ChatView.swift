@@ -1,5 +1,7 @@
 import Observation
+import PhotosUI
 import SwiftUI
+import UIKit
 
 @MainActor
 @Observable
@@ -23,6 +25,12 @@ final class ChatModel {
     private(set) var steps: [ChatProgress.Step] = []
     /// 发送中的用户消息：一轮成功后才和回复一起保存，先在界面上显示。
     private(set) var outgoing: String?
+    /// 发送中消息附带的标签照片，只用于显示。
+    private(set) var outgoingImage: UIImage?
+    /// 待发送的营养标签照片（已压缩的 JPEG）；发送时先在本机识别，再把识别结果交给模型。
+    private(set) var attachment: Data?
+    /// 缩略图缓存：在视图取值时写入，不参与界面刷新。
+    @ObservationIgnored private var thumbnails: [UUID: UIImage] = [:]
     private(set) var pending: PendingSnapshot?
     /// 模型提到了别的日期：只提示切换，不自动跳转（TDD §5.2）。
     private(set) var requestedDate: LocalDate?
@@ -41,7 +49,46 @@ final class ChatModel {
 
     var today: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
     var isSending: Bool { streamingText != nil }
-    var canSend: Bool { !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var canSend: Bool { !isSending && (attachment != nil || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+    var attachmentImage: UIImage? { attachment.flatMap(UIImage.init(data:)) }
+
+    /// 选好照片后先放在输入框上方，用户可以再补一句（如品名、喝了多少）再发。
+    func attach(_ image: UIImage) {
+        attachment = Self.compressed(image)
+    }
+
+    func removeAttachment() {
+        attachment = nil
+    }
+
+    private static func scaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+        let scale = min(1, maxSide / max(image.size.width, image.size.height, 1))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        return UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+    }
+
+    /// 长边压到 2000 像素以内：足够本地识别，也不占太多空间。原图只存本机。
+    private static func compressed(_ image: UIImage) -> Data? {
+        let longest = max(image.size.width, image.size.height)
+        let scale = min(1, 2000 / max(longest, 1))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        return resized.jpegData(compressionQuality: 0.85)
+    }
+
+    /// 消息里标签照片的缩略图，按识别记录读取本机原图。
+    func labelThumbnail(_ ref: ChatCardRef) -> UIImage? {
+        guard case .label(let id) = ref else { return nil }
+        if let cached = thumbnails[id] { return cached }
+        guard let reference = try? services.labels.imageReference(forScan: id),
+              let data = try? services.labels.imageData(reference),
+              let original = UIImage(data: data) else { return nil }
+        let image = Self.scaled(original, maxSide: 440)
+        thumbnails[id] = image
+        return image
+    }
 
     func reload() {
         if followsToday { sessionDate = today }
@@ -66,15 +113,27 @@ final class ChatModel {
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
+        let image = attachment
         draft = ""
+        attachment = nil
         requestedDate = nil
         outgoing = text
+        outgoingImage = image.flatMap(UIImage.init(data:))
         streamingText = ""
-        activity = .thinking
+        activity = image == nil ? .thinking : .tool("attachNutritionLabel")
         let date = sessionDate
         sendTask = Task {
             do {
-                let result = try await orchestrator.send(text, on: date) { [weak self] progress in
+                // attachNutritionLabel：在本机保存原图并识别，模型只拿到识别出的文字与候选值。
+                var scanID: UUID?
+                if let image {
+                    do {
+                        scanID = try await services.labels.scan(image).scanID
+                    } catch {
+                        throw LabelAttachmentError.recognitionFailed
+                    }
+                }
+                let result = try await orchestrator.send(text, on: date, labelScan: scanID) { [weak self] progress in
                     self?.streamingText = progress.text
                     self?.activity = progress.activity
                     self?.thinking = progress.thinking
@@ -82,15 +141,19 @@ final class ChatModel {
                 }
                 requestedDate = result.requestedDate
             } catch {
-                // 这一轮没有保存，把原文放回输入框，方便重发。
+                // 这一轮没有保存，把原文和照片放回输入框，方便重发。
                 if draft.isEmpty { draft = text }
-                if let error = error as? LLMError {
+                if attachment == nil { attachment = image }
+                if error is LabelAttachmentError {
+                    message = "没能识别这张照片里的文字，换一张清楚些、正对营养成分表的照片试试。"
+                } else if let error = error as? LLMError {
                     message = error.userMessage
                 } else if !(error is CancellationError) {
                     message = "发送失败：\(error)"
                 }
             }
             outgoing = nil
+            outgoingImage = nil
             streamingText = nil
             activity = nil
             thinking = ""
@@ -133,6 +196,11 @@ final class ChatModel {
 
 }
 
+/// 本机识别标签照片失败（Vision 出错）。识别出空结果不算失败，交给模型去说明。
+enum LabelAttachmentError: Error {
+    case recognitionFailed
+}
+
 /// Chat 页（PRD §3.1）：按日期组织的对话。模型只能提出确认卡，记录在用户点确认后才保存。
 struct ChatView: View {
     let services: AppServices
@@ -142,6 +210,9 @@ struct ChatView: View {
     @State private var isShowingSettings = false
     @AppStorage(OnboardingState.key) private var onboardingCompleted = false
     @FocusState private var inputFocused: Bool
+    @State private var isPickingPhoto = false
+    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var isTakingPhoto = false
 
     init(services: AppServices) {
         self.services = services
@@ -174,6 +245,20 @@ struct ChatView: View {
                 }
         }
         .tint(VitaTheme.intake)
+        .photosPicker(isPresented: $isPickingPhoto, selection: $pickedPhoto, matching: .images)
+        .onChange(of: pickedPhoto) {
+            guard let item = pickedPhoto else { return }
+            pickedPhoto = nil
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                    model.attach(image)
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $isTakingPhoto) {
+            CameraPicker { image in model.attach(image) }
+                .ignoresSafeArea()
+        }
         .onAppear { model.reload() }
         .onChange(of: scenePhase) { if scenePhase == .active { model.reload() } }
     }
@@ -187,11 +272,11 @@ struct ChatView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if model.entries.isEmpty && !model.isSending { emptyState }
                     ForEach(model.entries) { entry in
-                        MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus))
+                        MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus), image: entry.cardRef.flatMap(model.labelThumbnail))
                             .id(entry.id)
                     }
                     if let text = model.outgoing {
-                        MessageRow(entry: ChatEntry(id: UUID(), role: .user, text: text, createdAt: Date()))
+                        MessageRow(entry: ChatEntry(id: UUID(), role: .user, text: text, createdAt: Date()), image: model.outgoingImage)
                             .id("outgoing")
                     }
                     if let text = model.streamingText {
@@ -292,16 +377,20 @@ struct ChatView: View {
         .animation(.smooth, value: model.pending?.id)
     }
 
-    /// 输入框与发送按钮放在同一个圆角容器里；多行时按钮贴底。
+    /// 输入框与发送按钮放在同一个圆角容器里；多行时按钮贴底。左侧的“+”用来附上营养标签照片。
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 6) {
-            TextField(model.sessionDate == model.today ? "说说吃了什么…" : "补记 \(DisplayFormat.shortDate(model.sessionDate)) 吃了什么…", text: $model.draft, axis: .vertical)
-                .font(.body)
-                .lineLimit(1...6)
-                .focused($inputFocused)
-                .padding(.leading, 16)
-                .padding(.vertical, 11)
-                .onSubmit(model.send)
+        VStack(alignment: .leading, spacing: 0) {
+            if let image = model.attachmentImage {
+                attachmentPreview(image)
+            }
+            HStack(alignment: .bottom, spacing: 2) {
+                attachMenu
+                TextField(placeholder, text: $model.draft, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(1...6)
+                    .focused($inputFocused)
+                    .padding(.vertical, 11)
+                    .onSubmit(model.send)
             Group {
                 if model.isSending {
                     Button(action: model.stop) {
@@ -327,6 +416,7 @@ struct ChatView: View {
             .padding(.trailing, 6)
             .padding(.bottom, 6)
             .animation(.smooth(duration: 0.2), value: model.canSend)
+            }
         }
         .background(VitaTheme.card, in: .rect(cornerRadius: 23))
         .overlay {
@@ -335,6 +425,54 @@ struct ChatView: View {
         }
         .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
         .animation(.smooth(duration: 0.2), value: inputFocused)
+    }
+
+    private var placeholder: String {
+        if model.attachment != nil { return "补充品名、吃了多少（可不填）" }
+        return model.sessionDate == model.today ? "说说吃了什么…" : "补记 \(DisplayFormat.shortDate(model.sessionDate)) 吃了什么…"
+    }
+
+    private var attachMenu: some View {
+        Menu {
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("拍营养标签", systemImage: "camera") { isTakingPhoto = true }
+            }
+            Button("从相册选择", systemImage: "photo.on.rectangle") { isPickingPhoto = true }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 34)
+                .background(Color.primary.opacity(0.06), in: .circle)
+        }
+        .disabled(model.isSending)
+        .padding(.leading, 6)
+        .padding(.bottom, 6)
+        .accessibilityLabel("附上营养标签照片")
+    }
+
+    private func attachmentPreview(_ image: UIImage) -> some View {
+        HStack(spacing: 10) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(.rect(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("营养标签").font(VitaType.secondary.weight(.semibold))
+                Text("发送后在本机识别，只把识别出的文字交给模型。")
+                    .font(VitaType.meta)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button("移除照片", systemImage: "xmark.circle.fill", action: model.removeAttachment)
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
     }
 
     private var datePicker: some View {
@@ -371,6 +509,8 @@ struct ChatView: View {
 private struct MessageRow: View {
     let entry: ChatEntry
     var cardStatus: PendingStatus?
+    /// 用户消息附带的营养标签照片。
+    var image: UIImage?
     /// 仅用于生成中的回复：已调用的工具、当前步骤与推理摘要。
     var steps: [ChatProgress.Step] = []
     var activity: ChatProgress.Activity?
@@ -381,13 +521,27 @@ private struct MessageRow: View {
         case .user:
             HStack {
                 Spacer(minLength: 48)
-                Text(entry.text)
-                    .font(VitaType.body)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(VitaTheme.intake, in: .rect(cornerRadius: 20))
-                    .textSelection(.enabled)
+                VStack(alignment: .trailing, spacing: 6) {
+                    if let image {
+                        // 按原比例显示，宽的标签不被裁掉。
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: 220, maxHeight: 220)
+                            .clipShape(.rect(cornerRadius: 16))
+                            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.08)) }
+                            .accessibilityLabel("营养标签照片")
+                    }
+                    if !entry.text.isEmpty {
+                        Text(entry.text)
+                            .font(VitaType.body)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(VitaTheme.intake, in: .rect(cornerRadius: 20))
+                            .textSelection(.enabled)
+                    }
+                }
             }
         case .assistant, .toolSummary:
             VStack(alignment: .leading, spacing: 6) {
@@ -414,8 +568,8 @@ private struct MessageRow: View {
                         .font(VitaType.body)
                         .textSelection(.enabled)
                 }
-                // 工具执行中的状态已在步骤清单里，这里只显示思考。
-                if let activity, activity == .thinking {
+                // 工具执行中的状态已在步骤清单里；还没有步骤时（如识别标签）也在这里显示。
+                if let activity, activity == .thinking || steps.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text(activity.label)
@@ -425,13 +579,7 @@ private struct MessageRow: View {
                     }
                     .animation(.smooth, value: activity)
                     if activity == .thinking, !thinking.isEmpty {
-                        // 只露出推理的最后几行，像在看它边想边写。
-                        Text(thinking.trimmingCharacters(in: .whitespacesAndNewlines))
-                            .font(VitaType.meta)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(4)
-                            .truncationMode(.head)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ThinkingTail(text: thinking)
                     }
                 }
                 if let cardStatus, cardStatus != .readyForConfirmation {
@@ -467,5 +615,65 @@ private struct MessageRow: View {
         case .expired: "clock.badge.xmark"
         case .readyForConfirmation: "clock"
         }
+    }
+}
+
+/// 拍营养标签：系统相机。模拟器没有相机，“+”菜单里不会出现这一项。
+private struct CameraPicker: UIViewControllerRepresentable {
+    let onImage: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: CameraPicker
+
+        init(_ parent: CameraPicker) {
+            self.parent = parent
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage { parent.onImage(image) }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
+        }
+    }
+}
+
+/// 推理摘要：最多露出四行，新内容在底部出现、旧内容向上移出并渐隐；不足四行时按内容高度显示。
+private struct ThinkingTail: View {
+    let text: String
+    @State private var overflows = false
+
+    private static let maxHeight: CGFloat = 64
+
+    var body: some View {
+        Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            .font(VitaType.meta)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: Bool.self) { $0.size.height > Self.maxHeight } action: { overflows = $0 }
+            .frame(height: overflows ? Self.maxHeight : nil, alignment: .bottom)
+            .clipped()
+            .mask {
+                LinearGradient(
+                    stops: [.init(color: overflows ? .clear : .black, location: 0), .init(color: .black, location: 0.35)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            }
+            .animation(.smooth(duration: 0.2), value: text)
     }
 }

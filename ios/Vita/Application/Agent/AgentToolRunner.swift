@@ -58,7 +58,12 @@ final class AgentToolRunner {
                 return try Self.encode(RecordOut(record))
             case "searchPersonalFoods":
                 let query = try Self.string(arguments["query"], "query")
-                return try Self.encode(["products": try services.foods.search(query).map(ProductOut.init)])
+                // 不做字符串匹配：个人库很小，整库交给模型做语义匹配（PRD §3.1 设计要点）。query 只是模型想找什么的提示。
+                _ = query
+                return try Self.encode(PersonalSearchOut(
+                    products: try services.foods.products().map(ProductOut.init),
+                    note: "这是个人食品库的全部产品。是不是用户说的那一个由你判断；有多个可能或不确定时先问用户。"
+                ))
             case "searchReferenceFoods":
                 let query = try Self.string(arguments["query"], "query")
                 let aliases: [String] = if case .array(let values) = arguments["aliases"] { values.compactMap(\.stringValue) } else { [] }
@@ -308,6 +313,11 @@ private struct ProductOut: Encodable {
         basis = product.activeVersion.map { QuantityOut($0.basis.quantity) }
         nutrientsPerBasis = product.activeVersion.map { NutrientsOut($0.basis.nutrients) }
     }
+}
+
+private struct PersonalSearchOut: Encodable {
+    var products: [ProductOut]
+    var note: String?
 }
 
 private struct ReferenceSearchOut: Encodable {

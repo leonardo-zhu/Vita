@@ -42,6 +42,14 @@ final class LabelScanService {
         }
     }
 
+    /// 识别记录里保存的文字行与候选值，用来在对话里（包括之后重放历史时）交给模型。
+    func stored(_ id: UUID) throws -> (lines: [String], candidate: NutritionLabelCandidate)? {
+        var descriptor = FetchDescriptor<NutritionLabelScan>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        guard let scan = try context.fetch(descriptor).first else { return nil }
+        return (try scan.lines(), try scan.candidate())
+    }
+
     /// 工具层用 scan ID 找到图片引用，模型无从得知或伪造本地路径。
     func imageReference(forScan id: UUID) throws -> String? {
         var descriptor = FetchDescriptor<NutritionLabelScan>(predicate: #Predicate { $0.id == id })

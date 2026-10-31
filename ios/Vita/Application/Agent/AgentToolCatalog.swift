@@ -40,7 +40,7 @@ enum AgentToolCatalog {
         ),
         Spec(
             name: "searchPersonalFoods",
-            description: "按名称或品牌在用户的个人食品库中查找，返回产品 ID、生效版本 ID、包装规格与每基准营养。个人库优先于公共参考库。",
+            description: "返回个人食品库的全部产品（产品 ID、生效版本 ID、包装规格与每基准营养），由你按语义判断用户说的是哪一个。系统上下文里已有同样的列表，通常不必调用。个人库优先于公共参考库。",
             parameters: schema(#"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"#)
         ),
         Spec(
