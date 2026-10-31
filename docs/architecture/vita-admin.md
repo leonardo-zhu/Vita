@@ -1,6 +1,6 @@
 # Vita Admin 设计（草案）：远程配置与诊断日志
 
-**状态：草案，待评审**  
+**状态：草案，待评审。** 客户端已实现 §2 的三层合并（`ConfigResolver` / `LayeredConfigProvider`）与 §9 的本地调试覆盖；§5 的拉取、§7 的验签与 Admin 本身尚未开始，待 §12 第 1、2、9 条定下。  
 **关联：** [ADR](ADR.md)（拟新增 ADR-012）、[TDD](TDD-v0.1.md) §2 / §5 / §8、[模型 Provider 集成规范](../contracts/llm-provider.md)、[Agent 工具契约](../contracts/agent-tools.md)、[Conduit（LLM Gateway）项目设计](llm-gateway-project.md)
 
 ## 1. 背景与目标
@@ -193,6 +193,8 @@ prompt 会直接改变模型行为，因此配置的**来源可信**比传输加
 - 存储：本机，非敏感；不上传。
 - 界面显示当前每个覆盖项的来源（本地 / 远程 vX / 内置），避免“不知道现在到底用的哪份”。
 - 一键清除全部覆盖。
+
+实现（2026-10-31）：设置页连点版本号五次出现“调试覆盖”卡片，可覆盖模型别名、超时秒数（5–300）与系统 prompt，每项显示来源；存在 UserDefaults（`vita.config.override`），下一轮对话开始时生效。渠道选择随远程拉取一起做。
 
 ## 10. 可观测与测试
 

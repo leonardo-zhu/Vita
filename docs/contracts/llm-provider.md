@@ -1,6 +1,7 @@
 # Vita 模型 Provider 集成规范
 
-**状态：已采纳，部分被取代（见 ADR-013）**  
+**状态：已采纳并实现，部分被取代（见 ADR-013）**  
+**实现：** `ios/Vita/Platform/LLM/`（`LLMClient`、`ResponsesClient`），契约测试见 `ios/VitaTests/ResponsesClientTests.swift`。2026-10-31 经 Conduit 别名 `vita-chat` 完成真实对话验收。  
 **对应决策：** ADR-005（部分被 ADR-013 取代）  
 **当前上游：** 经 Conduit 网关访问（上游目前为火山方舟 Volcengine Ark）
 
@@ -98,4 +99,14 @@ ChatOrchestrator
 - 不能通过模型响应绕过 Pending 确认门；
 - ~~API Key~~ **Conduit 令牌** 不出现在 error、审计或网络诊断日志。
 
-App 将响应 ID、模型别名、请求耗时、token/费用字段（若返回）作为最小诊断信息保存，但不保存令牌或完整敏感 payload。~~Provider 的远端存储/保留选项必须以方舟当时文档为准，在设置页明确展示；~~ 现行：请求固定 `store: false`，远端保留策略由 Conduit 的隐私规则约束（默认不记录内容，见 Conduit 项目文档 §7）；Vita 不依赖远端状态保存本地会话。
+## 7. 实现说明（2026-10-31）
+
+- **流式事件**：解析 `response.output_text.delta`（正文）、`response.reasoning_summary_text.delta` / `response.reasoning_text.delta`（推理摘要，只在界面展示，不保存、不回传）、`response.output_item.done`（函数调用）、`response.completed` / `response.incomplete`（完成，补发只出现在完成事件里的函数调用）、`response.failed` 与 `error`。流在没有完成事件时结束视为连接中断。
+- **非流式**：按 `output` 顺序转成同样的事件序列（`streaming` 由生效配置决定）。
+- **请求体**：`store: false`；用户与助手消息用简写形式（`role` + 字符串 `content`），函数调用与输出用 `function_call` / `function_call_output` item 原样回传。
+- **重试**：只有在尚未产出任何事件时，才按 `llm.maxRetries` 重试可重试错误（502 / 503 / 504 / 网络），间隔 1 秒，避免重复的文字或工具调用。
+- **超时**：`URLRequest.timeoutInterval` 取 `llm.timeoutSeconds`；流式时是两次数据之间的最长等待。
+- **令牌**：每次请求时从 Keychain 读取，更换令牌不必重启；缺失时不发请求，直接提示去设置。
+- **错误提示**：`LLMError.userMessage` 为每类错误给出一句中文提示；401 提示更新令牌，400 显示 Conduit 返回的原因（如别名不存在）。
+
+App 将响应 ID、模型别名、请求耗时、token/费用字段（若返回）作为最小诊断信息保存（随诊断日志一起做，尚未实现；`LLMResponseInfo` 已解析出响应 ID 与 token 数），但不保存令牌或完整敏感 payload。~~Provider 的远端存储/保留选项必须以方舟当时文档为准，在设置页明确展示；~~ 现行：请求固定 `store: false`，远端保留策略由 Conduit 的隐私规则约束（默认不记录内容，见 Conduit 项目文档 §7）；Vita 不依赖远端状态保存本地会话。

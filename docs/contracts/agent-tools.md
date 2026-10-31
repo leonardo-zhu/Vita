@@ -1,10 +1,16 @@
-# Vita Agent 工具契约（草案）
+# Vita Agent 工具契约
+
+**状态：已实现（2026-10-31）。** 客户端实现见 `ios/Vita/Application/Agent/`：`AgentToolCatalog`（工具清单与参数 schema）、`AgentToolRunner`（执行）、`ProposalToolHandler`（Propose 类）、`ChatOrchestrator`（工具循环）。
 
 ## 目标
 
 将“理解自然语言”与“改变本地数据”严格分开。模型负责结构化理解、查询与建议；客户端负责校验、Pending 生命周期、事务写入和 HealthKit 同步。
 
-模型的每次工具调用必须携带 `sessionDate`（`YYYY-MM-DD`）和 `requestId`。客户端从当前界面状态注入 `sessionDate`，而不是信任模型自行推断的日期。
+客户端从当前界面状态注入 `sessionDate`，而不是信任模型自行推断的日期。实现中的分工：
+
+- `requestId` 一律由客户端生成（同一轮的所有工具调用共用，与 `X-Request-Id` 对应），模型给的值被覆盖。
+- 模型可以省略 `sessionDate` 与 `expectedRevision`，客户端用当前值补上；模型给了别的日期则保留，由处理器返回 `requiresDateSwitch`。
+- 当前日期、revision、活跃 Pending 与当天记录 ID 已在系统上下文中提供，模型通常不必先调用 `getDaySummary`。
 
 ## 权限级别
 
@@ -34,7 +40,9 @@
 
 ### `searchPersonalFoods`
 
-输入：自然语言 `query`。输出：个人 Food Product 的小型结构化列表，含当前有效 Version、包装规格和营养基准。个人库规模小，可将列表摘要随会话上下文提供；本工具用于取得精确 ID。
+输入：自然语言 `query`。输出：**个人食品库的全部产品**（`productId`、名称、品牌、包装规格、`activeVersionId`、每基准营养），`query` 只是模型想找什么的提示，客户端不据此过滤。
+
+客户端不做字符串或模糊匹配（ADR-015、PRD §3.1）：同一份整库摘要已随系统上下文提供，由模型按语义判断用户说的是哪一个；有多个可能或不确定时先问用户。
 
 ### `searchReferenceFoods`
 
@@ -122,7 +130,7 @@
 
 ### `updateGoal`
 
-输入为一个或多个明确数值目标、单位和用户命令证据。客户端仅接受完整明确指令；建议性语言应由模型在聊天中澄清后再调用。成功后递增 Goal revision 并记录审计日志。
+输入：`energyKcal`、`proteinG`、`fatG`、`carbohydrateG` 中的一项或多项（正数，只传要改的项）和必填的 `userCommand`（用户原话，作为指令证据）。新值从当前会话日期起生效。客户端仅接受完整明确指令；建议性语言应由模型在聊天中澄清后再调用。成功后递增 Goal revision 并记录审计日志。
 
 结果必须返回**旧值与新值**，模型据此复述。没有专门的撤销机制：用户想反悔时，以明确指令（如“改回 160g”）再次调用 `updateGoal` 即可；旧值可由 `getGoals` 的 revision 历史取得。
 
@@ -132,10 +140,18 @@
 
 首次生成目标属于“一次性确认”，不走 Pending：模型展示预览，用户在目标预览卡上点击确认后由客户端调用 `commitInitialGoals` 写入（`origin = initialRecommendation`）。
 
+### 只读工具的输出
+
+- `getDaySummary`：`date`（可省略，默认会话日期；历史日期可读，`writable` 标明能否写）、`revision`、每条记录（ID、事件时间、餐次、各 Item 的 ID / 原始用量 / 标准化用量 / 两种来源 / 营养）、当天合计、生效目标、活跃 Pending。
+- `getRecordDetail`：`recordId`，只能读当前会话日期的记录。
+- `searchReferenceFoods`：`query` 与可选 `aliases`，精确命中最多返回 10 条；0 条或多条时附 `note` 提示改写或询问。
+- `getGoals`、`getHealthSnapshot`、`getGoalRecommendation`：无参数，读当前会话日期。
+- 数值保留一位小数（目标与千卡取整）。
+
 ### 手动身体数据与标签图片（client-only 入口）
 
 - `submitManualBodyMetrics`：体重、身高、体脂率、出生日期、生理性别缺失时，由 Onboarding 或设置页表单提交。仅用于目标生成，保存在目标的 evidence snapshot 中，**不写回 HealthKit**。`getHealthSnapshot` 与 `getGoalRecommendation` 返回时标注数据来源。
-- `attachNutritionLabel`：用户通过相册或相机选择营养标签图片，客户端本地存储并先做本地 OCR；只把 OCR 得到的结构化文本候选与置信信息交给模型，**原图默认不发送**（TDD §8）。模型据此调用 `proposeFoodChange`，仍需 Pending 确认。
+- `attachNutritionLabel`：用户在 Chat 输入框“+”拍照或从相册选图，发送时客户端先在本机存图并识别；识别结果作为一段“［客户端附件］”文字附在这条用户消息后：`labelScanId`、解析出的每基准候选值（含千焦原值与需留意的问题）、前 40 行识别文字，以及处理要求。**原图与本地路径都不发送**（TDD §8）。消息以 `label:<scanId>` 引用保存，之后重放历史时附件文字随之重放。只发照片时默认意图是存入个人食品库：模型应直接调用 `proposeFoodChange`（`source = nutritionLabel`），品牌、包装识别不到就留空，不先追问；仍需 Pending 确认。
 
 ## Pending 状态机
 

@@ -15,7 +15,9 @@ SwiftUI
  └─ Onboarding：权限与目标初设
         │
 Application Services
- ├─ SessionService / RecordService / FoodService / GoalService
+ ├─ ChatOrchestrator（工具循环）/ AgentToolRunner / ChatHistoryService
+ ├─ RecordService / FoodService / GoalService / DayDataService / HealthService
+ ├─ LabelScanService（attachNutritionLabel：本地存图 + OCR）
  ├─ PendingService（确认门与过期处理）
  ├─ NutritionCalculator
  └─ HealthSyncService（outbox）
@@ -78,7 +80,7 @@ docs/
 
 MVP 不需要用户账号、业务数据后端、实时协作或云端数据库。业务数据不进入任何服务端。客户端有三个网络出口：
 
-1. **模型请求：** 全部发往独立网关 Conduit（目前上游为火山方舟）。发送的内容是用户主动发给 Agent 的文本及为完成该请求所需的最小化本地数据摘要；个人食品库、健康数据和原图不可被“整库自动上传”。集成细节见 [模型 Provider 集成规范](../contracts/llm-provider.md)。
+1. **模型请求：** 全部发往独立网关 Conduit（目前上游为火山方舟）。发送的内容是用户主动发给 Agent 的文本，加上为完成该请求所需的本地数据：当天记录摘要，以及**个人食品库的结构化整库摘要**（名称、品牌、包装、ID、每基准营养；PRD §3.1 要求由模型做语义匹配，体量为几十条，可由配置 `includePersonalFoodSummary` 关闭）。健康数据只在模型调用相应工具时按需提供；营养标签原图不外发，只发本地识别出的文字。集成细节见 [模型 Provider 集成规范](../contracts/llm-provider.md)。
 2. **远程配置拉取：** 只读下发，请求不携带用户标识，见 [Vita Admin 设计](vita-admin.md)。
 3. **诊断日志上报：** 可在设置页关闭，只含元数据，不含对话、饮食、健康数据和图片。
 
@@ -177,9 +179,16 @@ personal / reference 的数值一律由客户端重算，模型即使带了数�
 | `HealthSyncMapping` | `recordId + nutrientType + HKSampleUUID` 与状态 | 删除成功后删除；权限撤销时保留待解决映射。 |
 | `HealthSyncOperation` | outbox 中的 create / replace / delete 操作、序号、重试信息 | 成功后保留最小审计结果，失败可重试。 |
 | `AuditEvent` | 操作类型、对象 ID、时间、结果、错误码、request ID | 本地技术诊断；不保存完整自由文本或原始图片。 |
-| `ChatMessage` | `id, sessionId, role(user/assistant/toolSummary), text, cardRef?, createdAt`；`cardRef` 指向 Pending 或已确认 Record 的结果卡 | 属于 DaySession，随 Session 保留，供折叠回看与继续对话；不保存 API Key、图片原文或完整工具 payload。 |
+| `ChatMessage` | `id, sessionId, role(user/assistant/toolSummary), text, cardRef?, createdAt`；`cardRef` 为 `pending:<id>`（回复附带的确认卡）、`record:<id>` 或 `label:<scanId>`（用户消息附带的营养标签照片） | 属于 DaySession，随 Session 保留，供折叠回看与继续对话；不保存 API Key、图片原文或完整工具 payload。 |
 
-发送给模型的上下文由 `ChatOrchestrator` 从 `ChatMessage` 裁剪得到：当前 `sessionDate` 的近期消息 + 当日汇总摘要 + 个人食品库摘要；超出预算的更早消息丢弃，不依赖远端 `previous_response_id`（见 [Provider 规范](../contracts/llm-provider.md) §5）。具体窗口大小是可调配置。
+发送给模型的上下文由 `ChatOrchestrator` 组装，每轮读取一次生效配置，一轮中途不切换：
+
+- **系统指令**：配置中的系统 prompt，后接客户端状态——会话日期与星期、当前本地时间与时区、当天 revision、活跃 Pending ID、当天各记录与 Item 的 ID 和原始用量、个人食品库整库摘要。
+- **历史**：当前 `sessionDate` 最近 `context.maxRecentMessages` 条用户与助手文字。工具调用不重放；附带确认卡的助手消息追加一句“［客户端注］”说明卡片结局（已确认 / 已取消 / 已过期 / 待确认），避免模型只模仿“已生成确认卡”的说法而不调用工具；带 `label:` 引用的用户消息重放时附上该次识别的文字与 `labelScanId`。
+- **工具循环**：最多 8 轮；超出则停止并提示用户换个说法。
+- **保存**：一轮成功后才同时保存用户消息与回复；失败或用户停止时都不保存，界面把原文与照片放回输入框。本轮已生成的 Pending 保留（它不是正式数据）。
+
+不依赖远端 `previous_response_id`（见 [Provider 规范](../contracts/llm-provider.md) §5）。生成中界面展示模型的推理摘要与已调用工具的步骤清单；推理内容只展示，不保存、不回传。
 
 Pending 需要落盘以便 App 重启恢复，这是 PRD 所说的“临时持久化”；它不是 Consumption Record、Food Version 或正式历史的一部分。
 
@@ -289,12 +298,13 @@ Vita UI 继续展示原始时间精度，不将代表性时间倒灌为业务事
 
 ## 8. 隐私、安全与可靠性
 
-- 业务库、标签原图和审计日志存于 app sandbox；Conduit 令牌只存 Keychain，不写入 SwiftData、日志、测试 fixture 或截图。客户端不持有上游模型 Key。
+- 业务库、标签原图和审计日志存于 app sandbox；Conduit 令牌只存 Keychain（设置页只显示末四位），不写入 SwiftData、日志、测试 fixture 或截图。客户端不持有上游模型 Key。
 - 远程配置只能改变 prompt、模型别名与运行参数，不能改变确认门、工具 schema、Conduit 地址或写入规则；配置先验签再解析，失败回退到缓存或内置默认值。
 - 诊断日志上报默认只含元数据（错误码、配置版本、耗时、token 数、轮换的匿名安装 ID），可关闭；不含任何用户内容。
-- 模型请求采用最小上下文：当前 Session 摘要、必要的个人食品候选和用户当前消息。健康原始数据只在生成目标/回答确有必要时传递，并标注来源。
+- 模型请求的上下文见 §3.4：当前 Session 摘要、个人食品库整库摘要（可配置关闭）和用户当前消息。健康原始数据只在模型调用 `getHealthSnapshot` / `getGoalRecommendation` 时传递，并标注来源。
+- 工具诊断日志用 `os.Logger`（subsystem `com.leonardo.vita`，category `agent.tools`）只记工具名与结果码，不记参数或结果内容。
 - 网络错误、模型输出无效、工具参数不合格、HealthKit 权限撤销均是可显示且可恢复的状态，不能转化成静默写入。
-- 图片解析应优先本地 OCR。若后来选择把图像发送给模型 Provider，必须在发送前提供一次明确、可理解的同意说明。
+- 营养标签：用户在输入框“+”拍照或从相册选图，图片压缩到长边 2000 px 存于 App Support，用 Vision 在本机识别；交给模型的只有识别文字、解析候选与 `labelScanId`，原图与本地路径都不外发。若后来选择把图像发送给模型 Provider，必须在发送前提供一次明确、可理解的同意说明。
 - 审计日志记录结构化操作与错误码，不默认保存完整对话。可在设置页提供“清除本地诊断日志”的维护入口，但不属于 MVP 核心界面。
 
 ## 9. 非目标与扩展点
