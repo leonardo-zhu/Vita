@@ -75,6 +75,8 @@ struct ResponsesClientTests {
     @Test func streamsTextDeltasAndCompletion() async throws {
         reset([(200, sse([
             #"{"type":"response.created","response":{"id":"r1"}}"#,
+            #"{"type":"response.output_item.added","item":{"type":"reasoning"}}"#,
+            #"{"type":"response.reasoning_summary_text.delta","delta":"想想"}"#,
             #"{"type":"response.output_text.delta","delta":"你"}"#,
             #"{"type":"response.output_text.delta","delta":"好"}"#,
             #"{"type":"response.completed","response":{"id":"r1","output":[],"usage":{"input_tokens":10,"output_tokens":2}}}"#,
@@ -82,7 +84,7 @@ struct ResponsesClientTests {
         ]))])
         let events = try await collect(client(), request())
         #expect(events == [
-            .textDelta("你"), .textDelta("好"),
+            .reasoning(""), .reasoning("想想"), .textDelta("你"), .textDelta("好"),
             .completed(LLMResponseInfo(responseID: "r1", inputTokens: 10, outputTokens: 2)),
         ])
     }

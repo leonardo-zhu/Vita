@@ -52,6 +52,8 @@ struct LLMToolDefinition: Sendable {
 }
 
 enum LLMEvent: Equatable, Sendable {
+    /// 模型的推理摘要增量（可能为空，只表示开始推理）。只在生成过程中展示，不保存、不回传。
+    case reasoning(String)
     case textDelta(String)
     case functionCall(LLMFunctionCall)
     case completed(LLMResponseInfo)

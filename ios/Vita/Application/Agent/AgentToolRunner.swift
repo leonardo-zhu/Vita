@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// 一次工具调用的结果：回给模型的 JSON，以及界面需要知道的副作用（生成了确认卡、需要切换日期）。
 struct ToolOutcome: Equatable, Sendable {
@@ -22,7 +23,22 @@ final class AgentToolRunner {
         self.timeZone = timeZone
     }
 
+    /// 诊断日志只记工具名与结果码，不记参数或结果内容（llm-provider.md §6）。
+    private static let log = Logger(subsystem: "com.leonardo.vita", category: "agent.tools")
+
     func run(_ call: LLMFunctionCall, sessionDate: LocalDate, requestID: UUID) async -> ToolOutcome {
+        let outcome = await execute(call, sessionDate: sessionDate, requestID: requestID)
+        let code = (try? JSONDecoder().decode(ToolResultCode.self, from: Data(outcome.output.utf8)))?.error?.code ?? "ok"
+        Self.log.info("tool \(call.name, privacy: .public) -> \(code, privacy: .public)")
+        return outcome
+    }
+
+    private struct ToolResultCode: Decodable {
+        struct Failure: Decodable { var code: String }
+        var error: Failure?
+    }
+
+    private func execute(_ call: LLMFunctionCall, sessionDate: LocalDate, requestID: UUID) async -> ToolOutcome {
         let arguments = (try? JSONDecoder().decode(JSONValue.self, from: Data(call.arguments.utf8))) ?? .null
         guard case .object = arguments else {
             return Self.failure("malformedArguments", "参数必须是 JSON 对象。")

@@ -8,6 +8,51 @@ struct ChatTurnResult: Equatable, Sendable {
     var goalChanged: Bool
 }
 
+/// 一轮进行中的状态：已经生成的文字，以及此刻在做什么（思考、调用哪个工具）。
+struct ChatProgress: Equatable, Sendable {
+    enum Activity: Equatable, Sendable {
+        case thinking
+        case tool(String)
+
+        var label: String {
+            switch self {
+            case .thinking: "正在思考…"
+            case .tool(let name): "正在" + Self.title(name) + "…"
+            }
+        }
+
+        /// 工具步骤的短名，用在步骤列表里。
+        static func title(_ tool: String) -> String {
+            switch tool {
+            case "getDaySummary", "getRecordDetail": "查看当天记录"
+            case "searchPersonalFoods": "查个人食品库"
+            case "searchReferenceFoods": "查公共营养库"
+            case "getGoals": "查看目标"
+            case "getHealthSnapshot": "读取健康数据"
+            case "getGoalRecommendation": "计算目标建议"
+            case "updateGoal": "修改目标"
+            case "proposeRecordChange", "proposeRecordDeletion", "proposeFoodChange": "生成确认卡"
+            default: "处理请求"
+            }
+        }
+    }
+
+    /// 这一轮已经调用过的工具，按顺序；界面列成步骤清单。
+    struct Step: Equatable, Sendable {
+        var tool: String
+        var done: Bool
+        /// 工具返回了错误（如参数不合法、需要切换日期），模型通常会据此改正。
+        var failed = false
+    }
+
+    var text: String
+    var steps: [Step] = []
+    /// nil 表示正在输出正文。
+    var activity: Activity?
+    /// 本次请求里模型的推理摘要，只在思考时展示。
+    var thinking = ""
+}
+
 /// 组装请求、驱动工具循环、保存对话（TDD §5.1）。模型只能查询与提案；确认由界面直接调用 `PendingService`，
 /// 模型在这里拿不到 `confirmPending`。每轮开始时读取一次生效配置，一轮中途不切换（vita-admin.md §5）。
 @MainActor
@@ -34,20 +79,25 @@ final class ChatOrchestrator {
         tools = AgentToolRunner(services: services, now: now, timeZone: timeZone)
     }
 
-    /// 跑完工具循环后一起保存用户消息与回复。`onText` 随流式输出给出本轮到目前为止的完整文字。
+    /// 跑完工具循环后一起保存用户消息与回复。`onProgress` 给出到目前为止的文字与当前步骤。
     /// 模型调用失败或被取消时什么都不保存，抛出错误，由界面把原文放回输入框。
     /// （这一轮里已经生成的确认卡保留：它不是正式数据，用户仍可确认或取消。）
-    func send(_ text: String, on date: LocalDate, onText: @escaping (String) -> Void = { _ in }) async throws -> ChatTurnResult {
+    func send(_ text: String, on date: LocalDate, onProgress: @escaping (ChatProgress) -> Void = { _ in }) async throws -> ChatTurnResult {
         let config = services.container.config.effectiveConfig().values
         let history = try services.chatHistory.messages(on: date)
         try services.pending.expireDue()
 
-        var input = Self.historyInput(history, limit: config.context.maxRecentMessages)
+        let pending = services.pending
+        var input = Self.historyInput(history, limit: config.context.maxRecentMessages) { ref in
+            guard case .pending(let id) = ref else { return nil }
+            return try? pending.pending(id).status
+        }
         input.append(.user(text))
         let definitions = AgentToolCatalog.definitions(descriptions: config.prompts.tools)
         let requestID = UUID()
 
         var reply = ""
+        var steps: [ChatProgress.Step] = []
         var pendingID: UUID?
         var requestedDate: LocalDate?
         var goalChanged = false
@@ -64,12 +114,20 @@ final class ChatOrchestrator {
                 streaming: config.llm.streaming
             )
             var roundText = ""
+            var thinking = ""
             var calls: [LLMFunctionCall] = []
+            // 等第一个事件时多半是模型在推理。
+            onProgress(ChatProgress(text: reply, steps: steps, activity: .thinking))
             for try await event in client.send(request) {
                 switch event {
+                case .reasoning(let delta):
+                    thinking += delta
+                    if roundText.isEmpty, !delta.isEmpty {
+                        onProgress(ChatProgress(text: reply, steps: steps, activity: .thinking, thinking: thinking))
+                    }
                 case .textDelta(let delta):
                     roundText += delta
-                    onText(Self.join(reply, roundText))
+                    onProgress(ChatProgress(text: Self.join(reply, roundText), steps: steps, activity: nil))
                 case .functionCall(let call):
                     calls.append(call)
                 case .completed:
@@ -81,7 +139,11 @@ final class ChatOrchestrator {
             guard !calls.isEmpty else { break }
 
             for call in calls {
+                steps.append(ChatProgress.Step(tool: call.name, done: false))
+                onProgress(ChatProgress(text: reply, steps: steps, activity: .tool(call.name)))
                 let outcome = await tools.run(call, sessionDate: date, requestID: requestID)
+                steps[steps.count - 1].done = true
+                steps[steps.count - 1].failed = outcome.output.hasPrefix(#"{"error""#) || outcome.output.contains(#""ok":false"#)
                 input.append(.functionCall(call))
                 input.append(.functionOutput(callID: call.callID, output: outcome.output))
                 if let id = outcome.pendingID { pendingID = id }
@@ -104,12 +166,24 @@ final class ChatOrchestrator {
     // MARK: - 上下文
 
     /// 最近的若干条用户与助手文字。工具调用不重放，模型需要时再查。
-    static func historyInput(_ history: [ChatEntry], limit: Int) -> [LLMInputItem] {
+    /// 附带确认卡的回复后面加一句客户端注记：历史里只有文字，模型会照着“已生成确认卡”的说法
+    /// 直接回答而不调用工具；注记让它看到卡片只来自工具。没有卡片的回复不加注记。
+    static func historyInput(_ history: [ChatEntry], limit: Int, cardStatus: (ChatCardRef) -> PendingStatus? = { _ in nil }) -> [LLMInputItem] {
         history.suffix(max(limit, 0)).compactMap { entry in
             switch entry.role {
-            case .user: .user(entry.text)
-            case .assistant: .assistant(entry.text)
-            case .toolSummary: nil
+            case .user:
+                return .user(entry.text)
+            case .assistant:
+                guard let ref = entry.cardRef else { return .assistant(entry.text) }
+                let status = switch cardStatus(ref) {
+                case .confirmed: "用户已确认，已保存"
+                case .cancelled: "用户已取消，没有保存"
+                case .expired: "已过期，没有保存"
+                case .readyForConfirmation, nil: "等待用户确认"
+                }
+                return .assistant(entry.text + "\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，\(status)。］")
+            case .toolSummary:
+                return nil
             }
         }
     }

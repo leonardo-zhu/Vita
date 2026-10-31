@@ -56,17 +56,28 @@ struct ChatOrchestratorTests {
 
     @Test func recordConfirmCorrectAndDeleteGoThroughTheConfirmGate() async throws {
         let (services, orchestrator, client) = try make([
-            .success([.textDelta("我查一下。"), call("c1", "searchReferenceFoods", #"{"query":"水煮蛋"}"#), done]),
+            .success([.reasoning("先查参考库"), .textDelta("我查一下。"), call("c1", "searchReferenceFoods", #"{"query":"水煮蛋"}"#), done]),
             .success([call("c2", "proposeRecordChange", eggProposal), done]),
             .success([.textDelta("请确认这条午餐。"), done]),
         ])
 
-        var streamed: [String] = []
-        let first = try await orchestrator.send("中午吃了 2 个水煮蛋，称了一共 108g", on: Fixtures.day) { streamed.append($0) }
+        var progress: [ChatProgress] = []
+        let first = try await orchestrator.send("中午吃了 2 个水煮蛋，称了一共 108g", on: Fixtures.day) { progress.append($0) }
         let pendingID = try #require(first.pendingID)
         #expect(first.reply?.cardRef == .pending(pendingID))
         #expect(first.reply?.text == "我查一下。\n\n请确认这条午餐。")
-        #expect(streamed.last == "我查一下。\n\n请确认这条午餐。")
+        #expect(progress.last?.text == "我查一下。\n\n请确认这条午餐。")
+        #expect(progress.last?.activity == nil)
+        #expect(progress.last?.steps == [
+            ChatProgress.Step(tool: "searchReferenceFoods", done: true),
+            ChatProgress.Step(tool: "proposeRecordChange", done: true),
+        ])
+        #expect(progress.contains(ChatProgress(text: "", activity: .thinking, thinking: "先查参考库")))
+        // 等待时依次提示：思考、查参考库、思考、生成确认卡、思考，最后输出正文。
+        let activities = progress.compactMap(\.activity).reduce(into: [ChatProgress.Activity]()) { result, activity in
+            if result.last != activity { result.append(activity) }
+        }
+        #expect(activities == [.thinking, .tool("searchReferenceFoods"), .thinking, .tool("proposeRecordChange"), .thinking])
         // 提案不写正式数据。
         #expect(try services.dayData.day(Fixtures.day).records.isEmpty)
 
@@ -186,6 +197,19 @@ struct ChatOrchestratorTests {
         for tool in request.tools {
             #expect(tool.parameters["type"] == .string("object"), "\(tool.name)")
         }
+    }
+
+    @Test func historyMarksRepliesThatCarriedACard() {
+        let card = UUID()
+        let history = [
+            ChatEntry(id: UUID(), role: .user, text: "早上喝了牛奶", createdAt: Fixtures.now),
+            ChatEntry(id: UUID(), role: .assistant, text: "请确认卡片。", cardRef: .pending(card), createdAt: Fixtures.now),
+            ChatEntry(id: UUID(), role: .assistant, text: "是全脂还是脱脂？", createdAt: Fixtures.now),
+        ]
+        let input = ChatOrchestrator.historyInput(history, limit: 20) { _ in .confirmed }
+        #expect(input[0] == .user("早上喝了牛奶"))
+        #expect(input[1] == .assistant("请确认卡片。\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］"))
+        #expect(input[2] == .assistant("是全脂还是脱脂？"))
     }
 
     @Test func toolDescriptionsCanBeOverriddenButNotAdded() {

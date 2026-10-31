@@ -16,6 +16,12 @@ final class ChatModel {
     private(set) var entries: [ChatEntry] = []
     /// 正在生成的回复；nil 表示没有进行中的请求。
     private(set) var streamingText: String?
+    /// 此刻在做什么（思考、查库、生成卡片）；nil 表示正在输出正文。
+    private(set) var activity: ChatProgress.Activity?
+    /// 模型此刻的推理摘要；不保存。
+    private(set) var thinking = ""
+    /// 这一轮调用过的工具；不保存。
+    private(set) var steps: [ChatProgress.Step] = []
     /// 发送中的用户消息：一轮成功后才和回复一起保存，先在界面上显示。
     private(set) var outgoing: String?
     private(set) var pending: PendingSnapshot?
@@ -65,11 +71,15 @@ final class ChatModel {
         requestedDate = nil
         outgoing = text
         streamingText = ""
+        activity = .thinking
         let date = sessionDate
         sendTask = Task {
             do {
-                let result = try await orchestrator.send(text, on: date) { [weak self] text in
-                    self?.streamingText = text
+                let result = try await orchestrator.send(text, on: date) { [weak self] progress in
+                    self?.streamingText = progress.text
+                    self?.activity = progress.activity
+                    self?.thinking = progress.thinking
+                    self?.steps = progress.steps
                 }
                 requestedDate = result.requestedDate
             } catch {
@@ -83,6 +93,9 @@ final class ChatModel {
             }
             outgoing = nil
             streamingText = nil
+            activity = nil
+            thinking = ""
+            steps = []
             reload()
         }
     }
@@ -220,7 +233,8 @@ struct ChatView: View {
     private var messages: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                // 一天的对话不长，用普通 VStack：LazyVStack 估算行高，滚到底部时会在顶部留出空白。
+                VStack(alignment: .leading, spacing: 12) {
                     if model.entries.isEmpty && !model.isSending { emptyState }
                     ForEach(model.entries) { entry in
                         MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus))
@@ -231,7 +245,7 @@ struct ChatView: View {
                             .id("outgoing")
                     }
                     if let text = model.streamingText {
-                        MessageRow(entry: ChatEntry(id: UUID(), role: .assistant, text: text, createdAt: Date()), isStreaming: true)
+                        MessageRow(entry: ChatEntry(id: UUID(), role: .assistant, text: text, createdAt: Date()), steps: model.steps, activity: model.activity, thinking: model.thinking)
                             .id("streaming")
                     }
                     if let date = model.requestedDate {
@@ -247,6 +261,9 @@ struct ChatView: View {
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: model.entries.count) { scrollToBottom(proxy) }
             .onChange(of: model.streamingText) { scrollToBottom(proxy, animated: false) }
+            // 思考摘要与步骤清单会让生成中的气泡变高，同样要跟到底部。
+            .onChange(of: model.thinking) { scrollToBottom(proxy, animated: false) }
+            .onChange(of: model.steps.count) { scrollToBottom(proxy) }
             .onChange(of: model.pending?.id) { scrollToBottom(proxy) }
             .onAppear { scrollToBottom(proxy, animated: false) }
         }
@@ -421,7 +438,10 @@ struct ChatView: View {
 private struct MessageRow: View {
     let entry: ChatEntry
     var cardStatus: PendingStatus?
-    var isStreaming = false
+    /// 仅用于生成中的回复：已调用的工具、当前步骤与推理摘要。
+    var steps: [ChatProgress.Step] = []
+    var activity: ChatProgress.Activity?
+    var thinking = ""
 
     var body: some View {
         switch entry.role {
@@ -438,12 +458,48 @@ private struct MessageRow: View {
             }
         case .assistant, .toolSummary:
             VStack(alignment: .leading, spacing: 6) {
-                if entry.text.isEmpty && isStreaming {
-                    ProgressView().padding(.vertical, 4)
-                } else {
+                if !steps.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                            HStack(spacing: 6) {
+                                if step.done {
+                                    Image(systemName: step.failed ? "exclamationmark.circle" : "checkmark.circle.fill")
+                                        .foregroundStyle(step.failed ? VitaTheme.caution : VitaTheme.intake)
+                                } else {
+                                    ProgressView().controlSize(.mini)
+                                }
+                                Text(ChatProgress.Activity.title(step.tool))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(VitaType.meta)
+                        }
+                    }
+                    .padding(.bottom, 2)
+                }
+                if !entry.text.isEmpty {
                     Text(Self.markdown(entry.text))
                         .font(VitaType.body)
                         .textSelection(.enabled)
+                }
+                // 工具执行中的状态已在步骤清单里，这里只显示思考。
+                if let activity, activity == .thinking {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(activity.label)
+                            .font(VitaType.secondary)
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.opacity)
+                    }
+                    .animation(.smooth, value: activity)
+                    if activity == .thinking, !thinking.isEmpty {
+                        // 只露出推理的最后几行，像在看它边想边写。
+                        Text(thinking.trimmingCharacters(in: .whitespacesAndNewlines))
+                            .font(VitaType.meta)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(4)
+                            .truncationMode(.head)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 if let cardStatus, cardStatus != .readyForConfirmation {
                     Label(Self.label(cardStatus), systemImage: Self.symbol(cardStatus))

@@ -222,6 +222,10 @@ struct ResponsesStreamParser {
         switch event.type {
         case "response.output_text.delta":
             return event.delta.map { [.textDelta($0)] } ?? []
+        case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+            return [.reasoning(event.delta ?? "")]
+        case "response.output_item.added":
+            return event.item?.type == "reasoning" ? [.reasoning("")] : []
         case "response.output_item.done":
             guard let item = event.item, let call = item.functionCall else { return [] }
             return emit(call)
