@@ -1,5 +1,4 @@
 import Observation
-import PhotosUI
 import SwiftUI
 
 @MainActor
@@ -132,41 +131,6 @@ final class ChatModel {
         return snapshot.status
     }
 
-    #if DEBUG
-    func runFakeAgent(_ step: FakeAgent.Step) {
-        do {
-            let day = try services.dayData.day(sessionDate)
-            fakeSend(try FakeAgent.call(step, day: day, products: try services.foods.products(), replacing: pending?.id))
-        } catch {
-            message = "\(error)"
-        }
-        reload()
-    }
-
-    /// 模拟 `attachNutritionLabel` 之后模型的下一步：本地识别图片，再按候选值提出新建食品。
-    func scanLabel(_ imageData: Data) async {
-        do {
-            let scan = try await services.labels.scan(imageData)
-            fakeSend(try FakeAgent.foodFromLabel(scan, day: try services.dayData.day(sessionDate)))
-        } catch FakeAgent.FakeAgentError.incompleteLabel(let warnings) {
-            message = "标签没有识别完整：" + warnings.joined(separator: "；")
-        } catch {
-            message = "识别失败：\(error)"
-        }
-        reload()
-    }
-
-    private func fakeSend(_ call: FakeAgent.Call) {
-        let handler = ProposalToolHandler(
-            pending: services.pending, referenceFoods: services.container.referenceFoods,
-            labels: services.labels, now: now, timeZone: timeZone
-        )
-        let result = handler.handle(tool: call.tool, arguments: call.arguments, sessionDate: sessionDate)
-        if let error = result.error {
-            message = "\(error.code)：\(error.message)"
-        }
-    }
-    #endif
 }
 
 /// Chat 页（PRD §3.1）：按日期组织的对话。模型只能提出确认卡，记录在用户点确认后才保存。
@@ -174,8 +138,6 @@ struct ChatView: View {
     let services: AppServices
     @State private var model: ChatModel
     @Environment(\.scenePhase) private var scenePhase
-    @State private var isPickingPhoto = false
-    @State private var pickedPhoto: PhotosPickerItem?
     @State private var isPickingDate = false
     @State private var isShowingSettings = false
     @FocusState private var inputFocused: Bool
@@ -199,9 +161,6 @@ struct ChatView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("选择日期", systemImage: "calendar") { isPickingDate = true }
                     }
-                    #if DEBUG
-                    ToolbarItem(placement: .topBarTrailing) { fakeAgentMenu }
-                    #endif
                 }
                 .alert("提示", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
                     Button("好", role: .cancel) {}
@@ -214,16 +173,6 @@ struct ChatView: View {
                 }
         }
         .tint(VitaTheme.intake)
-        .photosPicker(isPresented: $isPickingPhoto, selection: $pickedPhoto, matching: .images)
-        .onChange(of: pickedPhoto) {
-            guard let item = pickedPhoto else { return }
-            pickedPhoto = nil
-            #if DEBUG
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self) { await model.scanLabel(data) }
-            }
-            #endif
-        }
         .onAppear { model.reload() }
         .onChange(of: scenePhase) { if scenePhase == .active { model.reload() } }
     }
@@ -415,23 +364,6 @@ struct ChatView: View {
         .presentationDetents([.medium, .large])
     }
 
-    #if DEBUG
-    private var fakeAgentMenu: some View {
-        Menu("假 Agent", systemImage: "ladybug") {
-            Section("营养标签") {
-                Button("扫描样例营养标签", systemImage: "doc.text.viewfinder") {
-                    Task { await model.scanLabel(SampleLabelImage.render()) }
-                }
-                Button("从相册选择营养标签", systemImage: "photo") { isPickingPhoto = true }
-            }
-            Section("记录") {
-                ForEach(FakeAgent.Step.allCases, id: \.self) { step in
-                    Button(step.title) { model.runFakeAgent(step) }
-                }
-            }
-        }
-    }
-    #endif
 }
 
 /// 一条消息：用户靠右、助手靠左；助手消息支持行内 Markdown。
