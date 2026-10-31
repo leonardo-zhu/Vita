@@ -59,10 +59,22 @@ private struct RecordPreviewContent: View {
             HStack {
                 Text("合计").font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("\(DisplayFormat.energy(preview.totals.energyKcal)) · 蛋白质 \(DisplayFormat.grams(preview.totals.proteinG))")
-                    .font(.subheadline)
+                Text(DisplayFormat.energy(preview.totals.energyKcal))
+                    .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
             }
+            // 三大营养素各用 Data 页圆环的颜色。
+            HStack(spacing: 14) {
+                ForEach([Nutrient.proteinG, .fatG, .carbohydrateG], id: \.self) { nutrient in
+                    HStack(spacing: 5) {
+                        Circle().fill(VitaTheme.color(for: nutrient)).frame(width: 7, height: 7)
+                        Text(nutrient.label).foregroundStyle(.secondary)
+                        Text(DisplayFormat.grams(nutrient.value(in: preview.totals))).monospacedDigit()
+                    }
+                }
+            }
+            .font(VitaType.secondary)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
