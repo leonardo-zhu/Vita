@@ -6,27 +6,89 @@ import SwiftUI
 @Observable
 final class ChatModel {
     private let services: AppServices
+    private let orchestrator: ChatOrchestrator
     private let now: () -> Date
     private let timeZone: () -> TimeZone
 
+    /// 当前会话日期（PRD §3.1：一个 Session 对应一天）。默认跟随今天，跨午夜自动换到新的一天。
+    private(set) var sessionDate: LocalDate
+    private var followsToday = true
+    private(set) var entries: [ChatEntry] = []
+    /// 正在生成的回复；nil 表示没有进行中的请求。
+    private(set) var streamingText: String?
+    /// 发送中的用户消息：一轮成功后才和回复一起保存，先在界面上显示。
+    private(set) var outgoing: String?
     private(set) var pending: PendingSnapshot?
+    /// 模型提到了别的日期：只提示切换，不自动跳转（TDD §5.2）。
+    private(set) var requestedDate: LocalDate?
+    private(set) var hasToken = false
+    private var sendTask: Task<Void, Never>?
+    var draft = ""
     var message: String?
 
     init(services: AppServices, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         self.services = services
         self.now = now
         self.timeZone = timeZone
+        orchestrator = ChatOrchestrator(services: services, client: services.container.llmClient, now: now, timeZone: timeZone)
+        sessionDate = LocalDate(date: now(), timeZone: timeZone())
     }
 
-    /// 对话日期；按日期切换 Session 随 Phase 5 加入。
-    var sessionDate: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
+    var today: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
+    var isSending: Bool { streamingText != nil }
+    var canSend: Bool { !isSending && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     func reload() {
+        if followsToday { sessionDate = today }
+        hasToken = ((try? services.container.secrets.read(.conduitToken)) ?? nil)?.isEmpty == false
         do {
+            try services.pending.expireDue()
             pending = try services.pending.active(on: sessionDate)
+            entries = try services.chatHistory.messages(on: sessionDate)
         } catch {
-            message = "无法读取待确认内容：\(error)"
+            message = "无法读取对话：\(error)"
         }
+    }
+
+    func switchTo(_ date: LocalDate) {
+        guard !isSending else { return }
+        sessionDate = min(date, today)
+        followsToday = sessionDate == today
+        requestedDate = nil
+        reload()
+    }
+
+    func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSend else { return }
+        draft = ""
+        requestedDate = nil
+        outgoing = text
+        streamingText = ""
+        let date = sessionDate
+        sendTask = Task {
+            do {
+                let result = try await orchestrator.send(text, on: date) { [weak self] text in
+                    self?.streamingText = text
+                }
+                requestedDate = result.requestedDate
+            } catch {
+                // 这一轮没有保存，把原文放回输入框，方便重发。
+                if draft.isEmpty { draft = text }
+                if let error = error as? LLMError {
+                    message = error.userMessage
+                } else if !(error is CancellationError) {
+                    message = "发送失败：\(error)"
+                }
+            }
+            outgoing = nil
+            streamingText = nil
+            reload()
+        }
+    }
+
+    func stop() {
+        sendTask?.cancel()
     }
 
     func confirm() {
@@ -51,11 +113,17 @@ final class ChatModel {
         reload()
     }
 
+    /// 历史消息里卡片的结局：已确认、已取消或已过期。仍待确认的卡片在底部单独显示。
+    func cardStatus(_ ref: ChatCardRef) -> PendingStatus? {
+        guard case .pending(let id) = ref, let snapshot = try? services.pending.pending(id) else { return nil }
+        return snapshot.status
+    }
+
     #if DEBUG
     func runFakeAgent(_ step: FakeAgent.Step) {
         do {
             let day = try services.dayData.day(sessionDate)
-            send(try FakeAgent.call(step, day: day, products: try services.foods.products(), replacing: pending?.id))
+            fakeSend(try FakeAgent.call(step, day: day, products: try services.foods.products(), replacing: pending?.id))
         } catch {
             message = "\(error)"
         }
@@ -66,7 +134,7 @@ final class ChatModel {
     func scanLabel(_ imageData: Data) async {
         do {
             let scan = try await services.labels.scan(imageData)
-            send(try FakeAgent.foodFromLabel(scan, day: try services.dayData.day(sessionDate)))
+            fakeSend(try FakeAgent.foodFromLabel(scan, day: try services.dayData.day(sessionDate)))
         } catch FakeAgent.FakeAgentError.incompleteLabel(let warnings) {
             message = "标签没有识别完整：" + warnings.joined(separator: "；")
         } catch {
@@ -75,7 +143,7 @@ final class ChatModel {
         reload()
     }
 
-    private func send(_ call: FakeAgent.Call) {
+    private func fakeSend(_ call: FakeAgent.Call) {
         let handler = ProposalToolHandler(
             pending: services.pending, referenceFoods: services.container.referenceFoods,
             labels: services.labels, now: now, timeZone: timeZone
@@ -88,31 +156,36 @@ final class ChatModel {
     #endif
 }
 
-/// Chat 页骨架：对话随 Phase 5 接入，现在只承载当天的确认卡；Debug 构建可用“假 Agent”生成提案。
+/// Chat 页（PRD §3.1）：按日期组织的对话。模型只能提出确认卡，记录在用户点确认后才保存。
 struct ChatView: View {
+    let services: AppServices
     @State private var model: ChatModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var isPickingPhoto = false
     @State private var pickedPhoto: PhotosPickerItem?
+    @State private var isPickingDate = false
+    @State private var isShowingSettings = false
+    @FocusState private var inputFocused: Bool
 
     init(services: AppServices) {
+        self.services = services
         _model = State(initialValue: ChatModel(services: services))
     }
 
     var body: some View {
         NavigationStack {
-            ContentUnavailableView("对话即将上线", systemImage: "bubble.left.and.bubble.right", description: Text("模型接入后，在这里用自然语言记录饮食。"))
-                .safeAreaInset(edge: .bottom) {
-                    if let pending = model.pending {
-                        PendingCardView(pending: pending, onConfirm: model.confirm, onCancel: model.cancel)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 8)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-                }
-                .animation(.smooth, value: model.pending?.id)
-                .navigationTitle("Chat")
+            messages
+                .safeAreaInset(edge: .bottom) { bottomBar }
+                .background { VitaTheme.background }
+                .navigationTitle(model.sessionDate == model.today ? "今天" : DisplayFormat.date(model.sessionDate))
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("设置", systemImage: "gearshape") { isShowingSettings = true }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("选择日期", systemImage: "calendar") { isPickingDate = true }
+                    }
                     #if DEBUG
                     ToolbarItem(placement: .topBarTrailing) { fakeAgentMenu }
                     #endif
@@ -122,7 +195,12 @@ struct ChatView: View {
                 } message: {
                     Text(model.message ?? "")
                 }
+                .sheet(isPresented: $isPickingDate) { datePicker }
+                .sheet(isPresented: $isShowingSettings, onDismiss: model.reload) {
+                    SettingsView(services: services)
+                }
         }
+        .tint(VitaTheme.intake)
         .photosPicker(isPresented: $isPickingPhoto, selection: $pickedPhoto, matching: .images)
         .onChange(of: pickedPhoto) {
             guard let item = pickedPhoto else { return }
@@ -135,6 +213,143 @@ struct ChatView: View {
         }
         .onAppear { model.reload() }
         .onChange(of: scenePhase) { if scenePhase == .active { model.reload() } }
+    }
+
+    // MARK: - 消息列表
+
+    private var messages: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if model.entries.isEmpty && !model.isSending { emptyState }
+                    ForEach(model.entries) { entry in
+                        MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus))
+                            .id(entry.id)
+                    }
+                    if let text = model.outgoing {
+                        MessageRow(entry: ChatEntry(id: UUID(), role: .user, text: text, createdAt: Date()))
+                            .id("outgoing")
+                    }
+                    if let text = model.streamingText {
+                        MessageRow(entry: ChatEntry(id: UUID(), role: .assistant, text: text, createdAt: Date()), isStreaming: true)
+                            .id("streaming")
+                    }
+                    if let date = model.requestedDate {
+                        Button("切换到 \(DisplayFormat.date(date))", systemImage: "calendar") { model.switchTo(date) }
+                            .glassButton()
+                            .frame(maxWidth: .infinity)
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: model.entries.count) { scrollToBottom(proxy) }
+            .onChange(of: model.streamingText) { scrollToBottom(proxy, animated: false) }
+            .onChange(of: model.pending?.id) { scrollToBottom(proxy) }
+            .onAppear { scrollToBottom(proxy, animated: false) }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        if animated {
+            withAnimation(.smooth) { proxy.scrollTo("bottom", anchor: .bottom) }
+        } else {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if !model.hasToken {
+            InvitationCard(
+                symbol: "key.fill",
+                tint: VitaTheme.protein,
+                title: "连接模型服务",
+                message: "填入 Conduit 访问令牌后，就可以用对话记录饮食。",
+                actionTitle: "去设置",
+                action: { isShowingSettings = true }
+            )
+        } else {
+            InvitationCard(
+                symbol: "fork.knife",
+                tint: VitaTheme.intake,
+                title: model.sessionDate == model.today ? "今天吃了什么？" : "补记 \(DisplayFormat.date(model.sessionDate))",
+                message: "比如“中午吃了 200g 鸡胸肉和一碗米饭”。确认后才会保存。"
+            )
+        }
+    }
+
+    // MARK: - 底部
+
+    private var bottomBar: some View {
+        VStack(spacing: 8) {
+            if let pending = model.pending {
+                PendingCardView(pending: pending, onConfirm: model.confirm, onCancel: model.cancel)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            inputBar
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .animation(.smooth, value: model.pending?.id)
+    }
+
+    private var inputBar: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField(model.sessionDate == model.today ? "说说吃了什么" : "补记这一天", text: $model.draft, axis: .vertical)
+                .lineLimit(1...5)
+                .focused($inputFocused)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .glassCard(cornerRadius: 22)
+                .onSubmit(model.send)
+            if model.isSending {
+                Button("停止", systemImage: "stop.fill", action: model.stop)
+                    .labelStyle(.iconOnly)
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .glassButton()
+            } else {
+                Button("发送", systemImage: "arrow.up") {
+                    model.send()
+                }
+                .labelStyle(.iconOnly)
+                .font(.title3.weight(.semibold))
+                .frame(width: 44, height: 44)
+                .glassButton(prominent: true)
+                .disabled(!model.canSend)
+            }
+        }
+    }
+
+    private var datePicker: some View {
+        NavigationStack {
+            DatePicker(
+                "日期",
+                selection: Binding(
+                    get: {
+                        let date = model.sessionDate
+                        return Calendar.current.date(from: DateComponents(year: date.year, month: date.month, day: date.day)) ?? Date()
+                    },
+                    set: { model.switchTo(LocalDate(date: $0, timeZone: .current)) }
+                ),
+                in: ...Date(),
+                displayedComponents: .date
+            )
+            .datePickerStyle(.graphical)
+            .padding()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("今天") { model.switchTo(model.today); isPickingDate = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { isPickingDate = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     #if DEBUG
@@ -154,4 +369,68 @@ struct ChatView: View {
         }
     }
     #endif
+}
+
+/// 一条消息：用户靠右、助手靠左；助手消息支持行内 Markdown。
+private struct MessageRow: View {
+    let entry: ChatEntry
+    var cardStatus: PendingStatus?
+    var isStreaming = false
+
+    var body: some View {
+        switch entry.role {
+        case .user:
+            HStack {
+                Spacer(minLength: 48)
+                Text(entry.text)
+                    .font(VitaType.body)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(VitaTheme.intake, in: .rect(cornerRadius: 20))
+                    .textSelection(.enabled)
+            }
+        case .assistant, .toolSummary:
+            VStack(alignment: .leading, spacing: 6) {
+                if entry.text.isEmpty && isStreaming {
+                    ProgressView().padding(.vertical, 4)
+                } else {
+                    Text(Self.markdown(entry.text))
+                        .font(VitaType.body)
+                        .textSelection(.enabled)
+                }
+                if let cardStatus, cardStatus != .readyForConfirmation {
+                    Label(Self.label(cardStatus), systemImage: Self.symbol(cardStatus))
+                        .font(VitaType.meta)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(VitaTheme.card, in: .rect(cornerRadius: 20))
+            .padding(.trailing, 48)
+        }
+    }
+
+    private static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+
+    private static func label(_ status: PendingStatus) -> String {
+        switch status {
+        case .confirmed: "已确认"
+        case .cancelled: "已取消"
+        case .expired: "已过期，没有保存"
+        case .readyForConfirmation: "待确认"
+        }
+    }
+
+    private static func symbol(_ status: PendingStatus) -> String {
+        switch status {
+        case .confirmed: "checkmark.circle.fill"
+        case .cancelled: "xmark.circle"
+        case .expired: "clock.badge.xmark"
+        case .readyForConfirmation: "clock"
+        }
+    }
 }
