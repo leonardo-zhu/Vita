@@ -64,6 +64,8 @@
 
 验收：使用真实对话完成“记录、确认、查看、修正、删除”全链路，且所有写入均通过确认门。
 
+状态（2026-10-31）：客户端接入完成，真实对话验收待用户在 Conduit 配好应用 Vita、别名 `vita-chat` 与密钥后进行。`ResponsesClient`（`URLSession` + SSE）实现 `LLMClient`：`store: false`、函数调用、`X-Request-Id`，Conduit 六类错误各有提示，只在尚未产出任何事件时按 `maxRetries` 重试。`AgentToolCatalog` 定义契约里的 11 个工具与参数 schema（远程配置只能换描述），`AgentToolRunner` 执行只读工具与 `updateGoal`，Propose 工具交给 `ProposalToolHandler`，`requestId` 由客户端生成，缺省的 `sessionDate` / `expectedRevision` 由客户端补上。`ChatOrchestrator` 每轮读一次生效配置，在系统 prompt 后附上会话日期、时间、revision、待确认卡片、当天记录与个人食品名，最多 8 轮工具调用；一轮成功后才保存用户消息与回复，失败时原文退回输入框。Chat 页按日期组织会话（日历切换、跨午夜跟随今天、模型提到别的日期时给出切换按钮），确认卡在底部，历史消息标出卡片结局。设置页填写 Conduit 令牌（Keychain），连点版本号五次打开本地调试覆盖（模型别名、超时、系统 prompt，显示每项来源）。未做：远程配置拉取与验签（托管与签名方案见 Vita Admin 设计 §12 待确认）、Onboarding、诊断日志。
+
 ## 必须覆盖的测试场景
 
 1. 生/熟鸡胸肉同时命中时必须澄清，不能选一个写入。
