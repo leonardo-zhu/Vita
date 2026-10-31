@@ -133,7 +133,7 @@ struct ToolResult: Equatable, Encodable, Sendable {
 /// 处理 `proposeRecordChange` / `proposeRecordDeletion`。只会创建或替换 Pending，不写正式数据。
 @MainActor
 final class ProposalToolHandler {
-    static let toolNames: Set<String> = ["proposeRecordChange", "proposeRecordDeletion", "proposeFoodChange"]
+    nonisolated static let toolNames: Set<String> = ["proposeRecordChange", "proposeRecordDeletion", "proposeFoodChange"]
 
     private let pending: PendingService
     private let referenceFoods: ReferenceFoodCatalog

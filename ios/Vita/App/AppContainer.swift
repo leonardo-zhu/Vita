@@ -13,17 +13,22 @@ struct AppContainer: Sendable {
     var labelImages: any LabelImageStore = InMemoryLabelImageStore()
     var textRecognizer: any TextRecognizer = StubTextRecognizer(lines: [])
     var healthStore: any HealthDataStore = FakeHealthDataStore(writeAuthorization: .notDetermined)
+    /// 测试默认不发任何网络请求。
+    var llmClient: any LLMClient = UnavailableLLMClient()
 
     static func live() throws -> AppContainer {
-        AppContainer(
+        let secrets = KeychainSecretStore()
+        let environment = try BuildEnvironment.current()
+        return AppContainer(
             modelContainer: try PersistenceStore.makeContainer(inMemory: false),
-            secrets: KeychainSecretStore(),
-            config: LayeredConfigProvider(builtin: try VitaConfig.loadBuiltin()),
-            environment: try BuildEnvironment.current(),
+            secrets: secrets,
+            config: LayeredConfigProvider(builtin: try VitaConfig.loadBuiltin(), override: DebugOverrideStore.load()),
+            environment: environment,
             referenceFoods: try ReferenceFoodLoader.load(),
             labelImages: try FileLabelImageStore.live(),
             textRecognizer: VisionTextRecognizer(),
-            healthStore: HealthKitDataStore()
+            healthStore: HealthKitDataStore(),
+            llmClient: ResponsesClient(baseURL: environment.conduitBaseURL) { try secrets.read(.conduitToken) }
         )
     }
 
@@ -53,6 +58,7 @@ final class AppServices {
     let labels: LabelScanService
     let health: HealthService
     let healthSync: HealthSyncService
+    let chatHistory: ChatHistoryService
 
     init(container: AppContainer, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         let context = container.modelContainer.mainContext
@@ -65,6 +71,7 @@ final class AppServices {
         dayData = DayDataService(context: context, referenceFoods: container.referenceFoods, goals: goals) { sync.state(for: $0) }
         foods = FoodService(context: context, referenceFoods: container.referenceFoods, now: now)
         pending = PendingService(context: context, records: records, foods: foods, now: now, timeZone: timeZone)
+        chatHistory = ChatHistoryService(context: context, now: now, timeZone: timeZone)
         labels = LabelScanService(context: context, images: container.labelImages, recognizer: container.textRecognizer, now: now)
     }
 }
