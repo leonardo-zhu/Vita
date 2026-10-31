@@ -272,14 +272,43 @@ struct ChatView: View {
                 action: { isShowingSettings = true }
             )
         } else {
-            InvitationCard(
-                symbol: "fork.knife",
-                tint: VitaTheme.intake,
-                title: model.sessionDate == model.today ? "今天吃了什么？" : "补记 \(DisplayFormat.date(model.sessionDate))",
-                message: "比如“中午吃了 200g 鸡胸肉和一碗米饭”。确认后才会保存。"
-            )
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.sessionDate == model.today ? "今天吃了什么？" : "补记 \(DisplayFormat.date(model.sessionDate))")
+                        .font(.title2.weight(.bold))
+                    Text("用平常的话说就行，Vita 会算好营养，你确认后才保存。")
+                        .font(VitaType.body)
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Self.suggestions, id: \.text) { suggestion in
+                        Button {
+                            model.draft = suggestion.text
+                            inputFocused = true
+                        } label: {
+                            Label(suggestion.text, systemImage: suggestion.symbol)
+                                .font(VitaType.body)
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(VitaTheme.card, in: .capsule)
+                                .overlay { Capsule().strokeBorder(Color.primary.opacity(0.06)) }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.top, 24)
+            .padding(.horizontal, 4)
         }
     }
+
+    /// 空状态里的示例，点一下填进输入框（不直接发送）。
+    private static let suggestions: [(symbol: String, text: String)] = [
+        ("sun.max", "中午吃了 200g 鸡胸肉和一碗米饭"),
+        ("cup.and.saucer", "早上喝了一杯牛奶，吃了两个鸡蛋"),
+        ("target", "我今天还能吃多少？"),
+    ]
 
     // MARK: - 底部
 
@@ -296,32 +325,49 @@ struct ChatView: View {
         .animation(.smooth, value: model.pending?.id)
     }
 
+    /// 输入框与发送按钮放在同一个圆角容器里；多行时按钮贴底。
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(model.sessionDate == model.today ? "说说吃了什么" : "补记这一天", text: $model.draft, axis: .vertical)
-                .lineLimit(1...5)
+        HStack(alignment: .bottom, spacing: 6) {
+            TextField(model.sessionDate == model.today ? "说说吃了什么…" : "补记 \(DisplayFormat.shortDate(model.sessionDate)) 吃了什么…", text: $model.draft, axis: .vertical)
+                .font(.body)
+                .lineLimit(1...6)
                 .focused($inputFocused)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .glassCard(cornerRadius: 22)
+                .padding(.leading, 16)
+                .padding(.vertical, 11)
                 .onSubmit(model.send)
-            if model.isSending {
-                Button("停止", systemImage: "stop.fill", action: model.stop)
-                    .labelStyle(.iconOnly)
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .glassButton()
-            } else {
-                Button("发送", systemImage: "arrow.up") {
-                    model.send()
+            Group {
+                if model.isSending {
+                    Button(action: model.stop) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(Color.primary.opacity(0.85), in: .circle)
+                    }
+                    .accessibilityLabel("停止")
+                } else {
+                    Button(action: model.send) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 34, height: 34)
+                            .background(model.canSend ? VitaTheme.intake : Color.secondary.opacity(0.35), in: .circle)
+                    }
+                    .disabled(!model.canSend)
+                    .accessibilityLabel("发送")
                 }
-                .labelStyle(.iconOnly)
-                .font(.title3.weight(.semibold))
-                .frame(width: 44, height: 44)
-                .glassButton(prominent: true)
-                .disabled(!model.canSend)
             }
+            .padding(.trailing, 6)
+            .padding(.bottom, 6)
+            .animation(.smooth(duration: 0.2), value: model.canSend)
         }
+        .background(VitaTheme.card, in: .rect(cornerRadius: 23))
+        .overlay {
+            RoundedRectangle(cornerRadius: 23)
+                .strokeBorder(inputFocused ? VitaTheme.intake.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+        .animation(.smooth(duration: 0.2), value: inputFocused)
     }
 
     private var datePicker: some View {
