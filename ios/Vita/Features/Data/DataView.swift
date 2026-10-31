@@ -157,6 +157,7 @@ struct DataView: View {
         case .day(let day):
             DayDashboard(
                 day: day,
+                isToday: day.date == model.today,
                 snapshot: model.snapshot,
                 healthAvailable: services.health.isAvailable,
                 onSetGoal: { isSettingGoal = true },
@@ -218,6 +219,7 @@ struct DataView: View {
 
 private struct DayDashboard: View {
     let day: DayData
+    let isToday: Bool
     let snapshot: HealthSnapshot?
     let healthAvailable: Bool
     let onSetGoal: () -> Void
@@ -230,7 +232,7 @@ private struct DayDashboard: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            EnergyCard(summary: day.summary, activeEnergy: snapshot?.activeEnergyKcal.value, onSetGoal: onSetGoal)
+            EnergyCard(summary: day.summary, isToday: isToday, activeEnergy: snapshot?.activeEnergyKcal.value, onSetGoal: onSetGoal)
             MacroCard(summary: day.summary)
             if needsSyncAttention { syncAttention }
             MealsSection(day: day)
@@ -242,10 +244,13 @@ private struct DayDashboard: View {
     private var syncAttention: some View {
         VStack(alignment: .leading, spacing: 10) {
             CardHeader(title: "部分记录没有同步到 Apple 健康", systemImage: "heart.slash", tint: VitaTheme.caution)
-            Text("记录已保存在 Vita。若关闭了写入权限，请到“设置 › 健康 › 数据访问与设备 › Vita”打开后重试。")
-                .font(.footnote)
+            Text("记录已保存在 Vita。若关闭了写入权限，到“\(HealthApp.permissionPath)”打开后重试。")
+                .font(VitaType.body)
                 .foregroundStyle(.secondary)
-            Button("重试同步", action: onRetrySync).glassButton()
+            HStack {
+                Button("重试同步", action: onRetrySync).glassButton()
+                Button("打开健康 App", action: HealthApp.open).glassButton()
+            }
         }
         .vitaCard(padding: 20)
     }
@@ -254,6 +259,7 @@ private struct DayDashboard: View {
 /// 主卡：还可以吃多少，并列出目标、已摄入与当日活动消耗。
 private struct EnergyCard: View {
     let summary: DaySummary
+    let isToday: Bool
     let activeEnergy: Decimal?
     let onSetGoal: () -> Void
 
@@ -261,24 +267,60 @@ private struct EnergyCard: View {
     private var target: Decimal? { summary.goal?.targets.energyKcal }
 
     var body: some View {
+        if let target {
+            goalCard(target: target)
+        } else if isToday {
+            // 没有目标时不摆一个孤零零的大号“0”，而是引导去生成目标；当天已有摄入时一并列出。
+            InvitationCard(
+                symbol: "target",
+                tint: VitaTheme.intake,
+                title: "设定每日目标",
+                message: consumed > 0
+                    ? "今天已摄入 \(DisplayFormat.energy(consumed))。设定目标后这里显示还可以吃多少。"
+                    : "按身高、体重和活动量生成，之后这里显示还可以吃多少。",
+                actionTitle: "生成每日目标",
+                action: onSetGoal
+            )
+        } else {
+            pastDayWithoutGoal
+        }
+    }
+
+    /// 目标从生效日起一直沿用；早于第一个目标的日子只显示摄入，不在这里邀请设目标，以免让人以为每天都要设。
+    /// 用紧凑的一行，不摆大号数字。
+    private var pastDayWithoutGoal: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("这天已摄入")
+                    .font(VitaType.body.weight(.medium))
+                    .foregroundStyle(VitaTheme.intake)
+                Text("这天还没有设定目标")
+                    .font(VitaType.secondary)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(DisplayFormat.number(consumed, digits: 0))
+                    .font(.title2.weight(.semibold))
+                    .monospacedDigit()
+                Text("千卡").font(VitaType.meta).foregroundStyle(.secondary)
+            }
+        }
+        .vitaCard(padding: 20)
+    }
+
+    private func goalCard(target: Decimal) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    if let target {
-                        let remaining = target - consumed
-                        Text(remaining >= 0 ? "还可以吃" : "已超出")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(remaining >= 0 ? VitaTheme.intake : VitaTheme.caution)
-                        BigNumber(value: abs(remaining), unit: "千卡")
-                    } else {
-                        Text("今日已摄入")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(VitaTheme.intake)
-                        BigNumber(value: consumed, unit: "千卡")
-                    }
+                    let remaining = target - consumed
+                    Text(remaining >= 0 ? "还可以吃" : "已超出")
+                        .font(VitaType.body.weight(.medium))
+                        .foregroundStyle(remaining >= 0 ? VitaTheme.intake : VitaTheme.caution)
+                    BigNumber(value: abs(remaining), unit: "千卡")
                 }
                 Spacer()
-                if let target, target > 0 {
+                if target > 0 {
                     let fraction = NSDecimalNumber(decimal: consumed / target).doubleValue
                     ZStack {
                         ProgressRing(fraction: fraction, tint: VitaTheme.intake, lineWidth: 12)
@@ -289,27 +331,27 @@ private struct EnergyCard: View {
                     .frame(width: 84, height: 84)
                 }
             }
-            if let target {
-                // 目标已按每日总消耗（含活动）推算，运动消耗只作参考，不再加进“还可以吃”，避免重复计算。
-                HStack(spacing: 0) {
-                    EquationTerm(value: target, label: "目标")
-                    EquationTerm(value: consumed, label: "已摄入")
-                    EquationTerm(value: activeEnergy, label: "运动消耗")
-                }
-                Button("调整目标", action: onSetGoal).font(.footnote)
-            } else {
-                Text("还没有每日目标。根据身高、体重等数据生成后，这里会显示还可以吃多少。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Button("生成每日目标", action: onSetGoal).glassButton(prominent: true)
+            // 目标已按每日总消耗（含活动）推算，运动消耗只作参考，不再加进“还可以吃”，避免重复计算。
+            HStack(spacing: 0) {
+                EquationTerm(value: target, label: "目标")
+                EquationTerm(value: consumed, label: "已摄入")
+                EquationTerm(value: activeEnergy, label: "运动消耗")
             }
-            if summary.estimatedItemCount > 0 {
-                Label("其中 \(summary.estimatedItemCount) 项为 AI 估算", systemImage: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(VitaTheme.caution)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(VitaTheme.caution.opacity(0.12), in: .capsule)
+            HStack {
+                if summary.estimatedItemCount > 0 {
+                    Label("其中 \(summary.estimatedItemCount) 项为 AI 估算", systemImage: "sparkles")
+                        .font(VitaType.meta)
+                        .foregroundStyle(VitaTheme.caution)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(VitaTheme.caution.opacity(0.12), in: .capsule)
+                }
+                Spacer()
+                // 只在今天调整，避免从过去某天新建一个从那天起生效的目标。
+                if isToday {
+                    Button("调整目标", systemImage: "slider.horizontal.3", action: onSetGoal)
+                        .font(VitaType.secondary.weight(.medium))
+                }
             }
         }
         .padding(20)
@@ -332,7 +374,7 @@ private struct BigNumber: View {
                 .font(.system(size: 48, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-            Text(unit).font(.subheadline).foregroundStyle(.secondary)
+            Text(unit).font(VitaType.body).foregroundStyle(.secondary)
         }
     }
 }
@@ -346,7 +388,7 @@ private struct EquationTerm: View {
             Text(value.map { $0.formatted(.number.precision(.fractionLength(0)).rounded(rule: .toNearestOrAwayFromZero)) } ?? "--")
                 .font(.headline)
                 .monospacedDigit()
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(VitaType.meta).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -374,9 +416,9 @@ private struct MacroCard: View {
                         }
                     }
                     .frame(width: 60, height: 60)
-                    Text(nutrient.label).font(.subheadline)
+                    Text(nutrient.label).font(VitaType.body)
                     Text(progress.target.map { "目标 " + DisplayFormat.grams($0) } ?? "未设目标")
-                        .font(.caption)
+                        .font(VitaType.meta)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
@@ -395,18 +437,12 @@ private struct MealsSection: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("饮食记录").font(.title3.weight(.semibold)).padding(.horizontal, 4)
             if day.records.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "fork.knife.circle")
-                        .font(.system(size: 40))
-                        .foregroundStyle(VitaTheme.intake.opacity(0.6))
-                    Text("这一天还没有记录").font(.headline)
-                    Text("在 Chat 里告诉 Vita 你吃了什么，确认后会出现在这里。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .vitaCard(padding: 24)
+                InvitationCard(
+                    symbol: "fork.knife",
+                    tint: VitaTheme.intake,
+                    title: "这一天还没有记录",
+                    message: "在 Chat 里说说吃了什么，确认后显示在这里。"
+                )
             }
             ForEach(day.records) { record in
                 NavigationLink {

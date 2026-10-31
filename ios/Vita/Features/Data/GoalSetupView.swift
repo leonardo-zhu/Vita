@@ -115,6 +115,7 @@ struct GoalSetupView: View {
     }
 }
 
+/// 整行可点：点一下补录或修改这一项，右侧箭头提示可以进入。
 private struct MetricRow: View {
     let metric: MissingMetric
     let value: String?
@@ -122,22 +123,37 @@ private struct MetricRow: View {
     let onEdit: () -> Void
 
     var body: some View {
-        HStack {
-            Text(metric.label).foregroundStyle(.secondary)
-            Spacer()
-            if let value {
-                Text(value).monospacedDigit()
-                Text(source == .manual ? "手动" : "健康")
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background((source == .manual ? VitaTheme.fat : Color.pink).opacity(0.15), in: .capsule)
-            } else {
-                Text("缺失").foregroundStyle(metric == .bodyMass ? VitaTheme.caution : .secondary)
+        Button(action: onEdit) {
+            HStack(spacing: 8) {
+                Text(metric.label).foregroundStyle(.secondary)
+                Spacer()
+                if let value {
+                    Text(value).monospacedDigit().foregroundStyle(.primary)
+                    Text(source == .manual ? "手动" : "健康")
+                        .font(.caption2)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background((source == .manual ? VitaTheme.fat : Color.pink).opacity(0.15), in: .capsule)
+                } else {
+                    let tint = metric == .bodyMass ? VitaTheme.caution : VitaTheme.intake
+                    Label("补录", systemImage: "plus")
+                        .font(VitaType.secondary.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(tint.opacity(0.14), in: .capsule)
+                }
+                Image(systemName: "chevron.right")
+                    .font(VitaType.meta.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            Button(value == nil ? "补录" : "修改", action: onEdit).font(.subheadline)
+            .font(VitaType.body)
+            .padding(.vertical, 6)
+            .contentShape(.rect)
         }
-        .font(.subheadline)
+        .buttonStyle(.plain)
+        .accessibilityHint(value == nil ? "补录\(metric.label)" : "修改\(metric.label)")
     }
 }
 
@@ -192,15 +208,16 @@ private struct ManualMetricForm: View {
     @State private var number = ""
     @State private var birth = Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date()
     @State private var sex: BiologicalSex = .female
+    @FocusState private var numberFocused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 switch metric {
                 case .bodyMass:
-                    TextField("体重（kg）", text: $number).keyboardType(.decimalPad)
+                    TextField("体重（kg）", text: $number).keyboardType(.decimalPad).focused($numberFocused)
                 case .height:
-                    TextField("身高（cm）", text: $number).keyboardType(.decimalPad)
+                    TextField("身高（cm）", text: $number).keyboardType(.decimalPad).focused($numberFocused)
                 case .dateOfBirth:
                     DatePicker("出生日期", selection: $birth, in: ...Date(), displayedComponents: .date)
                 case .sex:
@@ -213,6 +230,8 @@ private struct ManualMetricForm: View {
                     Text("只用于生成目标，不会写回 Apple 健康。").font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            // 打开就弹出数字键盘，不用再点一次输入框。
+            .onAppear { numberFocused = true }
             .navigationTitle("补录\(metric.label)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
