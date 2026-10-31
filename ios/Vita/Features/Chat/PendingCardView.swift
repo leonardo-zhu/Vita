@@ -44,12 +44,7 @@ private struct RecordPreviewContent: View {
     let preview: ChangePreview
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.headline)
-            Text([preview.recordLabel, DisplayFormat.eventTime(preview.eventTime)].compactMap { $0 }.uniqued().joined(separator: " · "))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
+        header
         ForEach(preview.items) { ItemLine(item: $0) }
         ForEach(preview.removedItemNames, id: \.self) { name in
             Text(name).strikethrough().foregroundStyle(.secondary)
@@ -75,6 +70,41 @@ private struct RecordPreviewContent: View {
             }
             .font(VitaType.secondary)
             .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    /// 餐次图标与名称在左，操作类型做成右侧的彩色标签，和 Data 页的记录卡一致。
+    private var header: some View {
+        let slot = MealSlot(preview.eventTime)
+        let name = preview.recordLabel ?? slot.period.label
+        let time = DisplayFormat.eventTime(preview.eventTime)
+        return HStack(spacing: 10) {
+            Image(systemName: slot.symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(slot.tint)
+                .frame(width: 34, height: 34)
+                .background(slot.tint.opacity(0.14), in: .circle)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(VitaType.title)
+                if time != name {
+                    Text(time).font(VitaType.meta).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            Text(title)
+                .font(VitaType.meta.weight(.semibold))
+                .foregroundStyle(kindTint)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(kindTint.opacity(0.12), in: .capsule)
+        }
+    }
+
+    private var kindTint: Color {
+        switch preview.kind {
+        case .create, .appendItems: VitaTheme.intake
+        case .replaceItem: VitaTheme.protein
+        case .removeItem, .deleteRecord: VitaTheme.caution
         }
     }
 
