@@ -7,6 +7,9 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # 真机签名：个人免费团队，自动签名（装到设备上的 App 7 天后需重装）。
+    DEVELOPMENT_TEAM: 7Z55C6T77Z
+    CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
