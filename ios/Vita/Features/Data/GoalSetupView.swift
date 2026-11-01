@@ -223,19 +223,29 @@ private struct Stat: View {
 private struct ManualMetricForm: View {
     let metric: MissingMetric
     let onSave: (ManualBodyMetrics) -> Void
-    @State private var number = ""
+    /// 体重用两个轮盘：整数 kg 和一位小数，与健康 App 一致。
+    @State private var weightKg = 60
+    @State private var weightTenth = 0
+    @State private var heightCm = 170
     @State private var birth = Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date()
     @State private var sex: BiologicalSex = .female
-    @FocusState private var numberFocused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 switch metric {
                 case .bodyMass:
-                    TextField("体重（kg）", text: $number).keyboardType(.decimalPad).focused($numberFocused)
+                    HStack(spacing: 0) {
+                        wheel($weightKg, 20...250)
+                        unitLabel(".")
+                        wheel($weightTenth, 0...9)
+                        unitLabel("kg")
+                    }
                 case .height:
-                    TextField("身高（cm）", text: $number).keyboardType(.decimalPad).focused($numberFocused)
+                    HStack(spacing: 0) {
+                        wheel($heightCm, 50...250)
+                        unitLabel("cm")
+                    }
                 case .dateOfBirth:
                     DatePicker("出生日期", selection: $birth, in: ...Date(), displayedComponents: .date)
                 case .sex:
@@ -248,32 +258,34 @@ private struct ManualMetricForm: View {
                     Text("只用于生成目标，不会写回 Apple 健康。").font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            // 打开就弹出数字键盘，不用再点一次输入框。
-            .onAppear { numberFocused = true }
             .navigationTitle("补录\(metric.label)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { onSave(metrics) }.disabled(!canSave)
+                    Button("保存") { onSave(metrics) }
                 }
             }
         }
     }
 
-    private var value: Decimal? { Decimal(string: number) }
-
-    private var canSave: Bool {
-        switch metric {
-        case .bodyMass, .height: value != nil
-        case .dateOfBirth, .sex: true
+    private func wheel(_ selection: Binding<Int>, _ range: ClosedRange<Int>) -> some View {
+        Picker("", selection: selection) {
+            ForEach(range, id: \.self) { Text("\($0)").monospacedDigit().tag($0) }
         }
+        .pickerStyle(.wheel)
+        .labelsHidden()
+    }
+
+    /// 单位固定在轮盘旁边，不随数字滚动。
+    private func unitLabel(_ text: String) -> some View {
+        Text(text).font(.title3.weight(.semibold)).padding(.horizontal, 4)
     }
 
     private var metrics: ManualBodyMetrics {
         var metrics = ManualBodyMetrics(enteredAt: Date())
         switch metric {
-        case .bodyMass: metrics.bodyMassKg = value
-        case .height: metrics.heightCm = value
+        case .bodyMass: metrics.bodyMassKg = Decimal(weightKg) + Decimal(weightTenth) / 10
+        case .height: metrics.heightCm = Decimal(heightCm)
         case .dateOfBirth: metrics.dateOfBirth = LocalDate(date: birth, timeZone: .current)
         case .sex: metrics.sex = sex
         }
