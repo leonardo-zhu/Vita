@@ -17,6 +17,8 @@ struct AppContainer: Sendable {
     var llmClient: any LLMClient = UnavailableLLMClient()
     /// 远程配置的本地缓存；为 nil 时不拉取远程配置（测试与预览）。
     var remoteConfigCache: (any RemoteConfigCache)?
+    /// 诊断日志；测试与预览默认不记录。
+    var diagnostics: any DiagnosticsRecording = NoDiagnostics()
 
     static func live() throws -> AppContainer {
         let secrets = KeychainSecretStore()
@@ -34,7 +36,11 @@ struct AppContainer: Sendable {
             textRecognizer: VisionTextRecognizer(),
             healthStore: HealthKitDataStore(),
             llmClient: ResponsesClient(baseURL: environment.conduitBaseURL) { try secrets.read(.conduitToken) },
-            remoteConfigCache: remoteCache
+            remoteConfigCache: remoteCache,
+            diagnostics: DiagnosticsService(
+                url: environment.diagnosticsURL, appVersion: AppVersion.current, osVersion: AppVersion.os,
+                queue: try FileDiagnosticsQueue.live()
+            )
         )
     }
 
@@ -84,7 +90,8 @@ final class AppServices {
         labels = LabelScanService(context: context, images: container.labelImages, recognizer: container.textRecognizer, now: now)
         if let cache = container.remoteConfigCache, let layered = container.config as? LayeredConfigProvider {
             remoteConfig = RemoteConfigService(
-                url: container.environment.remoteConfigURL, clientVersion: AppVersion.current, provider: layered, cache: cache
+                url: container.environment.remoteConfigURL, clientVersion: AppVersion.current, provider: layered, cache: cache,
+                diagnostics: container.diagnostics
             )
         } else {
             remoteConfig = nil

@@ -90,7 +90,65 @@ final class ChatOrchestrator {
         labelScan: UUID? = nil,
         onProgress: @escaping (ChatProgress) -> Void = { _ in }
     ) async throws -> ChatTurnResult {
+        let started = now()
+        var stats = TurnStats()
+        do {
+            let result = try await runTurn(text, on: date, labelScan: labelScan, stats: &stats, onProgress: onProgress)
+            record(stats, started: started, outcome: "ok", errorCode: nil, result: result)
+            return result
+        } catch {
+            if Task.isCancelled || error is CancellationError {
+                record(stats, started: started, outcome: "cancelled", errorCode: nil, result: nil)
+            } else {
+                let code = (error as? LLMError)?.diagnosticCode ?? "app.unexpected"
+                record(stats, started: started, outcome: "error", errorCode: code, result: nil)
+            }
+            throw error
+        }
+    }
+
+    /// 诊断日志里的一轮对话（ADR-014）：只记计数、耗时与版本，不记消息内容。
+    struct TurnStats {
+        var configVersion: String?
+        var modelAlias: String?
+        var systemPromptVersion: Int?
+        var requestID: UUID?
+        var rounds = 0
+        var toolCalls = 0
+        var tokensIn: Int?
+        var tokensOut: Int?
+        var hitMaxRounds = false
+    }
+
+    private func record(_ stats: TurnStats, started: Date, outcome: String, errorCode: String?, result: ChatTurnResult?) {
+        let createdPending = result?.pendingID != nil
+        services.container.diagnostics.record(DiagnosticEvent(
+            occurredAt: now(), configVersion: stats.configVersion, type: .chatTurn, outcome: outcome, errorCode: errorCode,
+            requestId: stats.requestID, modelAlias: stats.modelAlias, systemPromptVersion: stats.systemPromptVersion,
+            latencyMs: DiagnosticEvent.milliseconds(since: started, now: now()), rounds: stats.rounds,
+            toolCalls: stats.toolCalls, tokensIn: stats.tokensIn, tokensOut: stats.tokensOut,
+            createdPending: result == nil ? nil : createdPending,
+            claimedCardWithoutTool: result.map { !createdPending && Self.claimsCard($0.reply?.text ?? "") },
+            hitMaxRounds: stats.hitMaxRounds
+        ))
+    }
+
+    /// 回复里说“生成了确认卡”之类的话。只在这一轮没有生成卡片时才算问题（见 TDD §3.4 的观察项）。
+    static func claimsCard(_ reply: String) -> Bool {
+        reply.contains("确认卡") && (reply.contains("生成") || reply.contains("下面") || reply.contains("下方"))
+    }
+
+    private func runTurn(
+        _ text: String,
+        on date: LocalDate,
+        labelScan: UUID?,
+        stats: inout TurnStats,
+        onProgress: @escaping (ChatProgress) -> Void
+    ) async throws -> ChatTurnResult {
         let config = services.container.config.effectiveConfig().values
+        stats.configVersion = config.configVersion
+        stats.modelAlias = config.llm.modelId
+        stats.systemPromptVersion = config.prompts.system.version
         let history = try services.chatHistory.messages(on: date)
         try services.pending.expireDue()
 
@@ -106,6 +164,7 @@ final class ChatOrchestrator {
         input.append(.user(Self.userText(text, attachment: labelScan.flatMap(labelAttachment))))
         let definitions = AgentToolCatalog.definitions(descriptions: config.prompts.tools)
         let requestID = UUID()
+        stats.requestID = requestID
 
         var reply = ""
         var steps: [ChatProgress.Step] = []
@@ -114,6 +173,7 @@ final class ChatOrchestrator {
         var goalChanged = false
 
         for round in 0..<Self.maxToolRounds {
+            stats.rounds = round + 1
             let request = LLMRequest(
                 model: config.llm.modelId,
                 instructions: try instructions(config: config, date: date),
@@ -141,14 +201,16 @@ final class ChatOrchestrator {
                     onProgress(ChatProgress(text: Self.join(reply, roundText), steps: steps, activity: nil))
                 case .functionCall(let call):
                     calls.append(call)
-                case .completed:
-                    break
+                case .completed(let info):
+                    if let tokens = info.inputTokens { stats.tokensIn = (stats.tokensIn ?? 0) + tokens }
+                    if let tokens = info.outputTokens { stats.tokensOut = (stats.tokensOut ?? 0) + tokens }
                 }
             }
             reply = Self.join(reply, roundText)
             if !roundText.isEmpty { input.append(.assistant(roundText)) }
             guard !calls.isEmpty else { break }
 
+            stats.toolCalls += calls.count
             for call in calls {
                 steps.append(ChatProgress.Step(tool: call.name, done: false))
                 onProgress(ChatProgress(text: reply, steps: steps, activity: .tool(call.name)))
@@ -162,6 +224,7 @@ final class ChatOrchestrator {
                 goalChanged = goalChanged || outcome.goalChanged
             }
             if round == Self.maxToolRounds - 1 {
+                stats.hitMaxRounds = true
                 reply = Self.join(reply, "这次处理步骤太多，我先停在这里。请换个说法再试一次。")
             }
         }

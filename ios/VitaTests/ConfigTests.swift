@@ -124,12 +124,20 @@ struct BuildEnvironmentTests {
         let environment = try BuildEnvironment.current(bundle: .main)
         #expect(environment.conduitBaseURL.scheme == "https")
         #expect(environment.remoteConfigURL.absoluteString == "https://vita.r4s.leonardo-zhu.me/config/stable.json")
+        #expect(environment.diagnosticsURL.absoluteString == "https://vita.r4s.leonardo-zhu.me/api/ingest/events")
     }
 
     @Test func rejectsMissingOrInsecureRemoteConfigURL() {
         let conduit = [BuildEnvironment.conduitBaseURLKey: "https://conduit.example"]
         #expect(throws: BuildEnvironmentError.missingRemoteConfigURL) {
             try BuildEnvironment.load(from: conduit)
+        }
+        let config = conduit.merging([BuildEnvironment.remoteConfigURLKey: "https://config.example/stable.json"]) { $1 }
+        #expect(throws: BuildEnvironmentError.missingDiagnosticsURL) {
+            try BuildEnvironment.load(from: config)
+        }
+        #expect(throws: BuildEnvironmentError.invalidDiagnosticsURL("http://diag.example")) {
+            try BuildEnvironment.load(from: config.merging([BuildEnvironment.diagnosticsURLKey: "http://diag.example"]) { $1 })
         }
         #expect(throws: BuildEnvironmentError.invalidRemoteConfigURL("http://config.example/stable.json")) {
             try BuildEnvironment.load(from: conduit.merging([BuildEnvironment.remoteConfigURLKey: "http://config.example/stable.json"]) { $1 })

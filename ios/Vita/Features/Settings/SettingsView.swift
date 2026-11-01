@@ -18,11 +18,13 @@ struct SettingsView: View {
     @State private var versionTaps = 0
     @State private var showsDebug = false
     @State private var override = ConfigOverride()
+    @State private var diagnosticsEnabled = true
     @State private var resetParts = DataResetPart.defaultSelection
     @State private var pendingReset: ResetRequest?
 
     private var secrets: any SecretStore { services.container.secrets }
     private var layered: LayeredConfigProvider? { services.container.config as? LayeredConfigProvider }
+    private var diagnostics: DiagnosticsService? { services.container.diagnostics as? DiagnosticsService }
 
     var body: some View {
         NavigationStack {
@@ -57,6 +59,7 @@ struct SettingsView: View {
             loadToken()
             override = DebugOverrideStore.load() ?? ConfigOverride()
             showsDebug = override != ConfigOverride()
+            diagnosticsEnabled = diagnostics?.isEnabled ?? false
         }
     }
 
@@ -299,6 +302,15 @@ struct SettingsView: View {
                 }
             Divider().padding(.vertical, 12)
             configRow
+            if let diagnostics {
+                Divider().padding(.vertical, 12)
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("诊断日志", isOn: $diagnosticsEnabled)
+                        .onChange(of: diagnosticsEnabled) { _, enabled in diagnostics.setEnabled(enabled) }
+                    Text("只上报错误码、耗时与版本号，用来排查问题；不包含对话、饮食和健康数据。关掉后不再记录，还没发出的也会删掉。")
+                        .font(VitaType.meta).foregroundStyle(.secondary)
+                }
+            }
             if let onReplayOnboarding {
                 Divider().padding(.vertical, 12)
                 Button {

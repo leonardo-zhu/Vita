@@ -53,14 +53,19 @@ targets:
         Debug:
           CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
           REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
+          DIAGNOSTICS_URL: https://vita.r4s.leonardo-zhu.me/api/ingest/events
         Release:
           CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
           REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
+          DIAGNOSTICS_URL: https://vita.r4s.leonardo-zhu.me/api/ingest/events
   VitaTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - VitaTests
+      # 诊断上报的示例批次，与 Admin 的校验测试共用
+      - path: ../shared/diagnostics/example-batch.json
+        buildPhase: resources
     dependencies:
       - target: Vita
     settings:

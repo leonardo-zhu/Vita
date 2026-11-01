@@ -27,9 +27,18 @@ final class AgentToolRunner {
     private static let log = Logger(subsystem: "com.leonardo.vita", category: "agent.tools")
 
     func run(_ call: LLMFunctionCall, sessionDate: LocalDate, requestID: UUID) async -> ToolOutcome {
+        let started = now()
         let outcome = await execute(call, sessionDate: sessionDate, requestID: requestID)
         let code = (try? JSONDecoder().decode(ToolResultCode.self, from: Data(outcome.output.utf8)))?.error?.code ?? "ok"
         Self.log.info("tool \(call.name, privacy: .public) -> \(code, privacy: .public)")
+        let config = services.container.config.effectiveConfig().values
+        services.container.diagnostics.record(DiagnosticEvent(
+            occurredAt: now(), configVersion: config.configVersion, type: .toolCall, requestId: requestID,
+            latencyMs: DiagnosticEvent.milliseconds(since: started, now: now()),
+            tool: DiagnosticEvent.resultCode(call.name),
+            toolDescriptionVersion: config.prompts.tools[call.name]?.version,
+            resultCode: DiagnosticEvent.resultCode(code)
+        ))
         return outcome
     }
 

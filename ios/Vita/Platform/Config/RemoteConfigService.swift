@@ -50,6 +50,7 @@ final class RemoteConfigService {
     @ObservationIgnored private let provider: LayeredConfigProvider
     @ObservationIgnored private let cache: any RemoteConfigCache
     @ObservationIgnored private let http: any RemoteConfigHTTP
+    @ObservationIgnored private let diagnostics: any DiagnosticsRecording
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private var inFlight: Task<Outcome, Never>?
 
@@ -58,13 +59,15 @@ final class RemoteConfigService {
 
     init(
         url: URL, clientVersion: String, provider: LayeredConfigProvider, cache: any RemoteConfigCache,
-        http: any RemoteConfigHTTP = URLSessionRemoteConfigHTTP(), now: @escaping () -> Date = Date.init
+        http: any RemoteConfigHTTP = URLSessionRemoteConfigHTTP(), diagnostics: any DiagnosticsRecording = NoDiagnostics(),
+        now: @escaping () -> Date = Date.init
     ) {
         self.url = url
         self.clientVersion = clientVersion
         self.provider = provider
         self.cache = cache
         self.http = http
+        self.diagnostics = diagnostics
         self.now = now
         lastCheckedAt = cache.load()?.lastCheckedAt
     }
@@ -75,10 +78,12 @@ final class RemoteConfigService {
         let task = Task { await fetch() }
         inFlight = task
         isRefreshing = true
+        let started = now()
         let outcome = await task.value
         inFlight = nil
         isRefreshing = false
         lastOutcome = outcome
+        record(outcome, started: started)
         return outcome
     }
 
@@ -130,6 +135,21 @@ final class RemoteConfigService {
         } catch {
             return fail("config.cache_write", detail: error.localizedDescription)
         }
+    }
+
+    private func record(_ outcome: Outcome, started: Date) {
+        var event = DiagnosticEvent(
+            occurredAt: now(), configVersion: provider.effectiveConfig().values.configVersion, type: .configFetch,
+            latencyMs: DiagnosticEvent.milliseconds(since: started, now: now())
+        )
+        switch outcome {
+        case .updated: event.outcome = "updated"
+        case .unchanged: event.outcome = "unchanged"
+        case .failed(let code):
+            event.outcome = "failed"
+            event.errorCode = DiagnosticEvent.code(code)
+        }
+        diagnostics.record(event)
     }
 
     private func fail(_ code: String, detail: String = "") -> Outcome {

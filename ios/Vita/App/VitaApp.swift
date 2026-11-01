@@ -21,10 +21,13 @@ struct VitaApp: App {
             case .success(let services):
                 RootView(services: services)
                     .modelContainer(services.container.modelContainer)
-                    // 启动和每次回到前台都检查一次远程配置（vita-admin.md §5），不阻塞界面
+                    // 启动和每次回到前台：检查远程配置（vita-admin.md §5），发出排队的诊断日志（ADR-014）。都不阻塞界面
                     .onChange(of: scenePhase, initial: true) { _, phase in
-                        guard phase == .active, let remote = services.remoteConfig else { return }
-                        Task { await remote.refresh() }
+                        guard phase == .active else { return }
+                        if let remote = services.remoteConfig { Task { await remote.refresh() } }
+                        if let diagnostics = services.container.diagnostics as? DiagnosticsService {
+                            Task { await diagnostics.flush() }
+                        }
                     }
             case .failure(let error):
                 StartupFailureView(error: error)

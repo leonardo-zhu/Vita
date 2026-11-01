@@ -6,5 +6,7 @@
 	<string>$(CONDUIT_BASE_URL)</string>
 	<key>VitaRemoteConfigURL</key>
 	<string>$(REMOTE_CONFIG_URL)</string>
+	<key>VitaDiagnosticsURL</key>
+	<string>$(DIAGNOSTICS_URL)</string>
 </dict>
 </plist>
