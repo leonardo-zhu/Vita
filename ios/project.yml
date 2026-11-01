@@ -25,6 +25,9 @@ targets:
       - path: Resources/ReferenceFood
         excludes:
           - "*.md"
+      # 工具参数 schema，与 Admin 共用（vita-admin.md §14）
+      - path: ../shared/agent-tools/tool-parameters.json
+        buildPhase: resources
     entitlements:
       path: Vita/Vita.entitlements
       properties:

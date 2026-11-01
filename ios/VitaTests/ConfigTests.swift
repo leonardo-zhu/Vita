@@ -24,6 +24,21 @@ struct ConfigTests {
         #expect(tools.values.allSatisfy { !$0.description.isEmpty })
     }
 
+    /// 参数 schema 来自打包进 App 的 shared/agent-tools/tool-parameters.json，清单要和代码里的工具一致。
+    @Test func bundledToolSchemasCoverEveryTool() throws {
+        let specs = try AgentToolCatalog.loadSpecs(from: .main)
+        #expect(specs == AgentToolCatalog.specs)
+        #expect(Set(specs.map(\.name)) == AgentToolCatalog.names)
+        #expect(specs.count == AgentToolCatalog.names.count)
+        for spec in specs {
+            guard case .object(let schema) = spec.parameters else {
+                Issue.record("\(spec.name) 的参数不是对象")
+                continue
+            }
+            #expect(schema["type"] == .string("object"))
+        }
+    }
+
     @Test func builtinOnlyResolvesToBuiltinSources() throws {
         let config = try builtin()
         let effective = ConfigResolver.resolve(builtin: config, remote: nil, override: nil)

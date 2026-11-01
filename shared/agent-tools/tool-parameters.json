@@ -1,0 +1,485 @@
+{
+  "$comment": "暴露给模型的工具清单与参数 schema（docs/contracts/agent-tools.md）。iOS 打包进 App（AgentToolCatalog），Admin 试跑时用同一份。只随客户端发布，远程配置不能改；描述文字在 ios/Vita/Resources/DefaultConfig.json。",
+  "tools": [
+    {
+      "name": "getDaySummary",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "YYYY-MM-DD，可省略"
+          }
+        }
+      }
+    },
+    {
+      "name": "getRecordDetail",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "recordId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "recordId"
+        ]
+      }
+    },
+    {
+      "name": "searchPersonalFoods",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "searchReferenceFoods",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "getGoals",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "getHealthSnapshot",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "getGoalRecommendation",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "updateGoal",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "energyKcal": {
+            "type": "number"
+          },
+          "proteinG": {
+            "type": "number"
+          },
+          "fatG": {
+            "type": "number"
+          },
+          "carbohydrateG": {
+            "type": "number"
+          },
+          "userCommand": {
+            "type": "string",
+            "description": "用户的原话，作为指令证据"
+          }
+        },
+        "required": [
+          "userCommand"
+        ]
+      }
+    },
+    {
+      "name": "proposeRecordChange",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sessionDate": {
+            "type": "string",
+            "description": "YYYY-MM-DD，当前会话日期"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "description": "读取到的当天 revision"
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "appendItems",
+                  "replaceItem",
+                  "removeItem"
+                ]
+              },
+              "recordId": {
+                "type": "string",
+                "description": "非 create 时必填"
+              },
+              "itemId": {
+                "type": "string",
+                "description": "replaceItem / removeItem 必填"
+              },
+              "record": {
+                "type": "object",
+                "description": "create 用",
+                "properties": {
+                  "eventTime": {
+                    "$ref": "#/$defs/eventTime"
+                  },
+                  "mealLabel": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/item"
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ]
+              },
+              "items": {
+                "type": "array",
+                "description": "appendItems 用",
+                "items": {
+                  "$ref": "#/$defs/item"
+                }
+              },
+              "item": {
+                "$ref": "#/$defs/item"
+              },
+              "replacesPendingId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "intent"
+            ]
+          }
+        },
+        "required": [
+          "sessionDate",
+          "payload"
+        ],
+        "$defs": {
+          "eventTime": {
+            "type": "object",
+            "properties": {
+              "precision": {
+                "type": "string",
+                "enum": [
+                  "exact",
+                  "approximate",
+                  "mealPeriod",
+                  "dateOnly"
+                ]
+              },
+              "time": {
+                "type": "string",
+                "description": "HH:mm，exact / approximate 用"
+              },
+              "mealPeriod": {
+                "type": "string",
+                "enum": [
+                  "breakfast",
+                  "lunch",
+                  "dinner",
+                  "snack",
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "precision"
+            ]
+          },
+          "item": {
+            "type": "object",
+            "properties": {
+              "displayName": {
+                "type": "string"
+              },
+              "groupName": {
+                "type": "string",
+                "description": "可选的菜品名，如“番茄炒蛋”"
+              },
+              "originalAmountText": {
+                "type": "string",
+                "description": "用户的原始用量表达"
+              },
+              "quantity": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "description": "g / kg / ml / L / 斤 / 两 等；计数单位须先换算"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "unit"
+                ]
+              },
+              "amountSource": {
+                "type": "string",
+                "enum": [
+                  "userMeasured",
+                  "userStated",
+                  "packageConversion",
+                  "aiEstimated"
+                ]
+              },
+              "nutrition": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "personalFoodVersion",
+                      "referenceFood",
+                      "aiEstimated"
+                    ]
+                  },
+                  "foodVersionId": {
+                    "type": "string"
+                  },
+                  "referenceFoodId": {
+                    "type": "string"
+                  },
+                  "values": {
+                    "type": "object",
+                    "properties": {
+                      "energyKcal": {
+                        "type": "number"
+                      },
+                      "proteinG": {
+                        "type": "number"
+                      },
+                      "fatG": {
+                        "type": "number"
+                      },
+                      "carbohydrateG": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "estimateBasis": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              },
+              "includeInSummary": {
+                "type": "boolean",
+                "description": "盐、葱花等可设 false"
+              }
+            },
+            "required": [
+              "displayName",
+              "originalAmountText",
+              "amountSource",
+              "nutrition"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "proposeRecordDeletion",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sessionDate": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "integer"
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "recordId": {
+                "type": "string"
+              },
+              "replacesPendingId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "recordId"
+            ]
+          }
+        },
+        "required": [
+          "sessionDate",
+          "payload"
+        ]
+      }
+    },
+    {
+      "name": "proposeFoodChange",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sessionDate": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "integer"
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "createProduct",
+                  "addVersion"
+                ]
+              },
+              "productId": {
+                "type": "string"
+              },
+              "expectedActiveVersionId": {
+                "type": "string"
+              },
+              "product": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "brandOrSupplier": {
+                    "type": "string"
+                  },
+                  "package": {
+                    "type": "object",
+                    "properties": {
+                      "amount": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "unit"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "version": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "nutritionLabel",
+                      "manualEntry",
+                      "referenceDerived"
+                    ]
+                  },
+                  "labelScanId": {
+                    "type": "string"
+                  },
+                  "referenceFoodId": {
+                    "type": "string"
+                  },
+                  "basis": {
+                    "type": "object",
+                    "properties": {
+                      "amount": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "amount",
+                      "unit"
+                    ]
+                  },
+                  "values": {
+                    "type": "object",
+                    "properties": {
+                      "energyKcal": {
+                        "type": "number"
+                      },
+                      "proteinG": {
+                        "type": "number"
+                      },
+                      "fatG": {
+                        "type": "number"
+                      },
+                      "carbohydrateG": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              },
+              "replacesPendingId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "intent",
+              "version"
+            ]
+          }
+        },
+        "required": [
+          "sessionDate",
+          "payload"
+        ]
+      }
+    }
+  ]
+}
