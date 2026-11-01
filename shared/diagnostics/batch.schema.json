@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vita.leonardo-zhu.me/schemas/diagnostics-batch.schema.json",
+  "title": "Vita diagnostics batch",
+  "description": "客户端诊断日志的上报批次（vita-admin.md §11.4 / ADR-014）。只有元数据：错误码、版本、耗时、token 数与计数；不含 prompt、消息、饮食、健康数据或任何自由文本。所有对象都不允许额外字段，服务端按此拒绝。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["installId", "appVersion", "events"],
+  "properties": {
+    "installId": { "$ref": "#/$defs/uuid" },
+    "appVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "osVersion": { "type": "string", "pattern": "^\\d+(\\.\\d+){0,2}$" },
+    "events": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/event" } }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$" },
+    "code": { "type": "string", "pattern": "^[a-z][a-z0-9_.]{0,63}$" },
+    "version": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}\\.\\d+$" },
+    "count": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+    "latency": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/chatTurn" },
+        { "$ref": "#/$defs/toolCall" },
+        { "$ref": "#/$defs/configFetch" }
+      ]
+    },
+    "common": {
+      "eventId": { "$ref": "#/$defs/uuid" },
+      "occurredAt": { "type": "string", "format": "date-time", "maxLength": 40 },
+      "dataClass": { "const": "diagnostic" },
+      "configVersion": { "$ref": "#/$defs/version" }
+    },
+    "chatTurn": {
+      "description": "一轮对话（用户发一条消息到回复保存或失败）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "occurredAt", "dataClass", "type", "outcome", "latencyMs"],
+      "properties": {
+        "eventId": { "$ref": "#/$defs/uuid" },
+        "occurredAt": { "type": "string", "format": "date-time", "maxLength": 40 },
+        "dataClass": { "const": "diagnostic" },
+        "configVersion": { "$ref": "#/$defs/version" },
+        "type": { "const": "chat_turn" },
+        "outcome": { "enum": ["ok", "error", "cancelled"] },
+        "errorCode": { "$ref": "#/$defs/code" },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "modelAlias": { "type": "string", "pattern": "^[A-Za-z0-9_./:-]{1,128}$" },
+        "systemPromptVersion": { "type": "integer", "minimum": 1 },
+        "latencyMs": { "$ref": "#/$defs/latency" },
+        "rounds": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "toolCalls": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "tokensIn": { "$ref": "#/$defs/count" },
+        "tokensOut": { "$ref": "#/$defs/count" },
+        "createdPending": { "type": "boolean", "description": "这一轮生成了确认卡" },
+        "claimedCardWithoutTool": { "type": "boolean", "description": "回复说生成了确认卡，但没有调用提案工具" },
+        "hitMaxRounds": { "type": "boolean" }
+      }
+    },
+    "toolCall": {
+      "description": "一次工具执行（在手机上）。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "occurredAt", "dataClass", "type", "tool", "resultCode", "latencyMs"],
+      "properties": {
+        "eventId": { "$ref": "#/$defs/uuid" },
+        "occurredAt": { "type": "string", "format": "date-time", "maxLength": 40 },
+        "dataClass": { "const": "diagnostic" },
+        "configVersion": { "$ref": "#/$defs/version" },
+        "type": { "const": "tool_call" },
+        "requestId": { "$ref": "#/$defs/uuid" },
+        "tool": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]{0,63}$" },
+        "toolDescriptionVersion": { "type": "integer", "minimum": 1 },
+        "resultCode": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.]{0,63}$" },
+        "latencyMs": { "$ref": "#/$defs/latency" }
+      }
+    },
+    "configFetch": {
+      "description": "一次远程配置检查。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "occurredAt", "dataClass", "type", "outcome", "latencyMs"],
+      "properties": {
+        "eventId": { "$ref": "#/$defs/uuid" },
+        "occurredAt": { "type": "string", "format": "date-time", "maxLength": 40 },
+        "dataClass": { "const": "diagnostic" },
+        "configVersion": { "$ref": "#/$defs/version" },
+        "type": { "const": "config_fetch" },
+        "outcome": { "enum": ["updated", "unchanged", "failed"] },
+        "errorCode": { "$ref": "#/$defs/code" },
+        "latencyMs": { "$ref": "#/$defs/latency" }
+      }
+    }
+  }
+}

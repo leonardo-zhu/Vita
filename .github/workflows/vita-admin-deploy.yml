@@ -9,6 +9,7 @@ on:
       - "!admin/**.md"
       - "shared/config-schema/**"
       - "shared/agent-tools/**"
+      - "shared/diagnostics/**"
       - "ios/Vita/Resources/DefaultConfig.json"
       - ".github/workflows/vita-admin-deploy.yml"
   workflow_dispatch:

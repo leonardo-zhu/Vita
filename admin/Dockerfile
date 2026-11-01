@@ -1,7 +1,7 @@
 # Vita Admin：一个 Next.js standalone 服务。CI 在 ARM runner 上构建 linux/arm64。
 #
 # 构建上下文是仓库根目录（docker build -f admin/Dockerfile .）：除了 admin/，还要
-# shared/config-schema/、shared/agent-tools/ 与 ios/Vita/Resources/DefaultConfig.json，由 scripts/sync-shared.mjs 拷进 src/generated/。
+# shared/config-schema/、shared/agent-tools/、shared/diagnostics/ 与 ios/Vita/Resources/DefaultConfig.json，由 scripts/sync-shared.mjs 拷进 src/generated/。
 # 上下文只放这几样，见 Dockerfile.dockerignore。
 #
 # 运行时需要的环境变量见 .env.example。SQLite 在 /data，发布目录在 /published，都要挂成卷。
@@ -14,6 +14,7 @@ COPY admin/package.json admin/pnpm-lock.yaml admin/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY shared/config-schema /repo/shared/config-schema
 COPY shared/agent-tools /repo/shared/agent-tools
+COPY shared/diagnostics /repo/shared/diagnostics
 COPY ios/Vita/Resources/DefaultConfig.json /repo/ios/Vita/Resources/DefaultConfig.json
 COPY admin ./
 ENV NEXT_TELEMETRY_DISABLED=1

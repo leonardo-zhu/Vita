@@ -14,6 +14,8 @@ export type AuditAction =
   | 'publish'
   | 'rollback'
   | 'trial'
+  | 'install_delete'
+  | 'install_revoke'
 
 export interface AuditEntry {
   actor: string

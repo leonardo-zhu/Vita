@@ -1,0 +1,62 @@
+{
+  "installId": "6F1C2A9E-3B4D-4E5F-8A7B-9C0D1E2F3A4B",
+  "appVersion": "0.1.0",
+  "osVersion": "27.0",
+  "events": [
+    {
+      "eventId": "0B6F7C3A-1D2E-4F50-9A8B-7C6D5E4F3A21",
+      "occurredAt": "2026-11-02T03:15:00Z",
+      "dataClass": "diagnostic",
+      "configVersion": "2026-11-02.1",
+      "type": "chat_turn",
+      "outcome": "ok",
+      "requestId": "8E3D2C1B-0A9F-4E8D-B7C6-5A4B3C2D1E0F",
+      "modelAlias": "vita-chat",
+      "systemPromptVersion": 3,
+      "latencyMs": 18250,
+      "rounds": 2,
+      "toolCalls": 1,
+      "tokensIn": 5120,
+      "tokensOut": 340,
+      "createdPending": true,
+      "claimedCardWithoutTool": false,
+      "hitMaxRounds": false
+    },
+    {
+      "eventId": "1C7A8D4B-2E3F-4061-8B9C-8D7E6F5A4B32",
+      "occurredAt": "2026-11-02T03:14:52Z",
+      "dataClass": "diagnostic",
+      "configVersion": "2026-11-02.1",
+      "type": "tool_call",
+      "requestId": "8E3D2C1B-0A9F-4E8D-B7C6-5A4B3C2D1E0F",
+      "tool": "proposeRecordChange",
+      "toolDescriptionVersion": 1,
+      "resultCode": "ok",
+      "latencyMs": 42
+    },
+    {
+      "eventId": "2D8B9E5C-3F40-4172-9CAD-9E8F7A6B5C43",
+      "occurredAt": "2026-11-02T03:10:05Z",
+      "dataClass": "diagnostic",
+      "configVersion": "2026-11-02.1",
+      "type": "chat_turn",
+      "outcome": "error",
+      "errorCode": "llm.timeout",
+      "requestId": "9F4E3D2C-1B0A-4F9E-A8D7-6B5C4D3E2F10",
+      "modelAlias": "vita-chat",
+      "systemPromptVersion": 3,
+      "latencyMs": 61000,
+      "rounds": 1,
+      "toolCalls": 0
+    },
+    {
+      "eventId": "3E9CAF6D-4051-4283-ADBE-AF9081726354",
+      "occurredAt": "2026-11-02T03:00:00Z",
+      "dataClass": "diagnostic",
+      "configVersion": "2026-11-02.1",
+      "type": "config_fetch",
+      "outcome": "updated",
+      "latencyMs": 230
+    }
+  ]
+}

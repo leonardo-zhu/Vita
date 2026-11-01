@@ -15,6 +15,8 @@ const ACTIONS: Record<AuditAction, string> = {
   publish: '发布',
   rollback: '回滚',
   trial: '试跑',
+  install_delete: '删除安装的诊断数据',
+  install_revoke: '封禁 / 解封安装',
 }
 
 export default async function AuditPage() {

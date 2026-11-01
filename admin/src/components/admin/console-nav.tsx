@@ -9,6 +9,7 @@ const ITEMS = [
   { href: '/admin', label: '配置' },
   { href: '/admin/trial', label: '试跑' },
   { href: '/admin/releases', label: '发布历史' },
+  { href: '/admin/diagnostics', label: '诊断' },
   { href: '/admin/audit', label: '审计' },
   { href: '/admin/settings', label: '设置' },
 ] as const

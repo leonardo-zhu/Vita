@@ -83,6 +83,45 @@ const MIGRATIONS = [
     created_at      INTEGER NOT NULL
   );
   CREATE INDEX prompt_trials_created ON prompt_trials (created_at DESC);`,
+  // 客户端诊断日志（vita-admin.md §11.4 / §11.7）：只存白名单字段，不存自由文本；保留 30 天
+  `CREATE TABLE installs (
+    install_id   TEXT PRIMARY KEY,             -- 轮换的匿名安装 ID，不含设备标识或用户信息
+    first_seen   INTEGER NOT NULL,
+    last_seen    INTEGER NOT NULL,
+    app_version  TEXT NOT NULL,
+    os_version   TEXT,
+    revoked      INTEGER NOT NULL DEFAULT 0    -- 1 时拒收它的上报
+  );
+  CREATE TABLE diagnostic_events (
+    id                         INTEGER PRIMARY KEY,
+    event_id                   TEXT NOT NULL UNIQUE,   -- 客户端生成，重传时去重
+    received_at                INTEGER NOT NULL,
+    occurred_at                INTEGER NOT NULL,
+    install_id                 TEXT NOT NULL,
+    data_class                 TEXT NOT NULL,
+    event_type                 TEXT NOT NULL,          -- chat_turn / tool_call / config_fetch
+    outcome                    TEXT,
+    error_code                 TEXT,
+    result_code                TEXT,
+    tool                       TEXT,
+    tool_description_version   INTEGER,
+    config_version             TEXT,
+    system_prompt_version      INTEGER,
+    model_alias                TEXT,
+    request_id                 TEXT,
+    latency_ms                 INTEGER NOT NULL,
+    rounds                     INTEGER,
+    tool_calls                 INTEGER,
+    tokens_in                  INTEGER,
+    tokens_out                 INTEGER,
+    created_pending            INTEGER,
+    claimed_card_without_tool  INTEGER,
+    hit_max_rounds             INTEGER,
+    app_version                TEXT NOT NULL,
+    os_version                 TEXT
+  );
+  CREATE INDEX diagnostic_events_occurred ON diagnostic_events (occurred_at);
+  CREATE INDEX diagnostic_events_install ON diagnostic_events (install_id);`,
 ]
 
 export function dataDir(): string {

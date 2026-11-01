@@ -29,6 +29,7 @@ import {
 } from '@/server/config/service'
 import type { ValidationIssue } from '@/server/config/validate'
 import { deletePasskey, getPasskey } from '@/server/db'
+import { deleteInstall, setInstallRevoked } from '@/server/diagnostics/query'
 import { conduitConfigured, runTrials, type TrialRun, type TrialSource } from '@/server/trial'
 
 export type ActionResult =
@@ -159,4 +160,28 @@ export async function runTrialAction(input: {
   const runs = await runTrials(sources, message, input.context, actor)
   revalidatePath('/admin/trial')
   return { ok: true, runs }
+}
+
+// ---------------------------------------------------------------------------
+// 诊断日志：按安装 ID 删除或封禁（vita-admin.md §11.4）
+// ---------------------------------------------------------------------------
+
+const INSTALL_ID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/
+
+export async function deleteInstallAction(installId: string): Promise<ActionResult> {
+  const actor = await requireActor()
+  if (!INSTALL_ID.test(installId)) return { ok: false, message: '安装 ID 格式不对' }
+  const removed = deleteInstall(installId, false)
+  recordAudit({ actor: actor.name, action: 'install_delete', targetType: 'install', targetId: installId, diff: { removed }, ip: actor.ip })
+  revalidatePath('/admin/diagnostics')
+  return { ok: true, message: `已删除 ${removed} 条诊断记录` }
+}
+
+export async function setInstallRevokedAction(installId: string, revoked: boolean): Promise<ActionResult> {
+  const actor = await requireActor()
+  if (!INSTALL_ID.test(installId)) return { ok: false, message: '安装 ID 格式不对' }
+  setInstallRevoked(installId, revoked)
+  recordAudit({ actor: actor.name, action: 'install_revoke', targetType: 'install', targetId: installId, diff: { revoked }, ip: actor.ip })
+  revalidatePath('/admin/diagnostics')
+  return { ok: true, message: revoked ? '已封禁，之后的上报会被拒收' : '已解封' }
 }
