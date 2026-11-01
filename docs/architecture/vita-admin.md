@@ -245,7 +245,7 @@ prompt 会直接改变模型行为，因此配置的**来源可信**比传输加
 - Prompt 试跑：用样例输入对草稿跑一次模型，发布前验证。
 - 系统 prompt 与各工具的 `description` 都可编辑（§3.1）；工具清单与参数 schema 不可改。
 - 发布二次确认；每次操作记录操作者、时间与 diff。
-- Admin 登录：单管理员，强密码加 TOTP。管理面在公网域名上，所以登录要有失败限速。
+- Admin 登录：复用 Conduit 的方案（§11.6）。管理面在公网域名上，登录失败按 IP 限速。
 
 ### 11.3 日志分类
 
@@ -291,7 +291,7 @@ Admin 与客户端同仓库，位于 `admin/`；配置的 JSON Schema 位于 `sh
 | 存储 | SQLite（`node:sqlite`），同机文件 | 与 Conduit 一致，不额外跑数据库服务。配置版本、审计、诊断事件；`jsonb` 字段存为 JSON 文本。 |
 | 签名 | 现阶段不做（§7） | 启用时用独立的签名步骤，Web 进程不持有私钥。 |
 | 发布 | `Publisher` 接口，首个实现原子写入 R4S 上的发布目录 | 发布目录以卷挂载给 Caddy；换托管只换实现。 |
-| 登录 | 强密码加 TOTP | 个人使用阶段为单管理员。 |
+| 登录 | 复用 Conduit：账号密码 + Passkey | 单管理员，账号与 scrypt 密码哈希来自环境变量（`ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH`），不建用户表；登录后发 `SESSION_SECRET` 签名的 HttpOnly cookie，服务端不存会话；登录失败按 IP 限速；Passkey 用 `@simplewebauthn/server`。Next.js 只监听 127.0.0.1，限速信任 Caddy 的 `X-Forwarded-For`。 |
 
 ### 11.7 数据模型（草案）
 
@@ -303,7 +303,7 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 | `config_releases` | `channel`、`config_version`、`content`(jsonb)、`content_hash`、`signature`、`key_id`、`published_by`、`published_at`、`rollback_of`、`note` | 不可变；`(channel, config_version)` 唯一。回滚是新增一条内容取自旧版本的 release。 |
 | `channels` | `name`、`current_release_id` | 当前对外发布的版本指针。 |
 | `admin_audit` | `actor`、`action`、`target_type`、`target_id`、`diff`(jsonb)、`ip`、`at` | 仅追加；不允许修改与删除。 |
-| `admin_users` | 登录凭证、TOTP / Passkey 信息 | 首期单用户。 |
+| `passkeys` | 凭证 ID、公钥、计数器、名称、创建与最近使用时间 | 管理员账号本身在环境变量里，不建用户表（同 Conduit）。 |
 | `installs` | `install_id`、`first_seen`、`last_seen`、`revoked` | 匿名安装 ID，不含设备标识或用户信息。 |
 | `diagnostic_events` | `received_at`、`install_id`、`data_class`、`event_type`、`error_code`、`config_version`、`prompt_versions`、`model_alias`、`latency_ms`、`tokens_in`、`tokens_out`、`request_id`、`app_version` | 只存白名单字段，不存自由文本；按保留期清理任务删除。 |
 
@@ -322,7 +322,7 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 7. **设备鉴权**：现阶段用匿名安装 ID 加服务端限流与封禁；分发前与 Conduit 的设备注册一起改为 App Attest（§11.4）。
 8. **开发环境**：不单独建 Conduit 开发实例，Debug 与 Release 都指向 `https://conduit.r4s.leonardo-zhu.me`（`ios/project.yml`）；Conduit 不可用时沿用 Chat 页现有的错误提示。
 9. **私钥存放**：不签名，暂无私钥；启用签名时私钥不放在 Admin Web 进程里（§7）。
-10. **Admin 部署**：R4S，与 Conduit 同机、同样经 Caddy 和 CI 部署；SQLite；单管理员，强密码加 TOTP（§11.6）。
+10. **Admin 部署**：R4S，与 Conduit 同机、同样经 Caddy 和 CI 部署；SQLite；登录复用 Conduit 的账号密码 + Passkey（§11.6）。
 
 ## 13. 对现有文档的拟议改动
 
