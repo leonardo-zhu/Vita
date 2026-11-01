@@ -49,6 +49,16 @@ SQLite 在 `.data/vita-admin.db`，发布出来的文件在 `.data/published/sta
 
 确认：`curl -sI https://vita.r4s.leonardo-zhu.me/config/stable.json` 返回 200 和 `ETag`。
 
+### 改了 `.env` 之后重启
+
+compose 里镜像 tag 默认是 `latest`，服务器上没有 GHCR 的拉取凭据，直接 `up` 会去拉 `latest` 并报 `unauthorized`。用当前运行的 sha，不拉取：
+
+```bash
+ssh istoreos 'cd /opt/stacks/vita-admin && ADMIN_TAG=<当前 sha> docker compose up -d --force-recreate --pull never admin'
+```
+
+当前 sha 看 `docker compose ps` 的镜像列。
+
 ### 回退到旧镜像
 
 ```bash
