@@ -4,6 +4,7 @@ import { RotateCcw } from 'lucide-react'
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 
+import { ConfigDiffView } from '@/components/admin/config-diff-view'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -20,6 +21,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { describeChanges } from '@/lib/config-diff'
 import { formatTime } from '@/lib/format'
 import type { DraftContent, PublishedConfig } from '@/server/config/model'
 import type { ValidationIssue } from '@/server/config/validate'
@@ -32,7 +34,8 @@ interface Props {
   tools: string[]
   saved: boolean
   current: { configVersion: string; publishedAt: number; publishedBy: string } | null
-  changes: string[]
+  /** 线上版本（还没发布过时是内置默认值），草稿与它对比 */
+  baseline: DraftContent
   hasPendingChanges: boolean
   preview: PublishedConfig
   issues: ValidationIssue[]
@@ -232,6 +235,10 @@ export function ConfigEditor(props: Props) {
               ))}
             </ul>
           )}
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-medium">相对线上{current ? ` ${current.configVersion}` : '（内置默认值）'}的改动</span>
+            <ConfigDiffView before={props.baseline} after={initial} empty="已保存的草稿和线上一致。" />
+          </div>
           <details>
             <summary className="cursor-pointer text-sm text-muted-foreground">查看将要发布的 stable.json</summary>
             <pre className="mt-2 max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs">
@@ -271,7 +278,7 @@ export function ConfigEditor(props: Props) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <ul className="list-inside list-disc text-sm">
-            {props.changes.map((change) => (
+            {describeChanges(props.baseline, initial).map((change) => (
               <li key={change}>{change}</li>
             ))}
           </ul>

@@ -4,7 +4,8 @@ import { notFound } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatTime } from '@/lib/format'
-import { draftFromPublished, describeChanges } from '@/server/config/model'
+import { ConfigDiffView } from '@/components/admin/config-diff-view'
+import { draftFromPublished } from '@/server/config/model'
 import { currentRelease, getRelease, listReleases } from '@/server/config/service'
 
 import { RollbackButton } from './rollback-button'
@@ -17,9 +18,6 @@ export default async function ReleasePage({ params }: { params: Promise<{ id: st
   const isCurrent = currentRelease()?.id === release.id
   // 与上一个版本比，列出这次改了什么
   const previous = listReleases().find((other) => other.id < release.id)
-  const changes = previous
-    ? describeChanges(draftFromPublished(previous.content), draftFromPublished(release.content))
-    : null
   const rollbackOf = release.rollback_of ? getRelease(release.rollback_of) : null
 
   return (
@@ -39,19 +37,13 @@ export default async function ReleasePage({ params }: { params: Promise<{ id: st
       </p>
       <Card>
         <CardHeader>
-          <CardTitle>相对上一版的改动</CardTitle>
+          <CardTitle>相对上一版{previous && ` ${previous.config_version}`}的改动</CardTitle>
         </CardHeader>
         <CardContent className="text-sm">
-          {changes === null ? (
-            <p className="text-muted-foreground">第一次发布。</p>
-          ) : changes.length === 0 ? (
-            <p className="text-muted-foreground">内容没有变化。</p>
+          {previous ? (
+            <ConfigDiffView before={draftFromPublished(previous.content)} after={draftFromPublished(release.content)} />
           ) : (
-            <ul className="list-inside list-disc">
-              {changes.map((change) => (
-                <li key={change}>{change}</li>
-              ))}
-            </ul>
+            <p className="text-muted-foreground">第一次发布。</p>
           )}
         </CardContent>
       </Card>

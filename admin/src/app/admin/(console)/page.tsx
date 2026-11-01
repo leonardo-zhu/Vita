@@ -1,4 +1,4 @@
-import { describeChanges, draftFromBuiltin, draftFromPublished, knownTools } from '@/server/config/model'
+import { draftFromBuiltin, draftFromPublished, knownTools } from '@/server/config/model'
 import { getDraft, preparePublish } from '@/server/config/service'
 
 import { ConfigEditor } from './config-editor'
@@ -25,7 +25,7 @@ export default async function ConfigPage() {
           publishedBy: draft.current.published_by,
         }
       }
-      changes={describeChanges(live ?? builtinDraft, draft.content)}
+      baseline={live ?? builtinDraft}
       hasPendingChanges={draft.dirty}
       preview={config}
       issues={issues}

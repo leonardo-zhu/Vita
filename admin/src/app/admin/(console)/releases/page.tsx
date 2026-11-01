@@ -12,7 +12,12 @@ export default async function ReleasesPage() {
   const currentId = currentRelease()?.id
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">发布历史</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">发布历史</h1>
+        <Link href="/admin/releases/compare" className="text-sm underline-offset-4 hover:underline">
+          对比任意两个版本 →
+        </Link>
+      </div>
       {releases.length === 0 ? (
         <p className="text-sm text-muted-foreground">还没有发布过。</p>
       ) : (
