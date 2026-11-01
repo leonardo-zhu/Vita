@@ -6,6 +6,8 @@ struct SettingsView: View {
     let services: AppServices
     /// 重新走一遍首次使用引导。
     var onReplayOnboarding: (() -> Void)?
+    /// 清空数据之后重建界面，让各页面丢掉内存里的旧状态。
+    var onDataReset: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     /// 令牌末四位，用来让用户认出是哪一把；nil 表示没有设置。
@@ -16,6 +18,8 @@ struct SettingsView: View {
     @State private var versionTaps = 0
     @State private var showsDebug = false
     @State private var override = ConfigOverride()
+    @State private var resetParts = DataResetPart.defaultSelection
+    @State private var pendingReset: ResetRequest?
 
     private var secrets: any SecretStore { services.container.secrets }
     private var layered: LayeredConfigProvider? { services.container.config as? LayeredConfigProvider }
@@ -25,7 +29,10 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     serviceCard
-                    if showsDebug { debugCard }
+                    if showsDebug {
+                        debugCard
+                        resetCard
+                    }
                     aboutCard
                 }
                 .padding(16)
@@ -195,6 +202,87 @@ struct SettingsView: View {
         case .builtin: "内置"
         case .remote(let version): "远程 \(version)"
         case .localOverride: "本地覆盖"
+        }
+    }
+
+    // MARK: - 清空数据
+
+    private enum ResetRequest: Identifiable {
+        case selected, everything
+        var id: Self { self }
+    }
+
+    private var resetCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CardHeader(title: "清空数据", systemImage: "trash", tint: .red)
+            ForEach(DataResetPart.allCases) { part in
+                Toggle(isOn: Binding(
+                    get: { resetParts.contains(part) },
+                    set: { if $0 { resetParts.insert(part) } else { resetParts.remove(part) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(Self.title(of: part)).font(VitaType.secondary.weight(.medium))
+                        Text(Self.detail(of: part)).font(VitaType.meta).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack(spacing: 10) {
+                Button(role: .destructive) { pendingReset = .selected } label: { Text("清空所选").frame(maxWidth: .infinity) }
+                    .glassButton()
+                    .disabled(resetParts.isEmpty)
+                Button(role: .destructive) { pendingReset = .everything } label: { Text("全部清空").frame(maxWidth: .infinity) }
+                    .glassButton(prominent: true)
+            }
+            .tint(.red)
+            Text("“全部清空”相当于删掉重装：所有分组连同令牌和本机设置一起清掉。Apple 健康里的数据不动，已经写进去的饮食记录会留在“健康”里。")
+                .font(VitaType.meta)
+                .foregroundStyle(.secondary)
+        }
+        .vitaCard(padding: 20)
+        .confirmationDialog(
+            pendingReset == .everything ? "清空全部数据，回到刚安装时的状态？" : "清空所选的数据？",
+            isPresented: Binding(get: { pendingReset != nil }, set: { if !$0 { pendingReset = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingReset
+        ) { request in
+            Button(request == .everything ? "全部清空" : "清空", role: .destructive) { performReset(request) }
+        } message: { request in
+            Text("无法恢复。Apple 健康里的数据不受影响。")
+        }
+    }
+
+    private func performReset(_ request: ResetRequest) {
+        do {
+            if request == .everything {
+                try services.dataReset.resetEverything()
+            } else {
+                try services.dataReset.reset(resetParts)
+            }
+            if request == .everything || resetParts.contains(.debugOverride) {
+                layered?.setOverride(nil)
+            }
+            dismiss()
+            onDataReset?()
+        } catch {
+            message = "清空失败：\(error.localizedDescription)"
+        }
+    }
+
+    static func title(of part: DataResetPart) -> String {
+        switch part {
+        case .records: "记录与对话"
+        case .goals: "目标与引导"
+        case .debugOverride: "调试覆盖"
+        case .token: "Conduit 令牌"
+        }
+    }
+
+    static func detail(of part: DataResetPart) -> String {
+        switch part {
+        case .records: "饮食记录、对话、确认卡、个人食品库、营养标签照片（Apple 健康里的不动）"
+        case .goals: "每日目标、补录的身体数据；下次打开重走首次引导"
+        case .debugOverride: "本地覆盖的模型别名、超时与 prompt"
+        case .token: "清掉后需要重新填写"
         }
     }
 

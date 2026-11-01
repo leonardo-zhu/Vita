@@ -9,14 +9,17 @@ enum OnboardingState {
 struct RootView: View {
     let services: AppServices
     @AppStorage(OnboardingState.key) private var onboardingCompleted = false
+    /// 清空数据后递增，整棵界面重建。
+    @State private var resetGeneration = 0
 
     var body: some View {
         TabView {
-            ChatView(services: services)
+            ChatView(services: services) { resetGeneration += 1 }
                 .tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
             DataView(services: services)
                 .tabItem { Label("Data", systemImage: "chart.bar") }
         }
+        .id(resetGeneration)
         // 界面只有中文：系统控件（日期选择器等）也按中文显示，不跟随系统语言。
         .environment(\.locale, DisplayFormat.locale)
         .fullScreenCover(isPresented: Binding(get: { !onboardingCompleted }, set: { if !$0 { onboardingCompleted = true } })) {

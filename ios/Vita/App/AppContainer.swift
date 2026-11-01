@@ -59,6 +59,7 @@ final class AppServices {
     let health: HealthService
     let healthSync: HealthSyncService
     let chatHistory: ChatHistoryService
+    let dataReset: DataResetService
 
     init(container: AppContainer, now: @escaping () -> Date = Date.init, timeZone: @escaping () -> TimeZone = { .current }) {
         let context = container.modelContainer.mainContext
@@ -73,5 +74,6 @@ final class AppServices {
         pending = PendingService(context: context, records: records, foods: foods, now: now, timeZone: timeZone)
         chatHistory = ChatHistoryService(context: context, now: now, timeZone: timeZone)
         labels = LabelScanService(context: context, images: container.labelImages, recognizer: container.textRecognizer, now: now)
+        dataReset = DataResetService(context: context, secrets: container.secrets, labelImages: container.labelImages)
     }
 }

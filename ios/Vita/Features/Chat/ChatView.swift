@@ -214,8 +214,12 @@ struct ChatView: View {
     @State private var pickedPhoto: PhotosPickerItem?
     @State private var isTakingPhoto = false
 
-    init(services: AppServices) {
+    /// 设置里清空数据之后调用。
+    var onDataReset: (() -> Void)?
+
+    init(services: AppServices, onDataReset: (() -> Void)? = nil) {
         self.services = services
+        self.onDataReset = onDataReset
         _model = State(initialValue: ChatModel(services: services))
     }
 
@@ -241,7 +245,7 @@ struct ChatView: View {
                 }
                 .sheet(isPresented: $isPickingDate) { datePicker }
                 .sheet(isPresented: $isShowingSettings, onDismiss: model.reload) {
-                    SettingsView(services: services) { onboardingCompleted = false }
+                    SettingsView(services: services, onReplayOnboarding: { onboardingCompleted = false }, onDataReset: onDataReset)
                 }
         }
         .tint(VitaTheme.intake)

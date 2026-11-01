@@ -5,6 +5,7 @@ protocol LabelImageStore: Sendable {
     func save(_ data: Data) throws -> String
     func load(_ reference: String) throws -> Data?
     func delete(_ reference: String) throws
+    func deleteAll() throws
 }
 
 enum LabelImageReference {
@@ -46,6 +47,10 @@ struct FileLabelImageStore: LabelImageStore {
         let file = try url(reference)
         if FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) { try FileManager.default.removeItem(at: file) }
     }
+
+    func deleteAll() throws {
+        if FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)) { try FileManager.default.removeItem(at: directory) }
+    }
 }
 
 /// 测试替身。
@@ -65,5 +70,9 @@ final class InMemoryLabelImageStore: LabelImageStore, @unchecked Sendable {
 
     func delete(_ reference: String) throws {
         lock.withLock { _ = images.removeValue(forKey: reference) }
+    }
+
+    func deleteAll() throws {
+        lock.withLock { images.removeAll() }
     }
 }
