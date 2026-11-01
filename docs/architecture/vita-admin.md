@@ -1,6 +1,6 @@
 # Vita Admin 设计：远程配置与诊断日志
 
-**状态：M1、M2 已实现并部署到 R4S（2026-11-02）；M3（诊断日志）未开始。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
+**状态：M1–M3 已实现（2026-11-02）。M1、M2 已部署到 R4S；M3 见 §16。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
 **2026-11-01 的主要决定：** Admin 与 Conduit 一样部署在 R4S，用 SQLite；配置文件也由 R4S 上的 Caddy 直接提供，不另找静态托管；现阶段不签名，只认固定的 HTTPS 地址；每次回到前台都检查配置；首期只有 `stable` 渠道；诊断日志默认开。  
 **关联：** [ADR](ADR.md)（拟新增 ADR-012）、[TDD](TDD-v0.1.md) §2 / §5 / §8、[模型 Provider 集成规范](../contracts/llm-provider.md)、[Agent 工具契约](../contracts/agent-tools.md)、[Conduit（LLM Gateway）项目设计](llm-gateway-project.md)
 
@@ -277,7 +277,7 @@ prompt 会直接改变模型行为，因此配置的**来源可信**比传输加
 | --- | --- |
 | M1 | 登录、配置 CRUD、服务端校验、发布到 `/config/stable.json`、变更审计；部署到 R4S；客户端拉取与设置页“立即刷新”（已完成，§14） |
 | M2 | Prompt 试跑、diff（已完成，§15） |
-| M3 | 诊断日志上报与查看；补 ADR 与隐私说明 |
+| M3 | 诊断日志上报与查看；补 ADR 与隐私说明（已完成，§16） |
 | 以后 | `dev` 渠道与晋升、配置签名（分发前评估）、告警、用户内容类数据（须新 ADR） |
 
 模型网关相关里程碑见 Conduit 项目文档。
@@ -381,4 +381,26 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 **工具参数 schema 移到 `shared/agent-tools/tool-parameters.json`**：原来写在 `AgentToolCatalog` 的 Swift 源码里，Admin 试跑拿不到。现在 iOS 打包这份 JSON 并从中读取（`project.yml` 把它列为资源），Admin 在构建时拷入。远程配置仍然改不了它，只随客户端发布；iOS 测试保证它覆盖全部工具。
 
 **没验证的**：没有用真实的 Conduit 和模型跑过试跑（本地用模拟的 Conduit 走通了界面与存储）；生产环境要先配好 Conduit 密钥。
+
+## 16. 实现现状（2026-11-02，M3）
+
+**事件与格式**：`shared/diagnostics/batch.schema.json`，示例 `example-batch.json`。iOS 测试检查编码与示例逐字段一致，Admin 测试用同一个示例校验 schema。三类事件：
+
+| 事件 | 什么时候记 | 字段 |
+| --- | --- | --- |
+| `chat_turn` | 一轮对话保存、失败或取消 | 结果、错误码（`llm.*` 或 `app.unexpected`）、总耗时、模型来回轮数、工具调用数、token（入 / 出）、是否生成确认卡、是否“说生成了卡却没调提案工具”、是否超出步骤上限 |
+| `tool_call` | 手机上执行完一个工具 | 工具名、结果码（`ok` 或工具返回的错误码）、耗时、工具描述版本 |
+| `config_fetch` | 一次远程配置检查 | 结果（更新 / 没变 / 失败）、错误码、耗时 |
+
+都带 `eventId`（去重）、发生时间、`dataClass: diagnostic`、生效的 `configVersion`，对话与工具事件带 `X-Request-Id`。批次带匿名安装 ID（30 天换一个）、App 版本与系统版本。错误码在客户端压成 `a-z0-9_.`，不会带出别的文字。
+
+“说生成了卡却没调提案工具”是按回复文字判断的（含“确认卡”且含“生成 / 下面 / 下方”，并且这一轮没生成卡），用来跟踪 Phase 5 里观察到的模型问题，只记真假，不记回复。
+
+**客户端**：`DiagnosticsService` 记到 `Application Support/Diagnostics/queue.json`（最多 500 条），攒够 20 条或回到前台时按 100 条一批 POST 到 `DIAGNOSTICS_URL`（`project.yml`，`https://vita.r4s.leonardo-zhu.me/api/ingest/events`），拒绝跨主机重定向。2xx 删除已发的；400 / 413 丢掉这批；403（被封禁）清空并停止本次运行的上报；其他失败留着下次再发。设置页“诊断日志”开关默认开，关掉时清空队列。
+
+**服务端**：`POST /api/ingest/events`，不看登录 cookie。体积上限 64KB、每批最多 100 条；按 schema 校验，多余字段整批拒绝；每个 IP、每个安装 ID 10 分钟最多 60 批；被封禁的安装 ID 返回 403；`eventId` 去重；早于 30 天或晚于现在一天的事件丢弃；每小时最多清理一次 30 天前的数据。
+
+**查看**（`/admin/diagnostics`）：按时间（24 小时 / 7 天 / 30 天）、配置版本、App 版本、错误码筛选；对话数、失败率、成功轮的 P50 / P95 耗时、“说有卡却没调工具”次数；按配置版本对比；错误码排行；每个工具的次数、失败率、P95 与结果码分布；最近 100 条事件；安装列表，可删除某个安装的全部数据或封禁它。删除与封禁写审计。
+
+**没验证的**：真机或模拟器上报到生产环境的整条链路，要等这次部署后在 App 里走一遍；本地用示例数据测过接收、拒收与页面。
 

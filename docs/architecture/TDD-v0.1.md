@@ -300,7 +300,7 @@ Vita UI 继续展示原始时间精度，不将代表性时间倒灌为业务事
 
 - 业务库、标签原图和审计日志存于 app sandbox；Conduit 令牌只存 Keychain（设置页只显示末四位），不写入 SwiftData、日志、测试 fixture 或截图。客户端不持有上游模型 Key。
 - 远程配置只能改变 prompt、模型别名与运行参数，不能改变确认门、工具 schema、Conduit 地址或写入规则；配置只从构建配置里的唯一 HTTPS 地址拉取，校验失败回退到缓存或内置默认值。
-- 诊断日志上报默认只含元数据（错误码、配置版本、耗时、token 数、轮换的匿名安装 ID），可关闭；不含任何用户内容。
+- 诊断日志上报默认只含元数据（错误码、配置版本、耗时、token 数、轮换的匿名安装 ID），可关闭；不含任何用户内容。事件格式见 `shared/diagnostics/batch.schema.json`，服务端拒收多余字段。
 - 模型请求的上下文见 §3.4：当前 Session 摘要、个人食品库整库摘要（可配置关闭）和用户当前消息。健康原始数据只在模型调用 `getHealthSnapshot` / `getGoalRecommendation` 时传递，并标注来源。
 - 工具诊断日志用 `os.Logger`（subsystem `com.leonardo.vita`，category `agent.tools`）只记工具名与结果码，不记参数或结果内容。
 - 网络错误、模型输出无效、工具参数不合格、HealthKit 权限撤销均是可显示且可恢复的状态，不能转化成静默写入。
