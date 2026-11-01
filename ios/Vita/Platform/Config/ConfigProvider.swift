@@ -30,7 +30,7 @@ protocol ConfigProvider: Sendable {
 }
 
 enum ConfigResolver {
-    /// 按字段合并：本地覆盖 > 远程 > 内置（vita-admin.md §2）。远程配置须在传入前通过验签与校验。
+    /// 按字段合并：本地覆盖 > 远程 > 内置（vita-admin.md §2）。远程配置须在传入前通过校验（`RemoteConfigValidator`）。
     static func resolve(builtin: VitaConfig, remote: RemoteConfig?, override: ConfigOverride?) -> EffectiveConfig {
         var values = builtin
         var sources: [ConfigField: ConfigSource] = [:]
@@ -73,7 +73,7 @@ enum ConfigResolver {
     }
 }
 
-/// 持有三层并按需合并。Phase 5 的拉取与调试页通过 `setRemote` / `setOverride` 更新层；
+/// 持有三层并按需合并。`RemoteConfigService` 与调试页通过 `setRemote` / `setOverride` 更新层；
 /// 测试直接使用它作为内存实现。
 final class LayeredConfigProvider: ConfigProvider, @unchecked Sendable {
     private let lock = NSLock()

@@ -17,6 +17,13 @@ struct ConfigTests {
         #expect(!config.prompts.system.text.isEmpty)
     }
 
+    /// 工具描述只写在内置默认值里：每个工具都要有，也不能有多余的键（Admin 按这份清单编辑描述）。
+    @Test func builtinDescribesEveryTool() throws {
+        let tools = try builtin().prompts.tools
+        #expect(Set(tools.keys) == AgentToolCatalog.names)
+        #expect(tools.values.allSatisfy { !$0.description.isEmpty })
+    }
+
     @Test func builtinOnlyResolvesToBuiltinSources() throws {
         let config = try builtin()
         let effective = ConfigResolver.resolve(builtin: config, remote: nil, override: nil)
@@ -101,6 +108,17 @@ struct BuildEnvironmentTests {
     @Test func appBundleCarriesConduitBaseURL() throws {
         let environment = try BuildEnvironment.current(bundle: .main)
         #expect(environment.conduitBaseURL.scheme == "https")
+        #expect(environment.remoteConfigURL.absoluteString == "https://vita.r4s.leonardo-zhu.me/config/stable.json")
+    }
+
+    @Test func rejectsMissingOrInsecureRemoteConfigURL() {
+        let conduit = [BuildEnvironment.conduitBaseURLKey: "https://conduit.example"]
+        #expect(throws: BuildEnvironmentError.missingRemoteConfigURL) {
+            try BuildEnvironment.load(from: conduit)
+        }
+        #expect(throws: BuildEnvironmentError.invalidRemoteConfigURL("http://config.example/stable.json")) {
+            try BuildEnvironment.load(from: conduit.merging([BuildEnvironment.remoteConfigURLKey: "http://config.example/stable.json"]) { $1 })
+        }
     }
 
     @Test func rejectsMissingInsecureAndUnexpandedValues() {

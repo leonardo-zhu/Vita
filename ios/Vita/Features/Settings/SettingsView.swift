@@ -291,14 +291,14 @@ struct SettingsView: View {
     private var aboutCard: some View {
         VStack(spacing: 0) {
             // 连点五次版本号打开调试覆盖。
-            row("版本", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+            row("版本", AppVersion.current)
                 .contentShape(.rect)
                 .onTapGesture {
                     versionTaps += 1
                     if versionTaps >= 5 { withAnimation { showsDebug = true } }
                 }
             Divider().padding(.vertical, 12)
-            row("配置", services.container.config.effectiveConfig().values.configVersion)
+            configRow
             if let onReplayOnboarding {
                 Divider().padding(.vertical, 12)
                 Button {
@@ -317,6 +317,43 @@ struct SettingsView: View {
         }
         .font(VitaType.body)
         .vitaCard(padding: 20)
+    }
+
+    /// 生效配置的版本与来源，以及远程配置上次检查的结果；点“刷新”立即检查一次（vita-admin.md §5）。
+    private var configRow: some View {
+        let effective = services.container.config.effectiveConfig()
+        let remote = services.remoteConfig
+        let isRemote = effective.sources.values.contains { if case .remote = $0 { true } else { false } }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("配置")
+                Spacer()
+                Text("\(effective.values.configVersion) · \(isRemote ? "远程" : "内置")")
+                    .foregroundStyle(.secondary).monospacedDigit()
+            }
+            if let remote {
+                HStack(spacing: 8) {
+                    Text(Self.describe(remote))
+                        .font(VitaType.meta).foregroundStyle(.secondary)
+                    Spacer()
+                    if remote.isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("立即刷新") { Task { await remote.refresh() } }
+                            .font(VitaType.meta.weight(.semibold))
+                    }
+                }
+            }
+        }
+    }
+
+    static func describe(_ remote: RemoteConfigService) -> String {
+        let checked = remote.lastCheckedAt.map { "上次检查 \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "还没检查过远程配置"
+        switch remote.lastOutcome {
+        case .updated(let version): return "已更新到 \(version)，下一轮对话生效"
+        case .failed(let code): return "检查失败（\(code)），继续用当前配置"
+        case .unchanged, nil: return checked
+        }
     }
 
     private func row(_ title: String, _ value: String) -> some View {

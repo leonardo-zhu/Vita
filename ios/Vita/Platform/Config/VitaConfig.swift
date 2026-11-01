@@ -53,7 +53,7 @@ struct VitaConfig: Equatable, Codable, Sendable {
 }
 
 /// L2 远程配置。缺失的字段回落到下一层；未知字段在解码时忽略（vita-admin.md §4）。
-/// 拉取、验签与 §6 校验在 Phase 5 实现，这里只定义形状。
+/// 拉取见 `RemoteConfigService`，§6 校验见 `RemoteConfigValidator`。
 struct RemoteConfig: Equatable, Codable, Sendable {
     struct LLM: Equatable, Codable, Sendable {
         var modelId: String?

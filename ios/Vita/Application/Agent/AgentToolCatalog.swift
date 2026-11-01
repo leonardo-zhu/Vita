@@ -10,12 +10,13 @@ enum AgentToolCatalog {
 
     static var names: Set<String> { readTools.union(ProposalToolHandler.toolNames).union(["updateGoal"]) }
 
-    /// 按配置里的描述覆盖生成定义；未知的覆盖键被忽略。
+    /// 描述来自生效配置：内置默认值（DefaultConfig.json）给出每个工具的描述，远程配置可以替换。
+    /// 内置默认值覆盖全部工具由测试保证；未知的键被忽略。
     static func definitions(descriptions: [String: ToolPrompt]) -> [LLMToolDefinition] {
         specs.map { spec in
             LLMToolDefinition(
                 name: spec.name,
-                description: descriptions[spec.name]?.description ?? spec.description,
+                description: descriptions[spec.name]?.description ?? "",
                 parameters: spec.parameters
             )
         }
@@ -23,49 +24,40 @@ enum AgentToolCatalog {
 
     private struct Spec {
         var name: String
-        var description: String
         var parameters: JSONValue
     }
 
     private static let specs: [Spec] = [
         Spec(
             name: "getDaySummary",
-            description: "读取某一天的全部记录（含 Record ID、Item ID、用量与营养）、当天汇总、目标与 revision。不传 date 时读当前会话日期；历史日期可读但不能写。",
             parameters: schema(#"{"type":"object","properties":{"date":{"type":"string","description":"YYYY-MM-DD，可省略"}}}"#)
         ),
         Spec(
             name: "getRecordDetail",
-            description: "读取当前会话日期中一条记录的完整内容，包括每项的营养来源与估算依据。",
             parameters: schema(#"{"type":"object","properties":{"recordId":{"type":"string"}},"required":["recordId"]}"#)
         ),
         Spec(
             name: "searchPersonalFoods",
-            description: "返回个人食品库的全部产品（产品 ID、生效版本 ID、包装规格与每基准营养），由你按语义判断用户说的是哪一个。系统上下文里已有同样的列表，通常不必调用。个人库优先于公共参考库。",
             parameters: schema(#"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"#)
         ),
         Spec(
             name: "searchReferenceFoods",
-            description: "在公共营养参考库中按名称或别名精确查找，可附加其他写法。返回多个候选（如生/熟）时必须先问用户，不要自己挑。",
             parameters: schema(#"{"type":"object","properties":{"query":{"type":"string"},"aliases":{"type":"array","items":{"type":"string"}}},"required":["query"]}"#)
         ),
         Spec(
             name: "getGoals",
-            description: "读取当前会话日期生效的每日目标（能量、蛋白质、脂肪、碳水）及其来源。",
             parameters: schema(#"{"type":"object","properties":{}}"#)
         ),
         Spec(
             name: "getHealthSnapshot",
-            description: "读取 Apple 健康与手动补录的身体数据：体重、身高、体脂率、出生日期、生理性别、当日活动能量与前一晚睡眠，并标明来源。",
             parameters: schema(#"{"type":"object","properties":{}}"#)
         ),
         Spec(
             name: "getGoalRecommendation",
-            description: "由客户端按固定公式计算每日目标建议（只读，不保存）。返回输入、公式、结果或缺失项。不要自己计算目标数值；首次保存目标由用户在 Data 页的目标设定里确认。",
             parameters: schema(#"{"type":"object","properties":{}}"#)
         ),
         Spec(
             name: "updateGoal",
-            description: "用户明确给出新的目标数值时直接修改（如“把蛋白质目标改成 150g”）。只传要改的项，返回旧值与新值，请据此复述。建议性或含糊的说法先在对话中确认，不要调用。",
             parameters: schema(#"""
             {"type":"object","properties":{
               "energyKcal":{"type":"number"},"proteinG":{"type":"number"},"fatG":{"type":"number"},"carbohydrateG":{"type":"number"},
@@ -75,7 +67,6 @@ enum AgentToolCatalog {
         ),
         Spec(
             name: "proposeRecordChange",
-            description: "提出新建、追加、替换或移除饮食记录的提案，生成确认卡；用户点确认后才会保存。命中个人库或参考库时只给 ID 与用量，不要给营养值；只有都没命中时才用 aiEstimated 并写明估算依据。用户没说时间就省略 eventTime。修正当前待确认卡片时填 replacesPendingId。",
             parameters: schema(#"""
             {"type":"object","properties":{
               "sessionDate":{"type":"string","description":"YYYY-MM-DD，当前会话日期"},
@@ -121,7 +112,6 @@ enum AgentToolCatalog {
         ),
         Spec(
             name: "proposeRecordDeletion",
-            description: "提出删除整条记录的提案，生成确认卡；用户确认后才删除。",
             parameters: schema(#"""
             {"type":"object","properties":{
               "sessionDate":{"type":"string"},"expectedRevision":{"type":"integer"},
@@ -131,7 +121,6 @@ enum AgentToolCatalog {
         ),
         Spec(
             name: "proposeFoodChange",
-            description: "提出把食品存入个人食品库（新建产品或为已有产品加新版本）的提案，生成确认卡。来源只能是营养标签、用户提供的数值或公共参考库，AI 估算不能存入。",
             parameters: schema(#"""
             {"type":"object","properties":{
               "sessionDate":{"type":"string"},"expectedRevision":{"type":"integer"},

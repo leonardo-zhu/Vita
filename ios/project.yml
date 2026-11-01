@@ -43,13 +43,15 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
-      # Conduit 地址只由构建配置决定，不可远程修改（vita-admin.md §3.2）。
+      # Conduit 与远程配置的地址只由构建配置决定，不可远程修改（vita-admin.md §3.2 / §7）。
       # 目前只有一个实例；有了开发实例后把 Debug 指过去。
       configs:
         Debug:
           CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
+          REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
         Release:
           CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
+          REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
   VitaTests:
     type: bundle.unit-test
     platform: iOS
