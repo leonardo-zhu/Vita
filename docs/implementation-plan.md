@@ -64,7 +64,7 @@
 
 验收：使用真实对话完成“记录、确认、查看、修正、删除”全链路，且所有写入均通过确认门。
 
-状态（2026-10-31）：除远程配置外完成；真实对话验收已通过（模拟器，经 Conduit 别名 `vita-chat`：记录 → 澄清生/熟与用量 → 确认 → Data 页查看 → 修正 → 删除，每次写入都经确认卡）。
+状态（2026-11-01）：完成，远程配置的服务端尚未部署；真实对话验收已通过（模拟器，经 Conduit 别名 `vita-chat`：记录 → 澄清生/熟与用量 → 确认 → Data 页查看 → 修正 → 删除，每次写入都经确认卡）。
 
 - **模型接入**：`ResponsesClient`（`URLSession` + SSE）实现 `LLMClient`，细节见 Provider 规范 §7。
 - **工具**：`AgentToolCatalog` 定义契约里的 11 个工具与参数 schema（远程配置只能换描述）；`AgentToolRunner` 执行只读工具与 `updateGoal`，Propose 工具交给 `ProposalToolHandler`。
@@ -75,14 +75,16 @@
 - **内置系统 prompt v3**：确认卡只能来自提案工具；思考用中文。验收中模型两次只说“已生成确认卡”却没调用工具，已用历史注记与这条规则缓解。
 - 调试用的假 Agent 菜单已删除。
 
-未做：远程配置拉取（与 Admin M1 一起做，见 Vita Admin 设计 §5 / §8）、诊断日志上报、PRD 中“减脂 / 增肌”的目标类型选择（目标仍按 `GoalRecommendationPolicy` 的固定系数）。
+- **远程配置（2026-11-01）**：`RemoteConfigService` 在启动、回到前台与设置页“立即刷新”时用 ETag 检查，校验通过才生效；设置页显示生效版本与上次检查结果。工具描述移进 `DefaultConfig.json`。见 Vita Admin 设计 §14。
+
+未做：诊断日志上报、PRD 中“减脂 / 增肌”的目标类型选择（目标仍按 `GoalRecommendationPolicy` 的固定系数）。
 
 ## 剩余工作
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| 远程配置拉取 | 未开始 | 方案已定（Vita Admin 设计 §12）：从 `https://vita.r4s.leonardo-zhu.me/config/stable.json` 拉取，启动与每次回到前台检查，设置页“立即刷新”；现阶段不签名。随 Admin M1 一起做。 |
-| Vita Admin（`admin/`） | 未开始 | 方案已定：Next.js + SQLite，部署在 R4S（与 Conduit 同机），首期只有 `stable` 渠道。按 Vita Admin 设计 §11.5 分期 M1–M3。 |
+| Vita Admin M1 部署 | 待做 | 代码完成（Vita Admin 设计 §14）。R4S 上要先注册 runner、建目录与 `.env`、给 Caddy 挂发布目录，步骤见 `admin/README.md`；部署后在手机上确认能拉到配置。 |
+| Vita Admin M2 / M3 | 未开始 | M2：Prompt 试跑、diff；M3：诊断日志。 |
 | 诊断日志上报 | 未开始 | ADR-014 已采纳，默认开；Admin M3 做。目前只有本机 `os.Logger`。 |
 | 真机验证 | 待做 | 本轮功能只在 iPhone 18 Pro 模拟器上验证；相机、权限弹窗与真实 Apple 健康数据需在 iPhone 上走一遍。 |
 | 模型未调用工具却声称已生成确认卡 | 观察中 | 已缓解；若仍出现，可在客户端检测“回复提到卡片但没有 Pending”并提示重试。 |

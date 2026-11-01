@@ -11,7 +11,7 @@ Vita 是一个本地优先的个人 AI 健康助理。当前 MVP 以自然语言
 | [架构决策记录](docs/architecture/ADR.md) | 已作出的技术决策 | 草案 |
 | [Agent 工具契约](docs/contracts/agent-tools.md) | Agent、客户端与写入确认边界 | 已实现 |
 | [模型 Provider 集成规范](docs/contracts/llm-provider.md) | Responses API、工具循环与密钥边界（直连方舟部分已被 Conduit 取代） | 已实现，部分被取代 |
-| [Vita Admin 设计](docs/architecture/vita-admin.md) | 远程配置发布与诊断日志 | 已定稿，待实现 |
+| [Vita Admin 设计](docs/architecture/vita-admin.md) | 远程配置发布与诊断日志 | M1 已实现，待部署 |
 | [Conduit 项目设计](docs/architecture/llm-gateway-project.md) | 独立的 LLM 网关项目 | 草案 |
 | [公共营养参考库规范](docs/reference-food-library.md) | 数据来源、收录规则、构建与校验 | 已采纳 |
 | [MVP 实施计划](docs/implementation-plan.md) | 开发阶段、各阶段状态与剩余工作 | 进行中 |

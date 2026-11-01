@@ -1,6 +1,6 @@
 # Vita Admin 设计：远程配置与诊断日志
 
-**状态：已定稿（2026-11-01），待实现。** §12 的待确认项已全部定下，结论写进了各节。客户端已实现 §2 的三层合并（`ConfigResolver` / `LayeredConfigProvider`）与 §9 的本地调试覆盖；§5 的拉取与 Admin 本身尚未开始。  
+**状态：M1 已实现（2026-11-01），尚未部署到 R4S。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
 **2026-11-01 的主要决定：** Admin 与 Conduit 一样部署在 R4S，用 SQLite；配置文件也由 R4S 上的 Caddy 直接提供，不另找静态托管；现阶段不签名，只认固定的 HTTPS 地址；每次回到前台都检查配置；首期只有 `stable` 渠道；诊断日志默认开。  
 **关联：** [ADR](ADR.md)（拟新增 ADR-012）、[TDD](TDD-v0.1.md) §2 / §5 / §8、[模型 Provider 集成规范](../contracts/llm-provider.md)、[Agent 工具契约](../contracts/agent-tools.md)、[Conduit（LLM Gateway）项目设计](llm-gateway-project.md)
 
@@ -203,6 +203,8 @@ prompt 会直接改变模型行为，因此配置的**来源可信**比传输加
 
 实现（2026-10-31）：设置页连点版本号五次出现“调试覆盖”卡片，可覆盖模型别名、超时秒数（5–300）与系统 prompt，每项显示来源；存在 UserDefaults（`vita.config.override`），下一轮对话开始时生效。
 
+注意：本地覆盖的超时上限是 300 秒，比远程配置的 180 宽，便于调试慢模型。
+
 ## 10. 可观测与测试
 
 **审计：** 每次模型请求在 `AuditEvent`（或诊断元数据）中记录生效的 `configVersion`、各字段来源层级与 prompt 版本号，不记录 prompt 全文。配置拉取失败、校验失败（以及将来的验签失败）各有独立错误码。这些字段同时是诊断日志的关联维度（§11）。
@@ -333,3 +335,29 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 - TDD §2 / §8：加入 `ConfigProvider`、Conduit 调用与诊断日志的隐私说明。
 - Provider 规范 §3：去掉用户自带 Key 与直连方舟，改为 Conduit 令牌鉴权；Model ID（别名）与超时来源改为“生效配置”。
 - 实施计划：Phase 0 加入内置默认配置与 `ConfigProvider` 协议；Phase 5 前完成远程拉取、校验与调试覆盖；诊断日志与 Admin 按 §11.5 分期。
+
+## 14. 实现现状（2026-11-01，M1）
+
+**Admin（`admin/`）**：Next.js 16 + SQLite（`node:sqlite`），前端 shadcn/ui（Base UI）+ Tailwind 4，说明与首次部署步骤见 [`admin/README.md`](../../admin/README.md)。
+
+- 登录：照搬 Conduit 的单管理员、签名会话 cookie、按 IP 限速与 Passkey；注册 Passkey 前再确认一次密码。
+- 配置页：按字段编辑（模型与请求、系统 prompt、11 个工具描述、开关、最低客户端版本），保存草稿后显示校验结果与将要发布的文件；发布时二次确认并列出相对线上的改动。
+- 与 App 内置默认值文字相同的 prompt 不写进发布文件，App 用自带的那份；改过的 prompt 版本号自动取（内置版本、历史最高）+1，文字不变就沿用。
+- 发布在一个事务里写 release、移动渠道指针、写审计、原子写 `stable.json`；写文件失败整体回滚。回滚是以新版本号重新发布旧内容。
+- `configVersion` 按北京时间的日期生成，序号按数字比较（`.10` 大于 `.9`），并且总比内置默认值的版本新。
+- 审计表有触发器，禁止修改和删除。
+- 发布前调 Conduit `/v1/models` 检查别名：别名不存在时拦截；没配置密钥或连不上 Conduit 时只提示。
+- 部署：`admin/Dockerfile`（构建上下文是仓库根目录）、`admin/deploy/compose.yaml`（端口 3013）、`admin/deploy/Caddyfile.snippet`、`.github/workflows/vita-admin-deploy.yml`。Caddy 容器需要只读挂载 `/opt/vita-admin/published`，首次部署要重建一次 Caddy。
+
+**内置默认值**：工具描述从 `AgentToolCatalog` 的 Swift 代码移到 `DefaultConfig.json` 的 `prompts.tools`（每个 v1），代码里只留名字和参数 schema。原因：`ConfigResolver` 只接受内置默认值里有的工具名，之前内置为空，远程下发的工具描述会被全部忽略；Admin 也要从这份文件读工具清单和默认文字。
+
+**客户端**：
+
+- `BuildEnvironment.remoteConfigURL`：`REMOTE_CONFIG_URL`（`project.yml`，Debug / Release 都是 `https://vita.r4s.leonardo-zhu.me/config/stable.json`），只允许 HTTPS。
+- `RemoteConfigService`：启动和每次回到前台（`scenePhase == .active`）、设置页“立即刷新”时检查；带 ETag，5 秒超时，同一时刻只跑一次；拒绝跨主机重定向。
+- `RemoteConfigValidator`：§6 的规则，再加上版本号不得比缓存旧（防回放）；版本相同按“没变化”处理。
+- `FileRemoteConfigCache`：`Application Support/RemoteConfig/cache.json`，存原始字节与 ETag；启动时重新校验后交给 `LayeredConfigProvider`。
+- 设置页“配置”一行显示生效版本、来源（内置 / 远程）、上次检查结果和“立即刷新”。
+
+**没验证的**：Docker 镜像只在 CI 里构建（本机没开 Docker）；R4S 上的部署、Caddy 挂载和 App 拉到真实配置的整条链路，要等首次部署后走一遍。Passkey 注册与登录没有在浏览器里实测。
+
