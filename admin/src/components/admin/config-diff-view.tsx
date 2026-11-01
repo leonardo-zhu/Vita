@@ -1,4 +1,7 @@
-import { configDiff } from '@/lib/config-diff'
+'use client'
+
+import { useT } from '@/i18n/client'
+import { configDiff, diffLabel, diffValue } from '@/lib/config-diff'
 import type { DraftContent } from '@/server/config/model'
 
 import { TextDiff } from './text-diff'
@@ -7,14 +10,15 @@ import { TextDiff } from './text-diff'
 export function ConfigDiffView({
   before,
   after,
-  empty = '内容没有变化。',
+  empty,
 }: {
   before: DraftContent
   after: DraftContent
   empty?: string
 }) {
+  const t = useT()
   const entries = configDiff(before, after)
-  if (entries.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>
+  if (entries.length === 0) return <p className="text-sm text-muted-foreground">{empty ?? t.diff.noChange}</p>
   const values = entries.filter((entry) => entry.kind === 'value')
   const texts = entries.filter((entry) => entry.kind === 'text')
   return (
@@ -23,11 +27,11 @@ export function ConfigDiffView({
         <div className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5">
           {values.map((entry) => (
             <div key={entry.key} className="contents">
-              <span className="text-muted-foreground">{entry.label}</span>
+              <span className="text-muted-foreground">{diffLabel(t, entry)}</span>
               <span className="font-mono text-xs leading-5">
-                <del className="text-red-700 dark:text-red-300">{entry.from}</del>
+                <del className="text-red-700 dark:text-red-300">{diffValue(t, entry.from)}</del>
                 <span className="px-1.5 text-muted-foreground">→</span>
-                <ins className="text-emerald-700 no-underline dark:text-emerald-300">{entry.to}</ins>
+                <ins className="text-emerald-700 no-underline dark:text-emerald-300">{diffValue(t, entry.to)}</ins>
               </span>
             </div>
           ))}
@@ -35,7 +39,7 @@ export function ConfigDiffView({
       )}
       {texts.map((entry) => (
         <div key={entry.key} className="flex flex-col gap-1.5">
-          <span className="font-medium">{entry.label}</span>
+          <span className="font-medium">{diffLabel(t, entry)}</span>
           <TextDiff from={entry.from} to={entry.to} />
         </div>
       ))}

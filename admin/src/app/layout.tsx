@@ -1,20 +1,21 @@
 import type { Metadata } from 'next'
 
 import { Providers } from '@/components/admin/providers'
+import { getLang } from '@/i18n/server'
 
 import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Vita Admin',
-  description: 'Vita 远程配置的编辑与发布',
   robots: { index: false, follow: false },
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const lang = await getLang()
   return (
-    <html lang="zh-CN" suppressHydrationWarning className="h-full antialiased">
+    <html lang={lang === 'zh' ? 'zh-CN' : 'en'} suppressHydrationWarning className="h-full antialiased">
       <body className="flex min-h-full flex-col">
-        <Providers>{children}</Providers>
+        <Providers lang={lang}>{children}</Providers>
       </body>
     </html>
   )

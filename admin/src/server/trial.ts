@@ -157,7 +157,7 @@ async function callConduit(content: DraftContent, context: string, message: stri
   const body = await res.json().catch(() => null)
   if (!res.ok) {
     const detail = (body as { error?: { message?: string } } | null)?.error?.message
-    throw new Error(`Conduit 返回 ${res.status}${detail ? `：${detail}` : ''}`)
+    throw new Error(`HTTP ${res.status}${detail ? `: ${detail}` : ''}`)
   }
   return parseResponse(body ?? {})
 }
@@ -178,8 +178,8 @@ export async function runTrials(
         const result = await callConduit(content, context, message, requestId)
         return { source, configVersion, content, requestId, latencyMs: Date.now() - started, ...result, error: null }
       } catch (error) {
-        const message =
-          (error as Error).name === 'TimeoutError' ? '等待模型超时' : (error as Error).message
+        // 存错误码与原始细节，文字由页面按当前语言显示
+        const message = (error as Error).name === 'TimeoutError' ? 'timeout' : (error as Error).message
         return {
           source,
           configVersion,

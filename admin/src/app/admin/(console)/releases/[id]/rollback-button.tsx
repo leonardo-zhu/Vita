@@ -14,10 +14,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { useT } from '@/i18n/client'
 
 import { rollbackAction } from '../../../actions'
 
 export function RollbackButton({ releaseId, version }: { releaseId: number; version: string }) {
+  const t = useT()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -38,20 +40,18 @@ export function RollbackButton({ releaseId, version }: { releaseId: number; vers
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        回滚到这个版本…
+        {t.releases.rollbackButton}
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>回滚到 {version}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              会用新的版本号重新发布 {version} 的内容，立即对外生效；当前未发布的草稿会被丢弃。
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t.releases.rollbackTitle(version)}</AlertDialogTitle>
+            <AlertDialogDescription>{t.releases.rollbackDescription(version)}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={pending}>{t.common.cancel}</AlertDialogCancel>
             <Button disabled={pending} onClick={rollback}>
-              {pending ? '发布中…' : '回滚'}
+              {pending ? t.editor.publishing : t.releases.rollback}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

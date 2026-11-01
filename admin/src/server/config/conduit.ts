@@ -4,30 +4,25 @@
  */
 export type AliasCheck =
   | { status: 'ok' }
-  | { status: 'missing'; message: string }
-  | { status: 'skipped'; message: string }
-  | { status: 'error'; message: string }
+  | { status: 'missing'; alias: string }
+  | { status: 'skipped' }
+  | { status: 'error'; detail: string }
 
 export async function checkModelAlias(modelId: string): Promise<AliasCheck> {
   const baseUrl = process.env.CONDUIT_BASE_URL
   const apiKey = process.env.CONDUIT_API_KEY
-  if (!baseUrl || !apiKey) {
-    return { status: 'skipped', message: '没有配置 CONDUIT_BASE_URL / CONDUIT_API_KEY，未检查模型别名' }
-  }
+  if (!baseUrl || !apiKey) return { status: 'skipped' }
   try {
     const res = await fetch(new URL('/v1/models', baseUrl), {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(5000),
       cache: 'no-store',
     })
-    if (!res.ok) return { status: 'error', message: `Conduit /v1/models 返回 ${res.status}，未能检查模型别名` }
+    if (!res.ok) return { status: 'error', detail: `HTTP ${res.status}` }
     const body = (await res.json()) as { data?: { id?: string }[] }
     const ids = new Set((body.data ?? []).map((model) => model.id))
-    if (!ids.has(modelId)) {
-      return { status: 'missing', message: `Conduit 上没有模型别名 ${modelId}` }
-    }
-    return { status: 'ok' }
+    return ids.has(modelId) ? { status: 'ok' } : { status: 'missing', alias: modelId }
   } catch (error) {
-    return { status: 'error', message: `连不上 Conduit，未能检查模型别名：${(error as Error).message}` }
+    return { status: 'error', detail: (error as Error).message }
   }
 }

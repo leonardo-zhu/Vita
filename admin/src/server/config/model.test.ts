@@ -8,6 +8,9 @@ import {
   knownTools,
   promptVersionHistory,
 } from './model'
+import { messages } from '@/i18n/messages'
+import { issueText } from '@/lib/issue-text'
+
 import { validatePublished } from './validate'
 
 const tool = knownTools()[0]
@@ -71,9 +74,12 @@ describe('validatePublished', () => {
     const config = valid()
     config.llm.timeoutSeconds = 1
     config.llm.modelId = ''
-    const messages = validatePublished(config, { latestVersion: null }).map((issue) => issue.message)
-    expect(messages).toContain('超时秒数不能小于 5')
-    expect(messages).toContain('模型别名不能为空')
+    const issues = validatePublished(config, { latestVersion: null })
+    expect(issues).toContainEqual({ path: '/llm/timeoutSeconds', rule: 'minimum', param: 5 })
+    const zh = issues.map((issue) => issueText(messages.zh, issue))
+    expect(zh).toContain('超时秒数不能小于 5')
+    expect(zh).toContain('模型别名不能为空')
+    expect(issues.map((issue) => issueText(messages.en, issue))).toContain('Timeout must be at least 5')
   })
 
   it('rejects unknown tools and non-increasing versions', () => {

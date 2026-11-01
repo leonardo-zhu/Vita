@@ -28,12 +28,30 @@ import { getPasskey, insertPasskey, listPasskeys, touchPasskey, type PasskeyRow 
 const FLOW_TTL_SECONDS = 5 * 60
 const RP_NAME = 'Vita Admin'
 
-export class PasskeyError extends Error {}
+export type PasskeyErrorCode =
+  | 'notConfigured'
+  | 'expired'
+  | 'notRegistered'
+  | 'verifyFailed'
+  | 'registerFailed'
+  | 'alreadyRegistered'
+  | 'wrongPassword'
+  | 'lockedOut'
+
+/** 只带错误码与技术细节，文字由界面按当前语言生成 */
+export class PasskeyError extends Error {
+  constructor(
+    readonly code: PasskeyErrorCode,
+    readonly detail?: string
+  ) {
+    super(code)
+  }
+}
 
 function relyingParty(req: NextRequest): { rpID: string; origin: string } {
   const configured = process.env.PASSKEY_ORIGIN
   if (!configured && process.env.NODE_ENV === 'production') {
-    throw new PasskeyError('服务端未配置 PASSKEY_ORIGIN')
+    throw new PasskeyError('notConfigured')
   }
   const origin = new URL(configured || req.nextUrl.origin).origin
   return { rpID: new URL(origin).hostname, origin }
@@ -70,7 +88,7 @@ function issueFlow(kind: FlowKind, challenge: string, rpID: string, sid?: string
 function spendFlow(kind: FlowKind, token: unknown): FlowPayload {
   const flow = typeof token === 'string' ? verifyToken<FlowPayload>(kind, token) : null
   if (!flow || spentFlows.has(flow.jti)) {
-    throw new PasskeyError('验证已过期，请重试')
+    throw new PasskeyError('expired')
   }
   const now = Math.floor(Date.now() / 1000)
   for (const [jti, exp] of spentFlows) if (exp <= now) spentFlows.delete(jti)
@@ -108,7 +126,7 @@ export async function finishLogin(req: NextRequest, token: unknown, credential: 
   const flow = spendFlow('passkey-login', token)
   const response = credential as AuthenticationResponseJSON
   const row = typeof response?.id === 'string' ? getPasskey(response.id) : undefined
-  if (!row) throw new PasskeyError('这个 Passkey 未在本站注册或已被删除')
+  if (!row) throw new PasskeyError('notRegistered')
   const { origin } = relyingParty(req)
 
   const result = await verifyAuthenticationResponse({
@@ -124,9 +142,9 @@ export async function finishLogin(req: NextRequest, token: unknown, credential: 
     },
     requireUserVerification: true,
   }).catch((error: Error) => {
-    throw new PasskeyError(`Passkey 验证失败：${error.message}`)
+    throw new PasskeyError('verifyFailed', error.message)
   })
-  if (!result.verified) throw new PasskeyError('Passkey 验证失败')
+  if (!result.verified) throw new PasskeyError('verifyFailed')
 
   const info = result.authenticationInfo
   touchPasskey(row.id, info.newCounter, info.credentialBackedUp, Math.floor(Date.now() / 1000))
@@ -165,7 +183,7 @@ export async function finishRegistration(
   name: string
 ) {
   const flow = spendFlow('passkey-register', token)
-  if (flow.sid !== sid) throw new PasskeyError('验证已过期，请重试')
+  if (flow.sid !== sid) throw new PasskeyError('expired')
   const { origin } = relyingParty(req)
 
   const result = await verifyRegistrationResponse({
@@ -175,12 +193,12 @@ export async function finishRegistration(
     expectedRPID: flow.rpID,
     requireUserVerification: true,
   }).catch((error: Error) => {
-    throw new PasskeyError(`Passkey 注册失败：${error.message}`)
+    throw new PasskeyError('registerFailed', error.message)
   })
-  if (!result.verified) throw new PasskeyError('Passkey 注册失败')
+  if (!result.verified) throw new PasskeyError('registerFailed')
 
   const info = result.registrationInfo
-  if (getPasskey(info.credential.id)) throw new PasskeyError('这个 Passkey 已经注册过')
+  if (getPasskey(info.credential.id)) throw new PasskeyError('alreadyRegistered')
   insertPasskey({
     id: info.credential.id,
     public_key: info.credential.publicKey,

@@ -30,12 +30,10 @@ function getConfig(): AuthConfig {
   const passwordHash = process.env.ADMIN_PASSWORD_HASH
   const secret = process.env.SESSION_SECRET
   if (!username || !passwordHash || !secret) {
-    throw new AuthConfigError(
-      '未配置管理员账号：需要 ADMIN_USERNAME、ADMIN_PASSWORD_HASH 和 SESSION_SECRET'
-    )
+    throw new AuthConfigError('ADMIN_USERNAME, ADMIN_PASSWORD_HASH and SESSION_SECRET are required')
   }
   if (secret.length < 32) {
-    throw new AuthConfigError('SESSION_SECRET 至少 32 个字符')
+    throw new AuthConfigError('SESSION_SECRET must be at least 32 characters')
   }
   return { username, passwordHash, secret }
 }

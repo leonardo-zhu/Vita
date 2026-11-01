@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { useT } from '@/i18n/client'
 
 export interface CompareOption {
   value: string
@@ -13,6 +14,7 @@ export interface CompareOption {
 
 /** 选两个版本跳到对比页；空值表示用对比页的默认选择 */
 export function CompareForm({ options, from, to }: { options: CompareOption[]; from: string; to: string }) {
+  const t = useT()
   const router = useRouter()
   const [left, setLeft] = useState(from)
   const [right, setRight] = useState(to)
@@ -31,9 +33,9 @@ export function CompareForm({ options, from, to }: { options: CompareOption[]; f
       }}
     >
       <Label className="flex flex-col items-start gap-1.5">
-        <span>从</span>
+        <span>{t.compare.from}</span>
         <select className={select} value={left} onChange={(e) => setLeft(e.target.value)}>
-          <option value="">上一个版本</option>
+          <option value="">{t.compare.previous}</option>
           {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -42,9 +44,9 @@ export function CompareForm({ options, from, to }: { options: CompareOption[]; f
         </select>
       </Label>
       <Label className="flex flex-col items-start gap-1.5">
-        <span>到</span>
+        <span>{t.compare.to}</span>
         <select className={select} value={right} onChange={(e) => setRight(e.target.value)}>
-          <option value="">线上版本</option>
+          <option value="">{t.compare.liveDefault}</option>
           {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -53,7 +55,7 @@ export function CompareForm({ options, from, to }: { options: CompareOption[]; f
         </select>
       </Label>
       <Button type="submit" variant="outline">
-        对比
+        {t.compare.submit}
       </Button>
     </form>
   )

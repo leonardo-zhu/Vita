@@ -1,3 +1,4 @@
+import { titled } from '@/i18n/metadata'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
@@ -5,14 +6,16 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatTime } from '@/lib/format'
 import { ConfigDiffView } from '@/components/admin/config-diff-view'
+import { getT } from '@/i18n/server'
 import { draftFromPublished } from '@/server/config/model'
 import { currentRelease, getRelease, listReleases } from '@/server/config/service'
 
 import { RollbackButton } from './rollback-button'
 
-export const metadata = { title: '发布详情 · Vita Admin' }
+export const generateMetadata = titled('release')
 
 export default async function ReleasePage({ params }: { params: Promise<{ id: string }> }) {
+  const t = await getT()
   const release = getRelease(Number((await params).id))
   if (!release) notFound()
   const isCurrent = currentRelease()?.id === release.id
@@ -23,33 +26,33 @@ export default async function ReleasePage({ params }: { params: Promise<{ id: st
   return (
     <div className="flex flex-col gap-4">
       <Link href="/admin/releases" className="text-sm text-muted-foreground hover:text-foreground">
-        ← 发布历史
+        {t.releases.back}
       </Link>
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="font-mono text-xl font-semibold">{release.config_version}</h1>
-        {isCurrent && <Badge variant="outline">线上</Badge>}
+        {isCurrent && <Badge variant="outline">{t.releases.live}</Badge>}
         {!isCurrent && <RollbackButton releaseId={release.id} version={release.config_version} />}
       </div>
       <p className="text-sm text-muted-foreground">
-        {formatTime(release.published_at)} 由 {release.published_by} 发布
-        {rollbackOf && `，回滚到 ${rollbackOf.config_version}`}
-        {release.note && `。${release.note}`}
+        {t.releases.byline(formatTime(release.published_at), release.published_by)}
+        {rollbackOf && ` · ${t.releases.rollbackOf(rollbackOf.config_version)}`}
+        {release.note && ` · ${release.note}`}
       </p>
       <Card>
         <CardHeader>
-          <CardTitle>相对上一版{previous && ` ${previous.config_version}`}的改动</CardTitle>
+          <CardTitle>{t.releases.changesTitle(previous?.config_version ?? null)}</CardTitle>
         </CardHeader>
         <CardContent className="text-sm">
           {previous ? (
             <ConfigDiffView before={draftFromPublished(previous.content)} after={draftFromPublished(release.content)} />
           ) : (
-            <p className="text-muted-foreground">第一次发布。</p>
+            <p className="text-muted-foreground">{t.releases.firstRelease}</p>
           )}
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>文件内容</CardTitle>
+          <CardTitle>{t.releases.fileTitle}</CardTitle>
         </CardHeader>
         <CardContent>
           <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted p-3 text-xs">

@@ -195,12 +195,14 @@ export function preparePublish(draft: DraftContent = getDraft().content): {
   return { config, issues: validatePublished(config, { latestVersion: latest }) }
 }
 
+export type PublishErrorCode = 'invalid' | 'releaseNotFound' | 'rollbackInvalid'
+
 export class PublishError extends Error {
   constructor(
-    message: string,
+    readonly code: PublishErrorCode,
     readonly issues: ValidationIssue[] = []
   ) {
-    super(message)
+    super(code)
   }
 }
 
@@ -229,7 +231,7 @@ function insertRelease(
 
 export function publish(note: string, actor: Actor): Release {
   const { config, issues } = preparePublish()
-  if (issues.length) throw new PublishError('配置没有通过校验', issues)
+  if (issues.length) throw new PublishError('invalid', issues)
   const previous = currentRelease()
   const id = transaction(() => {
     const id = insertRelease(config, actor, note.trim(), null)
@@ -249,7 +251,7 @@ export function publish(note: string, actor: Actor): Release {
 /** 回滚：以新的版本号重新发布旧版本的内容（vita-admin.md §5），客户端不支持降版本 */
 export function rollback(releaseId: number, actor: Actor): Release {
   const target = getRelease(releaseId)
-  if (!target) throw new PublishError('找不到这个版本')
+  if (!target) throw new PublishError('releaseNotFound')
   const releases = listReleases()
   const latest = releases[0]?.config_version ?? null
   const floor =
@@ -259,9 +261,10 @@ export function rollback(releaseId: number, actor: Actor): Release {
     configVersion: nextConfigVersion(floor, todayInShanghai()),
   }
   const issues = validatePublished(config, { latestVersion: latest })
-  if (issues.length) throw new PublishError('这个版本的内容没有通过当前的校验', issues)
+  if (issues.length) throw new PublishError('rollbackInvalid', issues)
   const id = transaction(() => {
-    const id = insertRelease(config, actor, `回滚到 ${target.config_version}`, target.id)
+    // 回滚的说明由页面按 rollback_of 生成，不存文字
+    const id = insertRelease(config, actor, '', target.id)
     recordAudit({
       actor: actor.name,
       action: 'rollback',

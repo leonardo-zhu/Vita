@@ -1,9 +1,10 @@
+import { titled } from '@/i18n/metadata'
 import { draftFromBuiltin, draftFromPublished, knownTools } from '@/server/config/model'
 import { getDraft, preparePublish } from '@/server/config/service'
 
 import { ConfigEditor } from './config-editor'
 
-export const metadata = { title: '配置 · Vita Admin' }
+export const generateMetadata = titled('config')
 
 export default async function ConfigPage() {
   const draft = getDraft()

@@ -13,10 +13,12 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { useT } from '@/i18n/client'
 
 import { deleteInstallAction, setInstallRevokedAction, type ActionResult } from '../../actions'
 
 export function InstallActions({ installId, revoked }: { installId: string; revoked: boolean }) {
+  const t = useT()
   const [pending, startTransition] = useTransition()
   const [confirming, setConfirming] = useState(false)
 
@@ -32,23 +34,21 @@ export function InstallActions({ installId, revoked }: { installId: string; revo
   return (
     <div className="flex justify-end gap-1">
       <Button variant="ghost" size="sm" disabled={pending} onClick={() => run(() => setInstallRevokedAction(installId, !revoked))}>
-        {revoked ? '解封' : '封禁'}
+        {revoked ? t.diagnostics.restore : t.diagnostics.revoke}
       </Button>
       <Button variant="destructive" size="sm" disabled={pending} onClick={() => setConfirming(true)}>
-        删除数据
+        {t.diagnostics.deleteData}
       </Button>
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>删除这个安装的诊断数据？</AlertDialogTitle>
-            <AlertDialogDescription>
-              安装 {installId.slice(0, 8)} 的全部诊断记录会被删除，不能恢复。它之后再上报的数据仍会被接收。
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t.diagnostics.deleteTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{t.diagnostics.deleteDescription(installId.slice(0, 8))}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={pending}>{t.common.cancel}</AlertDialogCancel>
             <Button variant="destructive" disabled={pending} onClick={() => run(() => deleteInstallAction(installId))}>
-              删除
+              {t.common.delete}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

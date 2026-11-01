@@ -3,22 +3,23 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
+import { useT } from '@/i18n/client'
 import { cn } from '@/lib/utils'
 
-const ITEMS = [
-  { href: '/admin', label: '配置' },
-  { href: '/admin/trial', label: '试跑' },
-  { href: '/admin/releases', label: '发布历史' },
-  { href: '/admin/diagnostics', label: '诊断' },
-  { href: '/admin/audit', label: '审计' },
-  { href: '/admin/settings', label: '设置' },
-] as const
-
 export function ConsoleNav() {
+  const t = useT()
   const pathname = usePathname()
+  const items = [
+    { href: '/admin', label: t.nav.config },
+    { href: '/admin/playground', label: t.nav.playground },
+    { href: '/admin/releases', label: t.nav.releases },
+    { href: '/admin/diagnostics', label: t.nav.diagnostics },
+    { href: '/admin/audit', label: t.nav.audit },
+    { href: '/admin/settings', label: t.nav.settings },
+  ]
   return (
     <nav className="flex min-w-0 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none]">
-      {ITEMS.map((item) => {
+      {items.map((item) => {
         const active = item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href)
         return (
           <Link

@@ -21,7 +21,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { useT } from '@/i18n/client'
 import { describeChanges } from '@/lib/config-diff'
+import { issueText } from '@/lib/issue-text'
 import { formatTime } from '@/lib/format'
 import type { DraftContent, PublishedConfig } from '@/server/config/model'
 import type { ValidationIssue } from '@/server/config/validate'
@@ -43,6 +45,7 @@ interface Props {
 
 export function ConfigEditor(props: Props) {
   const { initial, builtin, tools, current, preview } = props
+  const t = useT()
   const [content, setContent] = useState(initial)
   const [issues, setIssues] = useState(props.issues)
   const [pending, startTransition] = useTransition()
@@ -51,7 +54,10 @@ export function ConfigEditor(props: Props) {
 
   const unsaved = JSON.stringify(content) !== JSON.stringify(initial)
   const canPublish = !unsaved && props.hasPendingChanges && issues.length === 0
-  const issueFor = (path: string) => issues.find((issue) => issue.path === path)?.message
+  const issueFor = (path: string) => {
+    const issue = issues.find((item) => item.path === path)
+    return issue && issueText(t, issue)
+  }
 
   function update(change: (draft: DraftContent) => DraftContent) {
     setContent((draft) => change(structuredClone(draft)))
@@ -75,72 +81,72 @@ export function ConfigEditor(props: Props) {
     <div className="flex flex-col gap-6 pb-24">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">远程配置</h1>
+          <h1 className="text-xl font-semibold">{t.editor.title}</h1>
           <p className="text-sm text-muted-foreground">
             {current
-              ? `线上版本 ${current.configVersion}，${formatTime(current.publishedAt)} 由 ${current.publishedBy} 发布`
-              : '还没有发布过，App 正在使用内置默认值'}
+              ? t.editor.live(current.configVersion, formatTime(current.publishedAt), current.publishedBy)
+              : t.editor.neverPublished}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {unsaved ? (
-            <Badge variant="secondary">有未保存的修改</Badge>
+            <Badge variant="secondary">{t.editor.unsaved}</Badge>
           ) : props.hasPendingChanges ? (
-            <Badge>草稿未发布</Badge>
+            <Badge>{t.editor.draftPending}</Badge>
           ) : (
-            <Badge variant="outline">与线上一致</Badge>
+            <Badge variant="outline">{t.editor.inSync}</Badge>
           )}
         </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>模型与请求</CardTitle>
-          <CardDescription>模型别名必须是 Conduit 上已有的别名，发布前会检查。</CardDescription>
+          <CardTitle>{t.editor.modelTitle}</CardTitle>
+          <CardDescription>{t.editor.modelDescription}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="模型别名" error={issueFor('/llm/modelId')}>
+          <Field label={t.fields.modelId} error={issueFor('/llm/modelId')}>
             <Input
               value={content.llm.modelId}
               onChange={(e) => update((d) => ((d.llm.modelId = e.target.value), d))}
             />
           </Field>
-          <Field label="超时秒数（5–180）" error={issueFor('/llm/timeoutSeconds')}>
+          <Field label={t.editor.timeoutLabel} error={issueFor('/llm/timeoutSeconds')}>
             <NumberInput
               value={content.llm.timeoutSeconds}
               onChange={(v) => update((d) => ((d.llm.timeoutSeconds = v), d))}
             />
           </Field>
-          <Field label="重试次数（0–3）" error={issueFor('/llm/maxRetries')}>
+          <Field label={t.editor.retriesLabel} error={issueFor('/llm/maxRetries')}>
             <NumberInput
               value={content.llm.maxRetries}
               onChange={(v) => update((d) => ((d.llm.maxRetries = v), d))}
             />
           </Field>
           <SwitchField
-            label="流式输出"
+            label={t.fields.streaming}
             checked={content.llm.streaming}
             onChange={(v) => update((d) => ((d.llm.streaming = v), d))}
           />
-          <Field label="上下文消息条数（1–100）" error={issueFor('/context/maxRecentMessages')}>
+          <Field label={t.editor.messagesLabel} error={issueFor('/context/maxRecentMessages')}>
             <NumberInput
               value={content.context.maxRecentMessages}
               onChange={(v) => update((d) => ((d.context.maxRecentMessages = v), d))}
             />
           </Field>
           <SwitchField
-            label="上下文附带个人食品库"
+            label={t.fields.includePersonalFoodSummary}
             checked={content.context.includePersonalFoodSummary}
             onChange={(v) => update((d) => ((d.context.includePersonalFoodSummary = v), d))}
           />
           <Field
-            label="最低客户端版本（可空）"
-            hint="低于这个版本的 App 忽略本配置，格式 0.1.0"
+            label={t.editor.minClientLabel}
+            hint={t.editor.minClientHint}
             error={issueFor('/minClientVersion')}
           >
             <Input
               value={content.minClientVersion}
-              placeholder="不限制"
+              placeholder={t.editor.minClientPlaceholder}
               onChange={(e) => update((d) => ((d.minClientVersion = e.target.value), d))}
             />
           </Field>
@@ -149,12 +155,12 @@ export function ConfigEditor(props: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>系统 prompt</CardTitle>
-          <CardDescription>和 App 内置的一样时不写进配置文件，App 用自带的那份。</CardDescription>
+          <CardTitle>{t.editor.systemTitle}</CardTitle>
+          <CardDescription>{t.editor.systemDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           <PromptField
-            label="系统 prompt"
+            label={t.fields.systemPrompt}
             value={content.systemPrompt}
             builtin={builtin.systemPrompt}
             rows={14}
@@ -166,10 +172,8 @@ export function ConfigEditor(props: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>工具描述</CardTitle>
-          <CardDescription>
-            只能改模型看到的说明文字；工具清单和参数由 App 代码决定，这里改不了。
-          </CardDescription>
+          <CardTitle>{t.editor.toolsTitle}</CardTitle>
+          <CardDescription>{t.editor.toolsDescription}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {tools.map((name) => {
@@ -179,13 +183,13 @@ export function ConfigEditor(props: Props) {
               <details key={name} className="group rounded-lg border px-3 py-2" open={Boolean(error)}>
                 <summary className="flex cursor-pointer list-none items-center gap-2 text-sm">
                   <span className="font-mono">{name}</span>
-                  {modified && <Badge>已修改</Badge>}
-                  {error && <Badge variant="destructive">有问题</Badge>}
-                  <span className="ml-auto text-xs text-muted-foreground group-open:hidden">展开</span>
+                  {modified && <Badge>{t.editor.modified}</Badge>}
+                  {error && <Badge variant="destructive">{t.editor.hasIssue}</Badge>}
+                  <span className="ml-auto text-xs text-muted-foreground group-open:hidden">{t.common.expand}</span>
                 </summary>
                 <div className="pt-3">
                   <PromptField
-                    label={`${name} 的描述`}
+                    label={t.editor.toolDescriptionLabel(name)}
                     value={content.toolDescriptions[name] ?? ''}
                     builtin={builtin.toolDescriptions[name]}
                     rows={4}
@@ -201,12 +205,12 @@ export function ConfigEditor(props: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>功能开关</CardTitle>
-          <CardDescription>只能启用或关闭 App 已经带上的能力。</CardDescription>
+          <CardTitle>{t.editor.featuresTitle}</CardTitle>
+          <CardDescription>{t.editor.featuresDescription}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {Object.keys(builtin.features).length === 0 ? (
-            <p className="text-sm text-muted-foreground">当前 App 没有可远程控制的开关。</p>
+            <p className="text-sm text-muted-foreground">{t.editor.noFeatures}</p>
           ) : (
             Object.keys(builtin.features).map((name) => (
               <SwitchField
@@ -222,25 +226,23 @@ export function ConfigEditor(props: Props) {
 
       <Card>
         <CardHeader>
-          <CardTitle>发布预览</CardTitle>
-          <CardDescription>
-            按已保存的草稿生成，下一个版本号 {preview.configVersion}。App 回到前台时拉取，下一轮对话生效。
-          </CardDescription>
+          <CardTitle>{t.editor.previewTitle}</CardTitle>
+          <CardDescription>{t.editor.previewDescription(preview.configVersion)}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {issues.length > 0 && (
             <ul className="list-inside list-disc text-sm text-destructive">
               {issues.map((issue) => (
-                <li key={issue.path + issue.message}>{issue.message}</li>
+                <li key={issue.path + issue.rule}>{issueText(t, issue)}</li>
               ))}
             </ul>
           )}
           <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">相对线上{current ? ` ${current.configVersion}` : '（内置默认值）'}的改动</span>
-            <ConfigDiffView before={props.baseline} after={initial} empty="已保存的草稿和线上一致。" />
+            <span className="text-sm font-medium">{t.editor.changesAgainst(current?.configVersion ?? null)}</span>
+            <ConfigDiffView before={props.baseline} after={initial} empty={t.diff.draftSameAsLive} />
           </div>
           <details>
-            <summary className="cursor-pointer text-sm text-muted-foreground">查看将要发布的 stable.json</summary>
+            <summary className="cursor-pointer text-sm text-muted-foreground">{t.editor.showFile}</summary>
             <pre className="mt-2 max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs">
               {JSON.stringify(preview, null, 2)}
             </pre>
@@ -252,19 +254,19 @@ export function ConfigEditor(props: Props) {
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-end gap-2 px-4 py-3">
           {unsaved && (
             <Button variant="ghost" disabled={pending} onClick={() => setContent(initial)}>
-              撤销编辑
+              {t.editor.undoEdits}
             </Button>
           )}
           {!unsaved && props.saved && (
             <Button variant="ghost" disabled={pending} onClick={() => run(discardDraftAction)}>
-              放弃草稿
+              {t.editor.discardDraft}
             </Button>
           )}
           <Button variant="outline" disabled={!unsaved || pending} onClick={() => run(() => saveDraftAction(content))}>
-            保存草稿
+            {t.editor.saveDraft}
           </Button>
           <Button disabled={!canPublish || pending} onClick={() => setPublishOpen(true)}>
-            发布…
+            {t.editor.publishEllipsis}
           </Button>
         </div>
       </div>
@@ -272,23 +274,21 @@ export function ConfigEditor(props: Props) {
       <AlertDialog open={publishOpen} onOpenChange={setPublishOpen}>
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>发布 {preview.configVersion}？</AlertDialogTitle>
-            <AlertDialogDescription>
-              发布后立即对外生效。相对线上{current ? ` ${current.configVersion}` : '（内置默认值）'}的改动：
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t.editor.publishTitle(preview.configVersion)}</AlertDialogTitle>
+            <AlertDialogDescription>{t.editor.publishDescription(current?.configVersion ?? null)}</AlertDialogDescription>
           </AlertDialogHeader>
           <ul className="list-inside list-disc text-sm">
-            {describeChanges(props.baseline, initial).map((change) => (
+            {describeChanges(t, props.baseline, initial).map((change) => (
               <li key={change}>{change}</li>
             ))}
           </ul>
-          <Field label="备注（可空）">
-            <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="这次改了什么、为什么" />
+          <Field label={t.editor.noteLabel}>
+            <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t.editor.notePlaceholder} />
           </Field>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={pending}>{t.common.cancel}</AlertDialogCancel>
             <Button disabled={pending} onClick={() => run(() => publishAction(note), () => setPublishOpen(false))}>
-              {pending ? '发布中…' : '发布'}
+              {pending ? t.editor.publishing : t.editor.publish}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -367,16 +367,17 @@ function PromptField({
   error?: string
   onChange: (value: string) => void
 }) {
+  const t = useT()
   const modified = value !== builtin
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {modified ? <Badge>已修改</Badge> : <Badge variant="outline">与内置相同</Badge>}
-        <span>{value.length} 字</span>
+        {modified ? <Badge>{t.editor.modified}</Badge> : <Badge variant="outline">{t.editor.sameAsBuiltin}</Badge>}
+        <span>{t.editor.chars(value.length)}</span>
         {modified && (
           <Button variant="ghost" size="xs" className="ml-auto" onClick={() => onChange(builtin)}>
             <RotateCcw />
-            恢复内置
+            {t.editor.restoreBuiltin}
           </Button>
         )}
       </div>

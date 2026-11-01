@@ -7,7 +7,7 @@ import { passkeyRoute } from '@/server/passkey-route'
 
 export async function POST(req: NextRequest) {
   const session = await currentSession()
-  if (!session) return NextResponse.json({ ok: false, message: '未登录' }, { status: 401 })
+  if (!session) return NextResponse.json({ ok: false, code: 'notLoggedIn' }, { status: 401 })
   const body = (await req.json().catch(() => ({}))) as {
     flowToken?: unknown
     credential?: unknown

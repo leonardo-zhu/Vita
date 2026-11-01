@@ -8,6 +8,8 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useT } from '@/i18n/client'
+import { apiErrorText } from '@/lib/api-error-text'
 import { post } from '@/lib/post'
 
 import { deletePasskeyAction } from '../../actions'
@@ -20,6 +22,7 @@ interface Passkey {
 }
 
 export function PasskeyManager({ passkeys }: { passkeys: Passkey[] }) {
+  const t = useT()
   const router = useRouter()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -35,13 +38,13 @@ export function PasskeyManager({ passkeys }: { passkeys: Passkey[] }) {
         )
         const credential = await startRegistration({ optionsJSON: begin.options })
         await post('/api/passkey/register/finish', { flowToken: begin.flowToken, credential, name })
-        toast.success('已添加 Passkey')
+        toast.success(t.settings.passkeyAdded)
         setAdding(false)
         setName('')
         setPassword('')
         router.refresh()
       } catch (error) {
-        if ((error as Error).name !== 'NotAllowedError') toast.error((error as Error).message)
+        if ((error as Error).name !== 'NotAllowedError') toast.error(apiErrorText(t, error))
       }
     })
   }
@@ -56,28 +59,26 @@ export function PasskeyManager({ passkeys }: { passkeys: Passkey[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {passkeys.length === 0 && <p className="text-sm text-muted-foreground">还没有注册 Passkey。</p>}
+      {passkeys.length === 0 && <p className="text-sm text-muted-foreground">{t.settings.noPasskeys}</p>}
       {passkeys.map((passkey) => (
         <div key={passkey.id} className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm">
           <div className="flex flex-col">
             <span>{passkey.name}</span>
-            <span className="text-xs text-muted-foreground">
-              添加于 {passkey.createdAt}，最近使用 {passkey.lastUsedAt}
-            </span>
+            <span className="text-xs text-muted-foreground">{t.settings.passkeyMeta(passkey.createdAt, passkey.lastUsedAt)}</span>
           </div>
           <Button variant="destructive" size="sm" className="ml-auto" disabled={pending} onClick={() => remove(passkey.id)}>
-            删除
+            {t.common.delete}
           </Button>
         </div>
       ))}
       {adding ? (
         <div className="grid gap-3 rounded-lg border p-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="passkey-name">名称</Label>
-            <Input id="passkey-name" value={name} placeholder="如 MacBook" onChange={(e) => setName(e.target.value)} />
+            <Label htmlFor="passkey-name">{t.settings.passkeyName}</Label>
+            <Input id="passkey-name" value={name} placeholder={t.settings.passkeyNamePlaceholder} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="passkey-password">当前密码</Label>
+            <Label htmlFor="passkey-password">{t.settings.currentPassword}</Label>
             <Input
               id="passkey-password"
               type="password"
@@ -88,16 +89,16 @@ export function PasskeyManager({ passkeys }: { passkeys: Passkey[] }) {
           </div>
           <div className="flex gap-2 sm:col-span-2">
             <Button disabled={pending || !password} onClick={add}>
-              {pending ? '等待验证…' : '注册'}
+              {pending ? t.settings.registering : t.settings.register}
             </Button>
             <Button variant="ghost" disabled={pending} onClick={() => setAdding(false)}>
-              取消
+              {t.common.cancel}
             </Button>
           </div>
         </div>
       ) : (
         <Button variant="outline" className="self-start" onClick={() => setAdding(true)}>
-          添加 Passkey
+          {t.settings.addPasskey}
         </Button>
       )}
     </div>

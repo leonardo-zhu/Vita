@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { useT } from '@/i18n/client'
 
 interface Props {
   days: number
@@ -18,6 +19,7 @@ const select =
 
 /** 筛选条件放在 URL 里，换一项就跳转 */
 export function DiagnosticsFilters({ days, config, app, code, options }: Props) {
+  const t = useT()
   const router = useRouter()
 
   function go(change: Partial<Record<'days' | 'config' | 'app' | 'code', string>>) {
@@ -29,17 +31,17 @@ export function DiagnosticsFilters({ days, config, app, code, options }: Props) 
   return (
     <div className="flex flex-wrap items-end gap-3">
       <Label className="flex flex-col items-start gap-1.5">
-        <span>时间</span>
+        <span>{t.diagnostics.range}</span>
         <select className={select} value={days} onChange={(e) => go({ days: e.target.value })}>
-          <option value="1">最近 24 小时</option>
-          <option value="7">最近 7 天</option>
-          <option value="30">最近 30 天</option>
+          <option value="1">{t.diagnostics.last24h}</option>
+          <option value="7">{t.diagnostics.last7d}</option>
+          <option value="30">{t.diagnostics.last30d}</option>
         </select>
       </Label>
       <Label className="flex flex-col items-start gap-1.5">
-        <span>配置版本</span>
+        <span>{t.diagnostics.configVersion}</span>
         <select className={select} value={config} onChange={(e) => go({ config: e.target.value })}>
-          <option value="">全部</option>
+          <option value="">{t.diagnostics.all}</option>
           {options.configVersions.map((version) => (
             <option key={version} value={version}>
               {version}
@@ -48,9 +50,9 @@ export function DiagnosticsFilters({ days, config, app, code, options }: Props) 
         </select>
       </Label>
       <Label className="flex flex-col items-start gap-1.5">
-        <span>App 版本</span>
+        <span>{t.diagnostics.appVersion}</span>
         <select className={select} value={app} onChange={(e) => go({ app: e.target.value })}>
-          <option value="">全部</option>
+          <option value="">{t.diagnostics.all}</option>
           {options.appVersions.map((version) => (
             <option key={version} value={version}>
               {version}
@@ -60,7 +62,7 @@ export function DiagnosticsFilters({ days, config, app, code, options }: Props) 
       </Label>
       {code && (
         <Button variant="outline" onClick={() => go({ code: '' })}>
-          错误码 {code} ✕
+          {t.diagnostics.errorCodeChip(code)}
         </Button>
       )}
     </div>

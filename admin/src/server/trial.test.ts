@@ -93,7 +93,7 @@ describe('runTrials', () => {
   it('records the error when Conduit fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: { message: '额度用完' } }, { status: 429 })))
     const [run] = await runTrials(['draft'], '你好', '', actor)
-    expect(run.error).toBe('Conduit 返回 429：额度用完')
+    expect(run.error).toBe('HTTP 429: 额度用完')
     expect(run.output).toBeNull()
   })
 })

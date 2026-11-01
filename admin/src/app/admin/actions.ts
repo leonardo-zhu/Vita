@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import type { Messages } from '@/i18n/messages'
+import { getT } from '@/i18n/server'
 import { requireActor } from '@/server/actor'
 import { recordAudit } from '@/server/audit'
 import {
@@ -41,21 +43,22 @@ export type ActionResult =
 // ---------------------------------------------------------------------------
 
 export async function loginAction(_: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const t = await getT()
   const ip = await clientIp()
-  if (isLockedOut(ip)) return { ok: false, message: '失败次数太多，请 15 分钟后再试' }
+  if (isLockedOut(ip)) return { ok: false, message: t.login.lockedOut }
   const username = String(form.get('username') ?? '')
   const password = String(form.get('password') ?? '')
   let valid: boolean
   try {
     valid = checkCredentials(username, password)
   } catch (error) {
-    if (error instanceof AuthConfigError) return { ok: false, message: error.message }
+    if (error instanceof AuthConfigError) return { ok: false, message: t.login.notConfigured }
     throw error
   }
   if (!valid) {
     recordFailure(ip)
-    recordAudit({ actor: username || '(空)', action: 'login_failed', ip })
-    return { ok: false, message: '账号或密码不对' }
+    recordAudit({ actor: username || '(empty)', action: 'login_failed', ip })
+    return { ok: false, message: t.login.wrong }
   }
   clearFailures(ip)
   await startSession('password')
@@ -76,53 +79,65 @@ export async function logoutAction() {
 
 export async function saveDraftAction(content: DraftContent): Promise<ActionResult> {
   const actor = await requireActor()
+  const t = await getT()
   try {
     saveDraft(content, actor)
   } catch (error) {
-    return { ok: false, message: `草稿格式不对：${(error as Error).message}` }
+    return { ok: false, message: t.actions.draftInvalid((error as Error).message) }
   }
   revalidatePath('/admin')
   const { issues } = preparePublish()
   return issues.length
-    ? { ok: true, message: '草稿已保存', warning: `还有 ${issues.length} 处没通过校验，修好才能发布` }
-    : { ok: true, message: '草稿已保存' }
+    ? { ok: true, message: t.actions.draftSaved, warning: t.actions.draftHasIssues(issues.length) }
+    : { ok: true, message: t.actions.draftSaved }
 }
 
 export async function discardDraftAction(): Promise<ActionResult> {
   const actor = await requireActor()
+  const t = await getT()
   discardDraft(actor)
   revalidatePath('/admin')
-  return { ok: true, message: '已放弃修改' }
+  return { ok: true, message: t.actions.draftDiscarded }
+}
+
+function publishFailure(t: Messages, error: PublishError): ActionResult {
+  const message = {
+    invalid: t.actions.publishInvalid,
+    releaseNotFound: t.actions.releaseNotFound,
+    rollbackInvalid: t.actions.rollbackInvalid,
+  }[error.code]
+  return { ok: false, message, issues: error.issues }
 }
 
 export async function publishAction(note: string): Promise<ActionResult> {
   const actor = await requireActor()
+  const t = await getT()
   const alias = await checkModelAlias(getDraft().content.llm.modelId)
   if (alias.status === 'missing') {
-    return { ok: false, message: alias.message, issues: [{ path: '/llm/modelId', message: alias.message }] }
+    const message = t.issues.rule.aliasMissing('', alias.alias)
+    return { ok: false, message, issues: [{ path: '/llm/modelId', rule: 'aliasMissing', param: alias.alias }] }
   }
   try {
     const release = publish(note, actor)
     revalidatePath('/admin', 'layout')
-    return {
-      ok: true,
-      message: `已发布 ${release.config_version}`,
-      warning: alias.status === 'ok' ? undefined : alias.message,
-    }
+    const warning =
+      alias.status === 'skipped' ? t.actions.aliasSkipped : alias.status === 'error' ? t.actions.aliasError(alias.detail) : undefined
+    return { ok: true, message: t.actions.published(release.config_version), warning }
   } catch (error) {
-    if (error instanceof PublishError) return { ok: false, message: error.message, issues: error.issues }
+    if (error instanceof PublishError) return publishFailure(t, error)
     throw error
   }
 }
 
 export async function rollbackAction(releaseId: number): Promise<ActionResult> {
   const actor = await requireActor()
+  const t = await getT()
   try {
     const release = rollback(releaseId, actor)
     revalidatePath('/admin', 'layout')
-    return { ok: true, message: `已发布 ${release.config_version}（回滚）` }
+    return { ok: true, message: t.actions.rolledBack(release.config_version) }
   } catch (error) {
-    if (error instanceof PublishError) return { ok: false, message: error.message, issues: error.issues }
+    if (error instanceof PublishError) return publishFailure(t, error)
     throw error
   }
 }
@@ -133,15 +148,16 @@ export async function rollbackAction(releaseId: number): Promise<ActionResult> {
 
 export async function deletePasskeyAction(id: string): Promise<ActionResult> {
   const actor = await requireActor()
+  const t = await getT()
   const row = getPasskey(id)
-  if (!row || !deletePasskey(id)) return { ok: false, message: '这个 Passkey 已经不存在' }
+  if (!row || !deletePasskey(id)) return { ok: false, message: t.actions.passkeyGone }
   recordAudit({ actor: actor.name, action: 'passkey_remove', targetType: 'passkey', targetId: row.name, ip: actor.ip })
   revalidatePath('/admin/settings')
-  return { ok: true, message: `已删除 ${row.name}` }
+  return { ok: true, message: t.actions.passkeyDeleted(row.name) }
 }
 
 // ---------------------------------------------------------------------------
-// Prompt 试跑
+// Prompt 调试
 // ---------------------------------------------------------------------------
 
 export type TrialMode = 'draft' | 'live' | 'both'
@@ -152,13 +168,14 @@ export async function runTrialAction(input: {
   context: string
 }): Promise<{ ok: true; runs: TrialRun[] } | { ok: false; message: string }> {
   const actor = await requireActor()
-  if (!conduitConfigured()) return { ok: false, message: '没有配置 CONDUIT_BASE_URL / CONDUIT_API_KEY，不能试跑' }
+  const t = await getT()
+  if (!conduitConfigured()) return { ok: false, message: t.playground.errors.notConfigured }
   const message = input.message.trim()
-  if (!message) return { ok: false, message: '先写一句用户消息' }
-  if (message.length > 2000 || input.context.length > 20000) return { ok: false, message: '内容太长' }
+  if (!message) return { ok: false, message: t.playground.errors.emptyMessage }
+  if (message.length > 2000 || input.context.length > 20000) return { ok: false, message: t.playground.errors.tooLong }
   const sources: TrialSource[] = input.mode === 'both' ? ['live', 'draft'] : [input.mode]
   const runs = await runTrials(sources, message, input.context, actor)
-  revalidatePath('/admin/trial')
+  revalidatePath('/admin/playground')
   return { ok: true, runs }
 }
 
@@ -170,18 +187,20 @@ const INSTALL_ID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12
 
 export async function deleteInstallAction(installId: string): Promise<ActionResult> {
   const actor = await requireActor()
-  if (!INSTALL_ID.test(installId)) return { ok: false, message: '安装 ID 格式不对' }
+  const t = await getT()
+  if (!INSTALL_ID.test(installId)) return { ok: false, message: t.actions.badInstallId }
   const removed = deleteInstall(installId, false)
   recordAudit({ actor: actor.name, action: 'install_delete', targetType: 'install', targetId: installId, diff: { removed }, ip: actor.ip })
   revalidatePath('/admin/diagnostics')
-  return { ok: true, message: `已删除 ${removed} 条诊断记录` }
+  return { ok: true, message: t.actions.installDeleted(removed) }
 }
 
 export async function setInstallRevokedAction(installId: string, revoked: boolean): Promise<ActionResult> {
   const actor = await requireActor()
-  if (!INSTALL_ID.test(installId)) return { ok: false, message: '安装 ID 格式不对' }
+  const t = await getT()
+  if (!INSTALL_ID.test(installId)) return { ok: false, message: t.actions.badInstallId }
   setInstallRevoked(installId, revoked)
   recordAudit({ actor: actor.name, action: 'install_revoke', targetType: 'install', targetId: installId, diff: { revoked }, ip: actor.ip })
   revalidatePath('/admin/diagnostics')
-  return { ok: true, message: revoked ? '已封禁，之后的上报会被拒收' : '已解封' }
+  return { ok: true, message: revoked ? t.actions.installRevoked : t.actions.installRestored }
 }

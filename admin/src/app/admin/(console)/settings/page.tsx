@@ -1,13 +1,16 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { titled } from '@/i18n/metadata'
+import { getT } from '@/i18n/server'
 import { formatTime } from '@/lib/format'
 import { publishDir } from '@/server/config/publisher'
 import { listPasskeys } from '@/server/db'
 
 import { PasskeyManager } from './passkey-manager'
 
-export const metadata = { title: '设置 · Vita Admin' }
+export const generateMetadata = titled('settings')
 
 export default async function SettingsPage() {
+  const t = await getT()
   const passkeys = listPasskeys().map((row) => ({
     id: row.id,
     name: row.name,
@@ -16,11 +19,11 @@ export default async function SettingsPage() {
   }))
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">设置</h1>
+      <h1 className="text-xl font-semibold">{t.settings.title}</h1>
       <Card>
         <CardHeader>
-          <CardTitle>Passkey</CardTitle>
-          <CardDescription>注册后可以不输密码登录。添加前需要再确认一次密码。</CardDescription>
+          <CardTitle>{t.settings.passkeyTitle}</CardTitle>
+          <CardDescription>{t.settings.passkeyDescription}</CardDescription>
         </CardHeader>
         <CardContent>
           <PasskeyManager passkeys={passkeys} />
@@ -28,18 +31,18 @@ export default async function SettingsPage() {
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>发布</CardTitle>
-          <CardDescription>发布的文件由 Caddy 直接提供，不经过 Admin。</CardDescription>
+          <CardTitle>{t.settings.publishTitle}</CardTitle>
+          <CardDescription>{t.settings.publishDescription}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2 text-sm">
-          <Row label="对外地址" value="https://vita.r4s.leonardo-zhu.me/config/stable.json" />
-          <Row label="发布目录" value={publishDir()} />
+          <Row label={t.settings.publicUrl} value="https://vita.r4s.leonardo-zhu.me/config/stable.json" />
+          <Row label={t.settings.publishDir} value={publishDir()} />
           <Row
-            label="模型别名检查"
+            label={t.settings.conduit}
             value={
               process.env.CONDUIT_BASE_URL && process.env.CONDUIT_API_KEY
-                ? `已启用（${process.env.CONDUIT_BASE_URL}）`
-                : '未配置 CONDUIT_BASE_URL / CONDUIT_API_KEY，发布时不检查'
+                ? t.settings.conduitOn(process.env.CONDUIT_BASE_URL)
+                : t.settings.conduitOff
             }
           />
         </CardContent>

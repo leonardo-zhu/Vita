@@ -6,7 +6,7 @@ import { passkeyRoute } from '@/server/passkey-route'
 
 export async function POST(req: NextRequest) {
   return passkeyRoute(async () => {
-    if (isLockedOut(await clientIp())) throw new PasskeyError('失败次数太多，请 15 分钟后再试')
+    if (isLockedOut(await clientIp())) throw new PasskeyError('lockedOut')
     return beginLogin(req)
   })
 }

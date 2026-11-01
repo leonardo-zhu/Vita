@@ -1,33 +1,37 @@
+import { titled } from '@/i18n/metadata'
 import Link from 'next/link'
 
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatTime } from '@/lib/format'
+import { getT } from '@/i18n/server'
 import { currentRelease, listReleases } from '@/server/config/service'
 
-export const metadata = { title: '发布历史 · Vita Admin' }
+export const generateMetadata = titled('releases')
 
 export default async function ReleasesPage() {
+  const t = await getT()
   const releases = listReleases()
   const currentId = currentRelease()?.id
+  const rollbackVersion = (id: number) => releases.find((release) => release.id === id)?.config_version ?? `#${id}`
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">发布历史</h1>
+        <h1 className="text-xl font-semibold">{t.releases.title}</h1>
         <Link href="/admin/releases/compare" className="text-sm underline-offset-4 hover:underline">
-          对比任意两个版本 →
+          {t.releases.compareLink}
         </Link>
       </div>
       {releases.length === 0 ? (
-        <p className="text-sm text-muted-foreground">还没有发布过。</p>
+        <p className="text-sm text-muted-foreground">{t.releases.empty}</p>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>版本</TableHead>
-              <TableHead>发布时间</TableHead>
-              <TableHead>发布人</TableHead>
-              <TableHead>备注</TableHead>
+              <TableHead>{t.releases.version}</TableHead>
+              <TableHead>{t.releases.publishedAt}</TableHead>
+              <TableHead>{t.releases.publishedBy}</TableHead>
+              <TableHead>{t.releases.note}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -39,13 +43,13 @@ export default async function ReleasesPage() {
                   </Link>
                   {release.id === currentId && (
                     <Badge className="ml-2" variant="outline">
-                      线上
+                      {t.releases.live}
                     </Badge>
                   )}
                 </TableCell>
                 <TableCell>{formatTime(release.published_at)}</TableCell>
                 <TableCell>{release.published_by}</TableCell>
-                <TableCell className="max-w-xs truncate text-muted-foreground">{release.note || '—'}</TableCell>
+                <TableCell className="max-w-xs truncate text-muted-foreground">{release.note || (release.rollback_of ? t.releases.rollbackOf(rollbackVersion(release.rollback_of)) : t.common.none)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
