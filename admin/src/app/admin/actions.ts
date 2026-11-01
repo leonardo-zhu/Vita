@@ -29,6 +29,7 @@ import {
 } from '@/server/config/service'
 import type { ValidationIssue } from '@/server/config/validate'
 import { deletePasskey, getPasskey } from '@/server/db'
+import { conduitConfigured, runTrials, type TrialRun, type TrialSource } from '@/server/trial'
 
 export type ActionResult =
   | { ok: true; message?: string; warning?: string }
@@ -136,4 +137,26 @@ export async function deletePasskeyAction(id: string): Promise<ActionResult> {
   recordAudit({ actor: actor.name, action: 'passkey_remove', targetType: 'passkey', targetId: row.name, ip: actor.ip })
   revalidatePath('/admin/settings')
   return { ok: true, message: `已删除 ${row.name}` }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt 试跑
+// ---------------------------------------------------------------------------
+
+export type TrialMode = 'draft' | 'live' | 'both'
+
+export async function runTrialAction(input: {
+  mode: TrialMode
+  message: string
+  context: string
+}): Promise<{ ok: true; runs: TrialRun[] } | { ok: false; message: string }> {
+  const actor = await requireActor()
+  if (!conduitConfigured()) return { ok: false, message: '没有配置 CONDUIT_BASE_URL / CONDUIT_API_KEY，不能试跑' }
+  const message = input.message.trim()
+  if (!message) return { ok: false, message: '先写一句用户消息' }
+  if (message.length > 2000 || input.context.length > 20000) return { ok: false, message: '内容太长' }
+  const sources: TrialSource[] = input.mode === 'both' ? ['live', 'draft'] : [input.mode]
+  const runs = await runTrials(sources, message, input.context, actor)
+  revalidatePath('/admin/trial')
+  return { ok: true, runs }
 }

@@ -14,6 +14,7 @@ const ACTIONS: Record<AuditAction, string> = {
   draft_reset: '放弃草稿',
   publish: '发布',
   rollback: '回滚',
+  trial: '试跑',
 }
 
 export default async function AuditPage() {

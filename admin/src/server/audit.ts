@@ -13,6 +13,7 @@ export type AuditAction =
   | 'draft_reset'
   | 'publish'
   | 'rollback'
+  | 'trial'
 
 export interface AuditEntry {
   actor: string

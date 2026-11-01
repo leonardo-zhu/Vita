@@ -64,6 +64,25 @@ const MIGRATIONS = [
     BEGIN SELECT RAISE(ABORT, 'admin_audit is append-only'); END;
   CREATE TRIGGER admin_audit_no_delete BEFORE DELETE ON admin_audit
     BEGIN SELECT RAISE(ABORT, 'admin_audit is append-only'); END;`,
+  // Prompt 试跑（vita-admin.md §11.2）：用哪份配置、发了什么、模型第一步回了什么
+  `CREATE TABLE prompt_trials (
+    id              INTEGER PRIMARY KEY,
+    batch_id        TEXT NOT NULL,           -- 同一次点击里对比跑的几条共用
+    source          TEXT NOT NULL,           -- draft / live
+    config_version  TEXT,                    -- live 时是线上版本；没发布过或草稿为空
+    model           TEXT NOT NULL,
+    message         TEXT NOT NULL,
+    context         TEXT NOT NULL,
+    output          TEXT,                    -- JSON：{ text, reasoning, toolCalls }
+    error           TEXT,
+    request_id      TEXT NOT NULL,           -- X-Request-Id，可在 Conduit 日志里对上
+    latency_ms      INTEGER NOT NULL,
+    input_tokens    INTEGER,
+    output_tokens   INTEGER,
+    created_by      TEXT NOT NULL,
+    created_at      INTEGER NOT NULL
+  );
+  CREATE INDEX prompt_trials_created ON prompt_trials (created_at DESC);`,
 ]
 
 export function dataDir(): string {

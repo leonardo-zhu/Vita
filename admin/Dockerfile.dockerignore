@@ -2,6 +2,7 @@
 *
 !admin
 !shared/config-schema
+!shared/agent-tools
 !ios/Vita/Resources/DefaultConfig.json
 admin/node_modules
 admin/.next
