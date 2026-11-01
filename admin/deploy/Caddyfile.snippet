@@ -1,0 +1,24 @@
+# 追加到 /opt/stacks/caddy/Caddyfile。
+#
+# /config/* 由 Caddy 直接提供发布目录里的文件，不经过 Admin（vita-admin.md §8.1）：Admin 停机或部署中，
+# App 照样能拉到配置。前提是 Caddy 容器把发布目录只读挂进来，在 /opt/stacks/caddy 的 compose 里加：
+#     volumes:
+#       - /opt/vita-admin/published:/srv/vita-config:ro
+# 加卷需要重建 Caddy 容器（所有反代会断一下）。
+#
+# 其余路径（/admin、/api/passkey、/api/status，以及将来的 /api/ingest）转给只监听 127.0.0.1:3013 的 Admin。
+
+vita.r4s.leonardo-zhu.me {
+	handle /config/* {
+		uri strip_prefix /config
+		root * /srv/vita-config
+		# 只提供发布出来的 <channel>.json，目录里的临时文件不对外
+		@notChannel not path_regexp ^/[a-z]+\.json$
+		respond @notChannel 404
+		header Cache-Control "no-cache"
+		file_server
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3013
+	}
+}

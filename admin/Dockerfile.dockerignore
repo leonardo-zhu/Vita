@@ -1,0 +1,12 @@
+# 构建上下文是仓库根目录，只放 Admin 需要的文件（见 Dockerfile 开头）
+*
+!admin
+!shared/config-schema
+!ios/Vita/Resources/DefaultConfig.json
+admin/node_modules
+admin/.next
+admin/.data
+admin/.env*
+!admin/.env.example
+admin/src/generated
+admin/*.tsbuildinfo

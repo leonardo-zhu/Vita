@@ -1,0 +1,32 @@
+# Vita Admin — R4S 上的 /opt/stacks/vita-admin/compose.yaml
+# 由 GitHub Actions 部署时从仓库拷过去，不要在服务器上直接改（改了会被下次部署覆盖）。
+#
+# 一个服务：admin/ 目录的 Next.js 应用。CI 构建后推到 GHCR。
+# 和 R4S 其他 stack 一致：network_mode: host + restart: unless-stopped。
+# 端口：3000（gh-mcp）、3012（Conduit）、4000（个人站）已被占用，这里用 3013。
+
+services:
+  admin:
+    image: ghcr.io/leonardo-zhu/vita-admin:${ADMIN_TAG:-latest}
+    container_name: vita-admin
+    restart: unless-stopped
+    network_mode: host
+    # 管理员账号、会话密钥、PASSKEY_ORIGIN、Conduit 别名检查用的密钥，模板见 admin/.env.example。只在服务器上维护
+    env_file:
+      - .env
+    environment:
+      - PORT=3013
+      # 只给同机的 Caddy 访问：登录限速信任 X-Forwarded-For，不能让外部直连
+      - HOSTNAME=127.0.0.1
+      - TZ=Asia/Shanghai
+      - VITA_ADMIN_DATA_DIR=/data
+      - VITA_PUBLISH_DIR=/published
+      - NODE_OPTIONS=--max-old-space-size=128
+    volumes:
+      # 容器里以 node 用户（uid 1000）运行，首次部署前 chown 1000:1000 这两个目录
+      - /opt/vita-admin/data:/data
+      # 发布目录：Caddy 容器以只读方式挂载同一个目录，提供 /config/*，见 Caddyfile.snippet
+      - /opt/vita-admin/published:/published
+    mem_limit: 256m
+    labels:
+      - "app=vita-admin"
