@@ -1,6 +1,6 @@
 # Vita Admin
 
-Next.js 管理后台：远程配置的编辑、校验、签名发布，以及客户端诊断日志的接收与查看。
+Next.js 管理后台：远程配置的编辑、校验与发布，以及客户端诊断日志的接收与查看。部署在 R4S（与 Conduit 同机），数据库为 SQLite。
 
 设计见 [Vita Admin 设计](../docs/architecture/vita-admin.md)。尚未开始实现（M1 起）。
 

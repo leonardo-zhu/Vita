@@ -58,7 +58,7 @@
 ## Phase 5：Agent 接入与体验打磨
 
 - 以 `LLMClient` 接入 Conduit（Responses API，无状态），启用工具调用；前置：Conduit M1 可用（令牌鉴权、别名路由）——2026-10-29 已上线，开始时在 Conduit 的应用 Vita 下配别名（如 `vita-chat`）、每台设备建一把密钥。
-- 完成远程配置拉取、验签、校验与本地调试覆盖（见 Vita Admin 设计）；Admin 与诊断日志按其分期 M1–M3 推进，不阻塞本阶段的真实对话验收。
+- 完成远程配置拉取、校验与本地调试覆盖（见 Vita Admin 设计）；Admin 与诊断日志按其分期 M1–M3 推进，不阻塞本阶段的真实对话验收。
 - 为工具参数、模型输出、超时和网络错误增加校验与可恢复提示。
 - 实现 Chat / Data 双层导航、按日 Session、Onboarding。
 
@@ -75,15 +75,15 @@
 - **内置系统 prompt v3**：确认卡只能来自提案工具；思考用中文。验收中模型两次只说“已生成确认卡”却没调用工具，已用历史注记与这条规则缓解。
 - 调试用的假 Agent 菜单已删除。
 
-未做：远程配置拉取与验签（托管与签名方案待定，见 Vita Admin 设计 §12）、诊断日志上报、PRD 中“减脂 / 增肌”的目标类型选择（目标仍按 `GoalRecommendationPolicy` 的固定系数）。
+未做：远程配置拉取（与 Admin M1 一起做，见 Vita Admin 设计 §5 / §8）、诊断日志上报、PRD 中“减脂 / 增肌”的目标类型选择（目标仍按 `GoalRecommendationPolicy` 的固定系数）。
 
 ## 剩余工作
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| 远程配置拉取与验签 | 待决策 | 需先定托管位置与是否签名（Vita Admin 设计 §12 第 1、2、9 条）。在此之前用内置配置与本地调试覆盖。 |
-| Vita Admin（`admin/`） | 未开始 | 按 Vita Admin 设计 §11.5 分期 M1–M3。 |
-| 诊断日志上报 | 未开始 | ADR-014 待确认；目前只有本机 `os.Logger`。 |
+| 远程配置拉取 | 未开始 | 方案已定（Vita Admin 设计 §12）：从 `https://vita.r4s.leonardo-zhu.me/config/stable.json` 拉取，启动与每次回到前台检查，设置页“立即刷新”；现阶段不签名。随 Admin M1 一起做。 |
+| Vita Admin（`admin/`） | 未开始 | 方案已定：Next.js + SQLite，部署在 R4S（与 Conduit 同机），首期只有 `stable` 渠道。按 Vita Admin 设计 §11.5 分期 M1–M3。 |
+| 诊断日志上报 | 未开始 | ADR-014 已采纳，默认开；Admin M3 做。目前只有本机 `os.Logger`。 |
 | 真机验证 | 待做 | 本轮功能只在 iPhone 18 Pro 模拟器上验证；相机、权限弹窗与真实 Apple 健康数据需在 iPhone 上走一遍。 |
 | 模型未调用工具却声称已生成确认卡 | 观察中 | 已缓解；若仍出现，可在客户端检测“回复提到卡片但没有 Pending”并提示重试。 |
 | 目标类型（减脂 / 增肌 / 维持） | 未做 | PRD §3.7 第 4 步提到；需要先定各类型的系数。 |

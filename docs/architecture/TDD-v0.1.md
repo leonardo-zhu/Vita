@@ -75,7 +75,7 @@ docs/
 | 业务存储 | SwiftData | 单人小数据量、离线优先；通过 Repository 隔离。 |
 | 健康平台 | HealthKit | PRD 指定的唯一直接外部健康入口。 |
 | 模型接入 | 经 Conduit 网关的 Responses API + provider-neutral `LLMClient` | 客户端用 `URLSession` 对接 Conduit 的 `/v1/responses`；上游 Provider 由 Conduit 管理；领域逻辑不绑定具体模型或 SDK。 |
-| 远程配置 | `ConfigProvider` + 已签名静态 JSON | prompt、模型别名、超时等可远程调整，强制规则留在代码里；见 [Vita Admin 设计](vita-admin.md)。 |
+| 远程配置 | `ConfigProvider` + 静态 JSON（现阶段不签名） | prompt、模型别名、超时等可远程调整，强制规则留在代码里；见 [Vita Admin 设计](vita-admin.md)。 |
 | 图片解析 | 本地 OCR + 可选模型解析 | 先抽取文本，再将结构化候选送入确认流程；原图不应默认上传。 |
 
 MVP 不需要用户账号、业务数据后端、实时协作或云端数据库。业务数据不进入任何服务端。客户端有三个网络出口：
@@ -299,7 +299,7 @@ Vita UI 继续展示原始时间精度，不将代表性时间倒灌为业务事
 ## 8. 隐私、安全与可靠性
 
 - 业务库、标签原图和审计日志存于 app sandbox；Conduit 令牌只存 Keychain（设置页只显示末四位），不写入 SwiftData、日志、测试 fixture 或截图。客户端不持有上游模型 Key。
-- 远程配置只能改变 prompt、模型别名与运行参数，不能改变确认门、工具 schema、Conduit 地址或写入规则；配置先验签再解析，失败回退到缓存或内置默认值。
+- 远程配置只能改变 prompt、模型别名与运行参数，不能改变确认门、工具 schema、Conduit 地址或写入规则；配置只从构建配置里的唯一 HTTPS 地址拉取，校验失败回退到缓存或内置默认值。
 - 诊断日志上报默认只含元数据（错误码、配置版本、耗时、token 数、轮换的匿名安装 ID），可关闭；不含任何用户内容。
 - 模型请求的上下文见 §3.4：当前 Session 摘要、个人食品库整库摘要（可配置关闭）和用户当前消息。健康原始数据只在模型调用 `getHealthSnapshot` / `getGoalRecommendation` 时传递，并标注来源。
 - 工具诊断日志用 `os.Logger`（subsystem `com.leonardo.vita`，category `agent.tools`）只记工具名与结果码，不记参数或结果内容。
