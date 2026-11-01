@@ -14,7 +14,7 @@ import { post } from '@/lib/post'
 
 import { loginAction } from '../actions'
 
-export function LoginForm() {
+export function LoginForm({ passkeyAvailable }: { passkeyAvailable: boolean }) {
   const router = useRouter()
   const [state, action, pending] = useActionState(loginAction, null)
   const [passkeyError, setPasskeyError] = useState<string | null>(null)
@@ -49,13 +49,17 @@ export function LoginForm() {
         <CardDescription>远程配置的编辑与发布</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <Button variant="outline" size="lg" onClick={loginWithPasskey} disabled={passkeyPending}>
-          <KeyRound />
-          {passkeyPending ? '等待验证…' : '用 Passkey 登录'}
-        </Button>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <Separator className="flex-1" />或<Separator className="flex-1" />
-        </div>
+        {passkeyAvailable && (
+          <>
+            <Button variant="outline" size="lg" onClick={loginWithPasskey} disabled={passkeyPending}>
+              <KeyRound />
+              {passkeyPending ? '等待验证…' : '用 Passkey 登录'}
+            </Button>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <Separator className="flex-1" />或<Separator className="flex-1" />
+            </div>
+          </>
+        )}
         <form action={action} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="username">账号</Label>
