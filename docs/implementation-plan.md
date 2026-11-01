@@ -83,7 +83,7 @@
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| Vita Admin M1 部署 | 待做 | 代码完成（Vita Admin 设计 §14）。R4S 上要先注册 runner、建目录与 `.env`、给 Caddy 挂发布目录，步骤见 `admin/README.md`；部署后在手机上确认能拉到配置。 |
+| Vita Admin 首次发布 | 待做 | 已部署到 R4S（Vita Admin 设计 §14）。填管理员密码哈希、登录并注册 Passkey、发布第一版配置，再在手机设置页点“立即刷新”确认能拉到。 |
 | Vita Admin M2 / M3 | 未开始 | M2：Prompt 试跑、diff；M3：诊断日志。 |
 | 诊断日志上报 | 未开始 | ADR-014 已采纳，默认开；Admin M3 做。目前只有本机 `os.Logger`。 |
 | 真机验证 | 待做 | 本轮功能只在 iPhone 18 Pro 模拟器上验证；相机、权限弹窗与真实 Apple 健康数据需在 iPhone 上走一遍。 |

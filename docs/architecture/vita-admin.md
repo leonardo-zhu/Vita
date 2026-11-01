@@ -1,6 +1,6 @@
 # Vita Admin 设计：远程配置与诊断日志
 
-**状态：M1 已实现（2026-11-01），尚未部署到 R4S。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
+**状态：M1 已实现并部署到 R4S（2026-11-01），还没发布过配置。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
 **2026-11-01 的主要决定：** Admin 与 Conduit 一样部署在 R4S，用 SQLite；配置文件也由 R4S 上的 Caddy 直接提供，不另找静态托管；现阶段不签名，只认固定的 HTTPS 地址；每次回到前台都检查配置；首期只有 `stable` 渠道；诊断日志默认开。  
 **关联：** [ADR](ADR.md)（拟新增 ADR-012）、[TDD](TDD-v0.1.md) §2 / §5 / §8、[模型 Provider 集成规范](../contracts/llm-provider.md)、[Agent 工具契约](../contracts/agent-tools.md)、[Conduit（LLM Gateway）项目设计](llm-gateway-project.md)
 
@@ -359,5 +359,7 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 - `FileRemoteConfigCache`：`Application Support/RemoteConfig/cache.json`，存原始字节与 ETag；启动时重新校验后交给 `LayeredConfigProvider`。
 - 设置页“配置”一行显示生效版本、来源（内置 / 远程）、上次检查结果和“立即刷新”。
 
-**没验证的**：Docker 镜像只在 CI 里构建（本机没开 Docker）；R4S 上的部署、Caddy 挂载和 App 拉到真实配置的整条链路，要等首次部署后走一遍。Passkey 注册与登录没有在浏览器里实测。
+**部署（2026-11-01）**：CI 构建与部署成功，`vita-admin` 容器 healthy，内存约 40MB；`https://vita.r4s.leonardo-zhu.me/admin/login` 可访问。R4S 侧的改动记录在 HomeLab 的 `notes/2026-11-01-vita-admin-部署与-runner-入口脚本.md`。
+
+**没验证的**：管理员密码哈希还没填，生产环境还没登录过；Passkey 注册与登录没有实测；还没发布过配置，App 拉到真实配置的整条链路还没走。
 
