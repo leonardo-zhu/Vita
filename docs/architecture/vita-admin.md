@@ -1,6 +1,6 @@
 # Vita Admin 设计：远程配置与诊断日志
 
-**状态：M1 已实现并部署到 R4S（2026-11-01），还没发布过配置。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
+**状态：M1、M2 已实现并部署到 R4S（2026-11-02）；M3（诊断日志）未开始。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
 **2026-11-01 的主要决定：** Admin 与 Conduit 一样部署在 R4S，用 SQLite；配置文件也由 R4S 上的 Caddy 直接提供，不另找静态托管；现阶段不签名，只认固定的 HTTPS 地址；每次回到前台都检查配置；首期只有 `stable` 渠道；诊断日志默认开。  
 **关联：** [ADR](ADR.md)（拟新增 ADR-012）、[TDD](TDD-v0.1.md) §2 / §5 / §8、[模型 Provider 集成规范](../contracts/llm-provider.md)、[Agent 工具契约](../contracts/agent-tools.md)、[Conduit（LLM Gateway）项目设计](llm-gateway-project.md)
 
@@ -275,8 +275,8 @@ prompt 会直接改变模型行为，因此配置的**来源可信**比传输加
 
 | 阶段 | 内容 |
 | --- | --- |
-| M1 | 登录、配置 CRUD、服务端校验、发布到 `/config/stable.json`、变更审计；部署到 R4S；客户端拉取与设置页“立即刷新” |
-| M2 | Prompt 试跑、diff |
+| M1 | 登录、配置 CRUD、服务端校验、发布到 `/config/stable.json`、变更审计；部署到 R4S；客户端拉取与设置页“立即刷新”（已完成，§14） |
+| M2 | Prompt 试跑、diff（已完成，§15） |
 | M3 | 诊断日志上报与查看；补 ADR 与隐私说明 |
 | 以后 | `dev` 渠道与晋升、配置签名（分发前评估）、告警、用户内容类数据（须新 ADR） |
 
@@ -361,5 +361,24 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 
 **部署（2026-11-01）**：CI 构建与部署成功，`vita-admin` 容器 healthy，内存约 40MB；`https://vita.r4s.leonardo-zhu.me/admin/login` 可访问。R4S 侧的改动记录在 HomeLab 的 `notes/2026-11-01-vita-admin-部署与-runner-入口脚本.md`。
 
-**没验证的**：管理员密码哈希还没填，生产环境还没登录过；Passkey 注册与登录没有实测；还没发布过配置，App 拉到真实配置的整条链路还没走。
+**没验证的**：Passkey 注册与登录没有实测；还没发布过配置，App 拉到真实配置的整条链路还没走。
+
+## 15. 实现现状（2026-11-02，M2）
+
+**版本 diff**：
+
+- 取值类字段列前后值；系统 prompt 与工具描述用 jsdiff 按词比较（`Intl.Segmenter` 中文分词），删掉的标红划线、新增的标绿。逻辑在 `admin/src/lib/config-diff.ts`。
+- 出现在三处：发布详情（相对上一版）、版本对比页（任选两项：任一已发布版本、当前草稿、App 内置默认值）、配置页的发布预览（已保存的草稿相对线上）。
+
+**Prompt 试跑**（`/admin/trial`）：
+
+- 选“线上”“当前草稿（已保存的）”或“两边对比”，写一句用户消息，经 Conduit `/v1/responses`（非流式、`store: false`）跑一轮，并排显示文字回复、推理摘要、会调用的工具和参数、耗时、token 与 `X-Request-Id`。
+- 请求和 App 一致：系统指令是配置里的系统 prompt 加“当前状态”一段，工具定义是同一份参数 schema 加配置里的描述。“当前状态”在 App 里按真实数据生成，试跑页给一段可改的样例（今天、空记录、空食品库）。
+- 只跑第一步，工具不执行：用户数据都在手机上，Admin 拿不到。
+- 每次试跑存进 `prompt_trials` 表，页面显示最近 40 条，并写一条审计（`trial`）。
+- 需要 `.env` 里配置 `CONDUIT_BASE_URL` 和 `CONDUIT_API_KEY`（Admin 专用的 Conduit 密钥），没配时页面提示、按钮不可用。
+
+**工具参数 schema 移到 `shared/agent-tools/tool-parameters.json`**：原来写在 `AgentToolCatalog` 的 Swift 源码里，Admin 试跑拿不到。现在 iOS 打包这份 JSON 并从中读取（`project.yml` 把它列为资源），Admin 在构建时拷入。远程配置仍然改不了它，只随客户端发布；iOS 测试保证它覆盖全部工具。
+
+**没验证的**：没有用真实的 Conduit 和模型跑过试跑（本地用模拟的 Conduit 走通了界面与存储）；生产环境要先配好 Conduit 密钥。
 

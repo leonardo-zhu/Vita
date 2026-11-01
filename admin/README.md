@@ -1,11 +1,11 @@
 # Vita Admin
 
-Next.js 管理后台：远程配置的编辑、校验与发布（M1），以后加 Prompt 试跑、diff 与诊断日志（M2 / M3）。部署在 R4S（与 Conduit 同机），数据库为 SQLite。设计见 [Vita Admin 设计](../docs/architecture/vita-admin.md)。
+Next.js 管理后台：远程配置的编辑、校验与发布（M1），Prompt 试跑与版本 diff（M2）；诊断日志（M3）还没做。部署在 R4S（与 Conduit 同机），数据库为 SQLite。设计见 [Vita Admin 设计](../docs/architecture/vita-admin.md)。
 
 约定：
 
 - 包管理器使用 pnpm。
-- 配置校验使用 `../shared/config-schema/` 中的 JSON Schema，与 iOS 端共用；工具清单与内置 prompt 取自 `../ios/Vita/Resources/DefaultConfig.json`。两者由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
+- 配置校验使用 `../shared/config-schema/` 中的 JSON Schema，与 iOS 端共用；工具清单与内置 prompt 取自 `../ios/Vita/Resources/DefaultConfig.json`，工具参数 schema 取自 `../shared/agent-tools/tool-parameters.json`。三者由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
 - 模型网关不在此处，见独立项目 Conduit。
 
 ## 本地开发
@@ -28,6 +28,8 @@ SQLite 在 `.data/vita-admin.db`，发布出来的文件在 `.data/published/sta
 | `src/server/config/validate.ts` | 发布前校验（共用 JSON Schema + 已知工具 + 版本号单调） |
 | `src/server/config/service.ts` | 草稿、发布、回滚，一个事务里写 release、渠道指针、审计和发布文件 |
 | `src/server/config/publisher.ts` | 原子写入发布目录，由 Caddy 以 `/config/*` 直接提供 |
+| `src/lib/config-diff.ts`、`src/components/admin/text-diff.tsx` | 两份配置的差异；prompt 按中文分词标出增删 |
+| `src/server/trial.ts` | Prompt 试跑：和 App 一样的指令与工具定义，经 Conduit 跑一轮，结果存 `prompt_trials` |
 | `src/app/admin/` | 页面：配置、发布历史、审计、设置（Passkey） |
 | `deploy/` | R4S 上的 compose 与 Caddy 配置 |
 
