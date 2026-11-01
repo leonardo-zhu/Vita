@@ -287,6 +287,7 @@ Admin 与客户端同仓库，位于 `admin/`；配置的 JSON Schema 位于 `sh
 | 部分 | 选择 | 说明 |
 | --- | --- | --- |
 | 框架 | Next.js（App Router），pnpm | 管理页面在 `/admin/*`，客户端诊断上报在 `/api/ingest/*`，两者路由与鉴权分开，首期同进程，保留拆分余地。 |
+| 前端 | 与 Conduit 同款栈：shadcn/ui（Base UI）、Tailwind CSS 4、TanStack Query / Table、react-hook-form + zod | 界面风格与 Conduit 一致；从头搭，不搬 NewAPI 的前端代码，所以不带 AGPL。 |
 | 部署 | R4S（与 Conduit 同机），容器化，经 Caddy 对外 | 域名 `vita.r4s.leonardo-zhu.me`；`/config/*` 由 Caddy 直接提供（§8.1）。CI 构建镜像并部署，方式与 Conduit 相同。 |
 | 存储 | SQLite（`node:sqlite`），同机文件 | 与 Conduit 一致，不额外跑数据库服务。配置版本、审计、诊断事件；`jsonb` 字段存为 JSON 文本。 |
 | 签名 | 现阶段不做（§7） | 启用时用独立的签名步骤，Web 进程不持有私钥。 |
