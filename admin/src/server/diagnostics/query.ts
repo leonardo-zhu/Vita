@@ -201,9 +201,11 @@ export interface EventRow {
 
 export function recentEvents(filter: DiagnosticsFilter, limit = 100): EventRow[] {
   const w = where(filter)
-  return db()
+  const rows = db()
     .prepare(`SELECT * FROM diagnostic_events WHERE ${w.sql} ORDER BY occurred_at DESC, id DESC LIMIT ?`)
     .all(...w.params, limit) as unknown as EventRow[]
+  // node:sqlite rows have a null prototype; React refuses to pass those to a client component
+  return rows.map((row) => ({ ...row }))
 }
 
 export function filterOptions() {

@@ -8,7 +8,7 @@ import example from '@/generated/diagnostics-example-batch.json'
 
 import { db, resetDbForTests } from '../db'
 import { ingest, purgeExpired, resetRateLimitForTests, validate } from './ingest'
-import { deleteInstall, setInstallRevoked, summary } from './query'
+import { deleteInstall, recentEvents, setInstallRevoked, summary } from './query'
 
 /** 示例批次的时间改到现在，免得被保留期过滤掉 */
 function freshBatch() {
@@ -77,6 +77,13 @@ describe('ingest', () => {
     expect(result.configFetch).toEqual({ updated: 1, unchanged: 0, failed: 0 })
     expect(result.errorCodes).toEqual([{ code: 'llm.timeout', type: 'chat_turn', count: 1 }])
     expect(result.byConfigVersion[0]).toMatchObject({ configVersion: '2026-11-02.1', count: 2 })
+  })
+
+  it('returns recent events as plain objects a client component can take', () => {
+    ingest(freshBatch(), '1.2.3.4')
+    const events = recentEvents({ days: 7 })
+    expect(events).toHaveLength(4)
+    expect(events.every((event) => Object.getPrototypeOf(event) === Object.prototype)).toBe(true)
   })
 
   it('deletes everything for one install and purges old rows', () => {
