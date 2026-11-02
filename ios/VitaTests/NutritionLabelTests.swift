@@ -1,152 +1,81 @@
 import Foundation
+import ImageIO
 import Testing
+import UIKit
 @testable import Vita
 
-/// 按表格行生成识别结果：每列一段，模拟文字识别把同一行拆开。
-private func table(_ rows: [[String]]) -> [RecognizedTextLine] {
-    rows.enumerated().flatMap { index, row in
-        row.enumerated().map { column, text in
-            // 行内各段的纵坐标略有抖动，仍应拼回同一行。
-            RecognizedTextLine(text: text, x: 0.05 + Double(column) * 0.35, y: 0.9 - Double(index) * 0.1 + Double(column) * 0.005, width: 0.3, height: 0.05)
+struct LabelImageTests {
+    /// 测试用的 JPEG 照片。
+    static func photo(width: CGFloat, height: CGFloat) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            UIColor.black.setFill()
+            context.fill(CGRect(x: width / 4, y: height / 4, width: width / 2, height: height / 2))
         }
-    }
-}
-
-struct NutritionLabelParserTests {
-    @Test func parsesChineseLabelSplitIntoColumns() {
-        let candidate = NutritionLabelParser.parse(table([
-            ["项目", "每100克", "NRV%"],
-            ["能量", "1720千焦", "20%"],
-            ["蛋白质", "12.5克", "21%"],
-            ["脂肪", "18.0克", "30%"],
-            ["—饱和脂肪", "6.2克", "31%"],
-            ["碳水化合物", "52.3克", "17%"],
-            ["钠", "380毫克", "19%"],
-        ]))
-        #expect(candidate.basis == Quantity(amount: 100, unit: .gram))
-        #expect(candidate.energyKJ == 1720)
-        #expect(candidate.energyKcal == dec("411.1"))
-        #expect(candidate.proteinG == dec("12.5"))
-        #expect(candidate.fatG == 18)
-        #expect(candidate.carbohydrateG == dec("52.3"))
-        #expect(candidate.complete != nil)
-        #expect(candidate.warnings.contains { $0.contains("千焦") })
+        return image.jpegData(compressionQuality: 0.9)!
     }
 
-    @Test func handlesVolumeBasisKcalAndOCRQuirks() {
-        let candidate = NutritionLabelParser.parse(table([
-            ["营养成分表"],
-            ["项目", "每100ml"],
-            ["能量", "６５ 千卡"],
-            ["蛋白质", "3,2 g"],
-            ["脂肪", "3.6g"],
-            ["碳水化合物", "4.8g"],
-        ]))
-        #expect(candidate.basis == Quantity(amount: 100, unit: .milliliter))
-        #expect(candidate.energyKcal == 65)
-        #expect(candidate.energyKJ == nil)
-        #expect(candidate.proteinG == dec("3.2"))
+    private static func size(_ data: Data) -> (Int, Int)? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int
+        else { return nil }
+        return (width, height)
     }
 
-    @Test func englishLabelAndServingColumnWarning() {
-        let candidate = NutritionLabelParser.parse(table([
-            ["Nutrition", "Per 100 g", "Per serving (30 g)"],
-            ["Energy", "1880 kJ", "564 kJ"],
-            ["Protein", "8.0 g", "2.4 g"],
-            ["Fat", "20 g", "6 g"],
-            ["Saturated fat", "9 g", "2.7 g"],
-            ["Carbohydrate", "60 g", "18 g"],
-        ]))
-        #expect(candidate.basis == Quantity(amount: 100, unit: .gram))
-        #expect(candidate.fatG == 20)
-        #expect(candidate.energyKcal == dec("449.3"))
-        #expect(candidate.warnings.contains { $0.contains("每份") })
+    @Test func shrinksTheLongEdgeAndKeepsTheAspectRatio() throws {
+        let jpeg = try #require(LabelImageEncoder.jpeg(Self.photo(width: 2000, height: 1500), maxDimension: 800, quality: 0.8))
+        let (width, height) = try #require(Self.size(jpeg))
+        #expect(width == 800)
+        #expect(height == 600)
     }
 
-    @Test func reportsMissingItemsInsteadOfGuessing() {
-        let candidate = NutritionLabelParser.parse(table([["能量", "300千焦"], ["蛋白质", "2克"]]))
-        #expect(candidate.basis == nil)
-        #expect(candidate.complete == nil)
-        #expect(candidate.warnings.contains { $0.contains("计算基准") })
-        #expect(candidate.warnings.contains { $0.contains("脂肪") && $0.contains("碳水化合物") })
+    @Test func doesNotEnlargeSmallPhotos() throws {
+        let jpeg = try #require(LabelImageEncoder.jpeg(Self.photo(width: 400, height: 300), maxDimension: 1600, quality: 0.8))
+        let (width, _) = try #require(Self.size(jpeg))
+        #expect(width == 400)
     }
 
-    /// 真机拍的圣农鸡腿块标签（2026-11-02）：项目名称字小，只识别出“项目”“质”和错字“露水化合物”，数值列完整。
-    @Test func fallsBackToStandardOrderWhenItemNamesAreUnreadable() {
-        let line = { (text: String, x: Double, y: Double, width: Double) in
-            RecognizedTextLine(text: text, x: x, y: y, width: width, height: 0.015)
-        }
-        let candidate = NutritionLabelParser.parse([
-            line("营养成分表", 0.438, 0.294, 0.129),
-            line("每100克（g）", 0.439, 0.269, 0.098),
-            line("营养素参考值%", 0.546, 0.275, 0.111),
-            line("项目", 0.335, 0.256, 0.044),
-            line("523千焦（K）", 0.439, 0.245, 0.093),
-            line("6%", 0.628, 0.253, 0.025),
-            line("16.9克（g）", 0.439, 0.229, 0.083),
-            line("28%", 0.620, 0.238, 0.037),
-            line("质", 0.370, 0.221, 0.023),
-            line("6.3克（9）", 0.442, 0.217, 0.070),
-            line("10%", 0.622, 0.224, 0.035),
-            line("0克（g）", 0.442, 0.203, 0.060),
-            line("0%", 0.632, 0.209, 0.029),
-            line("露水化合物", 0.335, 0.179, 0.093),
-            line("74毫克（mg）", 0.440, 0.186, 0.103),
-            line("4%", 0.634, 0.193, 0.029),
-        ])
-        #expect(candidate.basis == Quantity(amount: 100, unit: .gram))
-        #expect(candidate.energyKJ == 523)
-        #expect(candidate.energyKcal == 125)
-        #expect(candidate.proteinG == dec("16.9"))
-        #expect(candidate.fatG == dec("6.3"))
-        #expect(candidate.carbohydrateG == 0)
-        #expect(candidate.warnings.contains { $0.contains("国标顺序") })
-        #expect(!candidate.warnings.contains { $0.contains("没有识别到") })
-    }
-
-    @Test func standardOrderFallbackSkipsColumnsWithExtraRows() {
-        let rows = [["每100克"], ["1720千焦"], ["12.5克"], ["18.0克"], ["6.2克"], ["52.3克"], ["380毫克"]]
-        let candidate = NutritionLabelParser.parse(table(rows))
-        #expect(candidate.complete == nil)
-        #expect(!candidate.warnings.contains { $0.contains("国标顺序") })
-    }
-
-    /// 真实的 Vision 识别：渲染一张标签图片再识别，验证拼行与解析在实际输出上成立。
-    @Test func visionRecognizesRenderedSampleLabel() async throws {
-        let lines = try await VisionTextRecognizer().recognize(SampleLabelImage.render())
-        let candidate = NutritionLabelParser.parse(lines)
-        #expect(candidate.basis == Quantity(amount: 100, unit: .gram))
-        #expect(candidate.energyKcal == dec("411.1"))
-        #expect(candidate.proteinG == dec("12.5"))
-        #expect(candidate.fatG == 18)
-        #expect(candidate.carbohydrateG == dec("52.3"))
+    @Test func rejectsDataThatIsNotAnImage() {
+        #expect(LabelImageEncoder.jpeg(Data("not an image".utf8), maxDimension: 800, quality: 0.8) == nil)
     }
 }
 
 @MainActor
 struct LabelScanServiceTests {
-    @Test func keepsImageLocallyAndRecordsScan() async throws {
+    @Test func keepsImageLocallyAndRecordsScan() throws {
         let images = InMemoryLabelImageStore()
         var container = try AppContainer.inMemory()
         container.labelImages = images
-        container.textRecognizer = StubTextRecognizer(lines: table([["每100克"], ["能量", "100千卡"], ["蛋白质", "1克"], ["脂肪", "1克"], ["碳水化合物", "1克"]]))
         let services = AppServices(container: container)
 
-        let result = try await services.labels.scan(Data("image".utf8))
-        #expect(try images.load(result.imageReference) == Data("image".utf8))
-        #expect(result.candidate.complete?.nutrients.energyKcal == 100)
+        let photo = LabelImageTests.photo(width: 1000, height: 800)
+        let result = try services.labels.scan(photo)
+        #expect(try images.load(result.imageReference) == photo)
         #expect(try services.labels.imageReference(forScan: result.scanID) == result.imageReference)
     }
 
-    @Test func failedRecognitionDropsTheImage() async throws {
-        struct Failing: TextRecognizer {
-            func recognize(_ imageData: Data) async throws -> [RecognizedTextLine] { throw CocoaError(.featureUnsupported) }
-        }
-        let images = InMemoryLabelImageStore()
-        var container = try AppContainer.inMemory()
-        container.labelImages = images
-        container.textRecognizer = Failing()
-        let services = AppServices(container: container)
-        await #expect(throws: CocoaError.self) { try await services.labels.scan(Data("x".utf8)) }
+    @Test func modelImageFollowsTheConfiguredSettings() throws {
+        let services = AppServices(container: try AppContainer.inMemory())
+        let scan = try services.labels.scan(LabelImageTests.photo(width: 3000, height: 2000))
+        let settings = VitaConfig.LabelImage(maxDimension: 600, jpegQuality: 0.7, detail: "low")
+
+        let image = try #require(services.labels.modelImage(forScan: scan.scanID, settings: settings))
+        #expect(image.detail == "low")
+        let base64 = String(try #require(image.dataURL.split(separator: ",").last))
+        let jpeg = try #require(Data(base64Encoded: base64))
+        let source = try #require(CGImageSourceCreateWithData(jpeg as CFData, nil))
+        let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        #expect(properties[kCGImagePropertyPixelWidth] as? Int == 600)
+    }
+
+    @Test func unknownScanHasNoModelImage() throws {
+        let services = AppServices(container: try AppContainer.inMemory())
+        let settings = VitaConfig.LabelImage(maxDimension: 600, jpegQuality: 0.7, detail: "high")
+        #expect(services.labels.modelImage(forScan: UUID(), settings: settings) == nil)
     }
 }

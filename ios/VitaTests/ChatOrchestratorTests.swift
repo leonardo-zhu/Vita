@@ -186,10 +186,17 @@ struct ChatOrchestratorTests {
         let config = services.container.config.effectiveConfig().values
         #expect(request.model == config.llm.modelId)
         #expect(request.streaming == config.llm.streaming)
+        #expect(request.reasoningEffort == config.llm.reasoningEffort)
         #expect(request.instructions.hasPrefix(config.prompts.system.text))
-        #expect(request.instructions.contains("会话日期：2026-10-30"))
-        #expect(request.instructions.contains("revision：0"))
-        #expect(request.input == [.user("你好"), .assistant("第一句回复"), .user("再说一次")])
+        // 每轮都变的客户端状态不进系统指令，作为系统消息放在本轮用户消息前，前面的内容才能命中缓存。
+        #expect(!request.instructions.contains("会话日期："))
+        #expect(request.instructions == client.requests[0].instructions)
+        #expect(request.input.count == 4)
+        #expect(Array(request.input.prefix(2)) == [.user("你好"), .assistant("第一句回复")])
+        guard case .system(let state) = request.input[2] else { Issue.record("no client state"); return }
+        #expect(state.contains("会话日期：2026-10-30"))
+        #expect(state.contains("revision：0"))
+        #expect(request.input[3] == .user("再说一次"))
         // 只暴露契约里的工具，client-only 工具不在其中。
         let names = Set(request.tools.map(\.name))
         #expect(names == AgentToolCatalog.names)
@@ -212,43 +219,33 @@ struct ChatOrchestratorTests {
         #expect(input[2] == .assistant("是全脂还是脱脂？"))
     }
 
-    @Test func labelPhotoSendsRecognizedTextNotTheImage() async throws {
+    @Test func labelPhotoIsSentToTheModelWithItsScanID() async throws {
         let client = ScriptedLLMClient([
             .success([.textDelta("这是什么牌子的？"), done]),
             .success([.textDelta("好的"), done]),
         ])
         var container = try AppContainer.inMemory(referenceFoods: try Fixtures.referenceFoods())
         container.llmClient = client
-        container.textRecognizer = StubTextRecognizer(lines: [
-            RecognizedTextLine(text: "营养成分表", x: 0.1, y: 0.95, width: 0.5, height: 0.04),
-            RecognizedTextLine(text: "项目", x: 0.05, y: 0.85, width: 0.2, height: 0.04),
-            RecognizedTextLine(text: "每100毫升", x: 0.4, y: 0.85, width: 0.25, height: 0.04),
-            RecognizedTextLine(text: "能量", x: 0.05, y: 0.75, width: 0.2, height: 0.04),
-            RecognizedTextLine(text: "272千焦", x: 0.4, y: 0.75, width: 0.25, height: 0.04),
-            RecognizedTextLine(text: "蛋白质", x: 0.05, y: 0.65, width: 0.2, height: 0.04),
-            RecognizedTextLine(text: "3.2克", x: 0.4, y: 0.65, width: 0.25, height: 0.04),
-        ])
         let services = AppServices(container: container, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
         let orchestrator = ChatOrchestrator(services: services, client: client, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
 
-        let image = Data("fake-jpeg-bytes".utf8)
-        let scan = try await services.labels.scan(image)
+        let scan = try services.labels.scan(LabelImageTests.photo(width: 2400, height: 1800))
         _ = try await orchestrator.send("", on: Fixtures.day, labelScan: scan.scanID)
 
-        guard case .user(let sent) = client.requests[0].input.last else { Issue.record("no user input"); return }
+        guard case .userImages(let sent, let images) = client.requests[0].input.last else { Issue.record("no image"); return }
         #expect(sent.contains("labelScanId: \(scan.scanID.uuidString)"))
-        #expect(sent.contains("能量"))
-        #expect(sent.contains("每100毫升"))
-        // 原图与本地路径都不交给模型。
-        #expect(!sent.contains("fake-jpeg-bytes"))
+        // 本地路径不交给模型。
         #expect(!sent.contains(scan.imageReference))
+        #expect(images.count == 1)
+        #expect(images[0].dataURL.hasPrefix("data:image/jpeg;base64,"))
+        #expect(images[0].detail == services.container.config.effectiveConfig().values.labelImage.detail)
 
         let history = try services.chatHistory.messages(on: Fixtures.day)
         #expect(history.first?.cardRef == .label(scan.scanID))
 
-        // 下一轮重放历史时识别结果还在，模型仍拿得到 labelScanId。
+        // 下一轮重放历史时照片还在，模型仍看得到标签和 labelScanId。
         _ = try await orchestrator.send("是伊利纯牛奶", on: Fixtures.day)
-        guard case .user(let replayed) = client.requests[1].input.first else { Issue.record("no history"); return }
+        guard case .userImages(let replayed, _) = client.requests[1].input.first else { Issue.record("no history"); return }
         #expect(replayed.contains("labelScanId: \(scan.scanID.uuidString)"))
         #expect(ChatCardRef(rawValue: ChatCardRef.label(scan.scanID).rawValue) == .label(scan.scanID))
     }

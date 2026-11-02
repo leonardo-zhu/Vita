@@ -24,6 +24,7 @@ struct DiagnosticEvent: Codable, Equatable, Sendable {
     var toolCalls: Int?
     var tokensIn: Int?
     var tokensOut: Int?
+    var tokensCached: Int?
     var createdPending: Bool?
     var claimedCardWithoutTool: Bool?
     var hitMaxRounds: Bool?

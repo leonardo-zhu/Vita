@@ -10,7 +10,6 @@ struct FoodServiceTests {
 
     init() throws {
         var container = try AppContainer.inMemory(referenceFoods: try Fixtures.referenceFoods())
-        container.textRecognizer = StubTextRecognizer(lines: [])
         let clock = clock
         services = AppServices(container: container, now: { clock.now }, timeZone: { Fixtures.shanghai })
     }

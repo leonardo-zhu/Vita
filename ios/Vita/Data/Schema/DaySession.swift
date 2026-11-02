@@ -38,7 +38,7 @@ enum ChatRole: String, Codable, Sendable {
     case user, assistant, toolSummary
 }
 
-/// 消息附带的卡片：指向 Pending 或已确认 Record 的结果卡（TDD §3.4），或用户发的营养标签照片（指向识别记录）。
+/// 消息附带的卡片：指向 Pending 或已确认 Record 的结果卡（TDD §3.4），或用户发的营养标签照片（指向附件记录）。
 enum ChatCardRef: Equatable, Sendable {
     case pending(UUID)
     case record(UUID)

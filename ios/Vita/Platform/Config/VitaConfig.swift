@@ -21,6 +21,10 @@ struct VitaConfig: Equatable, Codable, Sendable {
         var timeoutSeconds: Int
         var maxRetries: Int
         var streaming: Bool
+        /// Responses 的 `reasoning.effort`；`default` 表示不传，用模型自己的默认值。
+        var reasoningEffort: String
+        /// 原样合并进请求体的其他参数，键已在校验时排除客户端自己管理的字段。
+        var extraBody: [String: JSONValue]
     }
 
     struct Context: Equatable, Codable, Sendable {
@@ -33,11 +37,20 @@ struct VitaConfig: Equatable, Codable, Sendable {
         var tools: [String: ToolPrompt]
     }
 
+    /// 营养标签照片发给模型前的缩放与压缩。
+    struct LabelImage: Equatable, Codable, Sendable {
+        var maxDimension: Int
+        var jpegQuality: Double
+        /// Responses `input_image` 的 `detail`。
+        var detail: String
+    }
+
     var schemaVersion: Int
     var configVersion: String
     var llm: LLM
     var context: Context
     var prompts: Prompts
+    var labelImage: LabelImage
     /// 开关只能启用或关闭已随客户端发布的能力：键集合以内置默认值为准。
     var features: [String: Bool]
 
@@ -60,6 +73,8 @@ struct RemoteConfig: Equatable, Codable, Sendable {
         var timeoutSeconds: Int?
         var maxRetries: Int?
         var streaming: Bool?
+        var reasoningEffort: String?
+        var extraBody: [String: JSONValue]?
     }
 
     struct Context: Equatable, Codable, Sendable {
@@ -72,6 +87,12 @@ struct RemoteConfig: Equatable, Codable, Sendable {
         var tools: [String: ToolPrompt]?
     }
 
+    struct LabelImage: Equatable, Codable, Sendable {
+        var maxDimension: Int?
+        var jpegQuality: Double?
+        var detail: String?
+    }
+
     var schemaVersion: Int
     var configVersion: String
     var minClientVersion: String?
@@ -79,6 +100,7 @@ struct RemoteConfig: Equatable, Codable, Sendable {
     var llm: LLM?
     var context: Context?
     var prompts: Prompts?
+    var labelImage: LabelImage?
     var features: [String: Bool]?
 }
 

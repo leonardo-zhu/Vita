@@ -79,13 +79,13 @@ struct ResponsesClientTests {
             #"{"type":"response.reasoning_summary_text.delta","delta":"想想"}"#,
             #"{"type":"response.output_text.delta","delta":"你"}"#,
             #"{"type":"response.output_text.delta","delta":"好"}"#,
-            #"{"type":"response.completed","response":{"id":"r1","output":[],"usage":{"input_tokens":10,"output_tokens":2}}}"#,
+            #"{"type":"response.completed","response":{"id":"r1","output":[],"usage":{"input_tokens":10,"output_tokens":2,"input_tokens_details":{"cached_tokens":8}}}}"#,
             "[DONE]",
         ]))])
         let events = try await collect(client(), request())
         #expect(events == [
             .reasoning(""), .reasoning("想想"), .textDelta("你"), .textDelta("好"),
-            .completed(LLMResponseInfo(responseID: "r1", inputTokens: 10, outputTokens: 2)),
+            .completed(LLMResponseInfo(responseID: "r1", inputTokens: 10, outputTokens: 2, cachedTokens: 8)),
         ])
     }
 
@@ -205,5 +205,38 @@ struct ResponsesClientTests {
         let tools = try #require(body["tools"] as? [[String: Any]])
         #expect(tools[0]["type"] as? String == "function")
         #expect(tools[0]["name"] as? String == "getGoals")
+    }
+
+    @Test func bodyCarriesReasoningExtrasImagesAndSystemMessages() throws {
+        var request = request()
+        request.input = [
+            .system("当前状态"),
+            .userImages("看看这个标签", [LLMImage(dataURL: "data:image/jpeg;base64,AAAA", detail: "high")]),
+        ]
+        request.reasoningEffort = "low"
+        request.extraBody = ["max_output_tokens": .number(4000), "model": .string("hijack"), "store": .bool(true)]
+        let data = try JSONEncoder().encode(ResponsesRequestBody(request))
+        let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect((body["reasoning"] as? [String: Any])?["effort"] as? String == "low")
+        #expect(body["max_output_tokens"] as? Int == 4000)
+        // 客户端自己管的字段不能被 extraBody 覆盖。
+        #expect(body["model"] as? String == "vita-chat")
+        #expect(body["store"] as? Bool == false)
+
+        let input = try #require(body["input"] as? [[String: Any]])
+        #expect(input[0]["role"] as? String == "system")
+        #expect(input[0]["content"] as? String == "当前状态")
+        let parts = try #require(input[1]["content"] as? [[String: Any]])
+        #expect(parts[0]["type"] as? String == "input_text")
+        #expect(parts[0]["text"] as? String == "看看这个标签")
+        #expect(parts[1]["type"] as? String == "input_image")
+        #expect(parts[1]["image_url"] as? String == "data:image/jpeg;base64,AAAA")
+        #expect(parts[1]["detail"] as? String == "high")
+    }
+
+    @Test func defaultEffortSendsNoReasoningField() throws {
+        let data = try JSONEncoder().encode(ResponsesRequestBody(request()))
+        let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(body["reasoning"] == nil)
     }
 }

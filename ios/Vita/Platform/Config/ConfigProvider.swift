@@ -7,9 +7,10 @@ enum ConfigSource: Equatable, Sendable {
 }
 
 enum ConfigField: Hashable, Sendable {
-    case modelId, timeoutSeconds, maxRetries, streaming
+    case modelId, timeoutSeconds, maxRetries, streaming, reasoningEffort, extraBody
     case maxRecentMessages, includePersonalFoodSummary
     case systemPrompt
+    case labelImageMaxDimension, labelImageJPEGQuality, labelImageDetail
     case toolPrompt(String)
     case feature(String)
 }
@@ -48,12 +49,17 @@ enum ConfigResolver {
             apply(remote.llm?.timeoutSeconds, to: \.llm.timeoutSeconds, field: .timeoutSeconds, source: source)
             apply(remote.llm?.maxRetries, to: \.llm.maxRetries, field: .maxRetries, source: source)
             apply(remote.llm?.streaming, to: \.llm.streaming, field: .streaming, source: source)
+            apply(remote.llm?.reasoningEffort, to: \.llm.reasoningEffort, field: .reasoningEffort, source: source)
+            apply(remote.llm?.extraBody, to: \.llm.extraBody, field: .extraBody, source: source)
             apply(remote.context?.maxRecentMessages, to: \.context.maxRecentMessages, field: .maxRecentMessages, source: source)
             apply(
                 remote.context?.includePersonalFoodSummary,
                 to: \.context.includePersonalFoodSummary, field: .includePersonalFoodSummary, source: source
             )
             apply(remote.prompts?.system, to: \.prompts.system, field: .systemPrompt, source: source)
+            apply(remote.labelImage?.maxDimension, to: \.labelImage.maxDimension, field: .labelImageMaxDimension, source: source)
+            apply(remote.labelImage?.jpegQuality, to: \.labelImage.jpegQuality, field: .labelImageJPEGQuality, source: source)
+            apply(remote.labelImage?.detail, to: \.labelImage.detail, field: .labelImageDetail, source: source)
             // 只接受客户端已知的工具与开关，未知键忽略。
             for (name, prompt) in remote.prompts?.tools ?? [:] where builtin.prompts.tools[name] != nil {
                 apply(prompt, to: \.prompts.tools[name], field: .toolPrompt(name), source: source)

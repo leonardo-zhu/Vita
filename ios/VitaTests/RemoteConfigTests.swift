@@ -29,6 +29,10 @@ struct RemoteConfigValidatorTests {
             (config { $0.llm?.timeoutSeconds = 1 }, .invalidField("llm.timeoutSeconds")),
             (config { $0.llm?.maxRetries = 4 }, .invalidField("llm.maxRetries")),
             (config { $0.llm?.modelId = "" }, .invalidField("llm.modelId")),
+            (config { $0.llm?.reasoningEffort = "turbo" }, .invalidField("llm.reasoningEffort")),
+            (config { $0.llm?.extraBody = ["input": .string("x")] }, .invalidField("llm.extraBody")),
+            (config { $0.labelImage = .init(maxDimension: 100) }, .invalidField("labelImage.maxDimension")),
+            (config { $0.labelImage = .init(detail: "ultra") }, .invalidField("labelImage.detail")),
             (config { $0.context = .init(maxRecentMessages: 0) }, .invalidField("context.maxRecentMessages")),
             (config { $0.prompts = .init(system: PromptText(id: "agent.system", version: 4, text: "")) }, .invalidField("prompts.system.text")),
         ]

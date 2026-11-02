@@ -5,7 +5,7 @@ enum FoodServiceError: Error, Equatable {
     case emptyName
     case invalidPackage
     case invalidBasis
-    /// nutritionLabel 必须指向一张已在本地识别过的标签。
+    /// nutritionLabel 必须指向一张存在本机的标签照片。
     case unknownLabel
     /// referenceDerived 必须指向存在的参考条目，且营养值与之一致。
     case unknownReferenceFood(String)

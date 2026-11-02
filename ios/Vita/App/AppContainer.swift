@@ -9,9 +9,8 @@ struct AppContainer: Sendable {
     let config: any ConfigProvider
     let environment: BuildEnvironment
     let referenceFoods: ReferenceFoodCatalog
-    /// 测试默认用内存实现与空识别结果。
+    /// 测试默认用内存实现。
     var labelImages: any LabelImageStore = InMemoryLabelImageStore()
-    var textRecognizer: any TextRecognizer = StubTextRecognizer(lines: [])
     var healthStore: any HealthDataStore = FakeHealthDataStore(writeAuthorization: .notDetermined)
     /// 测试默认不发任何网络请求。
     var llmClient: any LLMClient = UnavailableLLMClient()
@@ -33,7 +32,6 @@ struct AppContainer: Sendable {
             environment: environment,
             referenceFoods: try ReferenceFoodLoader.load(),
             labelImages: try FileLabelImageStore.live(),
-            textRecognizer: VisionTextRecognizer(),
             healthStore: HealthKitDataStore(),
             llmClient: ResponsesClient(baseURL: environment.conduitBaseURL) { try secrets.read(.conduitToken) },
             remoteConfigCache: remoteCache,
@@ -87,7 +85,7 @@ final class AppServices {
         foods = FoodService(context: context, referenceFoods: container.referenceFoods, now: now)
         pending = PendingService(context: context, records: records, foods: foods, now: now, timeZone: timeZone)
         chatHistory = ChatHistoryService(context: context, now: now, timeZone: timeZone)
-        labels = LabelScanService(context: context, images: container.labelImages, recognizer: container.textRecognizer, now: now)
+        labels = LabelScanService(context: context, images: container.labelImages, now: now)
         if let cache = container.remoteConfigCache, let layered = container.config as? LayeredConfigProvider {
             remoteConfig = RemoteConfigService(
                 url: container.environment.remoteConfigURL, clientVersion: AppVersion.current, provider: layered, cache: cache,

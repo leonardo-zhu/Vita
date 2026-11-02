@@ -30,7 +30,7 @@ struct ChatProgress: Equatable, Sendable {
             case "getGoals": "查看目标"
             case "getHealthSnapshot": "读取健康数据"
             case "getGoalRecommendation": "计算目标建议"
-            case "attachNutritionLabel": "识别营养标签"
+            case "attachNutritionLabel": "读取营养标签"
             case "updateGoal": "修改目标"
             case "proposeRecordChange", "proposeRecordDeletion", "proposeFoodChange": "生成确认卡"
             default: "处理请求"
@@ -83,7 +83,7 @@ final class ChatOrchestrator {
     /// 跑完工具循环后一起保存用户消息与回复。`onProgress` 给出到目前为止的文字与当前步骤。
     /// 模型调用失败或被取消时什么都不保存，抛出错误，由界面把原文放回输入框。
     /// （这一轮里已经生成的确认卡保留：它不是正式数据，用户仍可确认或取消。）
-    /// `labelScan` 是这条消息附带的营养标签识别（`attachNutritionLabel` 已在本地完成）：只把识别出的文字与候选值交给模型，原图不外发。
+    /// `labelScan` 是这条消息附带的营养标签照片（`attachNutritionLabel` 已存到本机）：照片随消息发给模型读（ADR-016）。
     func send(
         _ text: String,
         on date: LocalDate,
@@ -117,6 +117,7 @@ final class ChatOrchestrator {
         var toolCalls = 0
         var tokensIn: Int?
         var tokensOut: Int?
+        var tokensCached: Int?
         var hitMaxRounds = false
     }
 
@@ -127,6 +128,7 @@ final class ChatOrchestrator {
             requestId: stats.requestID, modelAlias: stats.modelAlias, systemPromptVersion: stats.systemPromptVersion,
             latencyMs: DiagnosticEvent.milliseconds(since: started, now: now()), rounds: stats.rounds,
             toolCalls: stats.toolCalls, tokensIn: stats.tokensIn, tokensOut: stats.tokensOut,
+            tokensCached: stats.tokensCached,
             createdPending: result == nil ? nil : createdPending,
             claimedCardWithoutTool: result.map { !createdPending && Self.claimsCard($0.reply?.text ?? "") },
             hitMaxRounds: stats.hitMaxRounds
@@ -153,15 +155,20 @@ final class ChatOrchestrator {
         try services.pending.expireDue()
 
         let pending = services.pending
+        let labels = services.labels
+        let labelImage = { (id: UUID) in labels.modelImage(forScan: id, settings: config.labelImage) }
+        // 顺序按“越稳定越靠前”：系统指令、历史、本轮客户端状态、本轮消息，前缀才能命中服务商缓存。
         var input = Self.historyInput(
             history, limit: config.context.maxRecentMessages,
             cardStatus: { ref in
                 guard case .pending(let id) = ref else { return nil }
                 return try? pending.pending(id).status
             },
-            labelAttachment: labelAttachment
+            labelImage: labelImage
         )
-        input.append(.user(Self.userText(text, attachment: labelScan.flatMap(labelAttachment))))
+        input.append(.system(try clientState(date: date)))
+        input.append(Self.userItem(text, labelScan: labelScan, image: labelScan.flatMap(labelImage)))
+        let instructions = try instructions(config: config)
         let definitions = AgentToolCatalog.definitions(descriptions: config.prompts.tools)
         let requestID = UUID()
         stats.requestID = requestID
@@ -176,13 +183,15 @@ final class ChatOrchestrator {
             stats.rounds = round + 1
             let request = LLMRequest(
                 model: config.llm.modelId,
-                instructions: try instructions(config: config, date: date),
+                instructions: instructions,
                 input: input,
                 tools: definitions,
                 requestID: round == 0 ? requestID : UUID(),
                 timeoutSeconds: config.llm.timeoutSeconds,
                 maxRetries: config.llm.maxRetries,
-                streaming: config.llm.streaming
+                streaming: config.llm.streaming,
+                reasoningEffort: config.llm.reasoningEffort == "default" ? nil : config.llm.reasoningEffort,
+                extraBody: config.llm.extraBody
             )
             var roundText = ""
             var thinking = ""
@@ -204,6 +213,7 @@ final class ChatOrchestrator {
                 case .completed(let info):
                     if let tokens = info.inputTokens { stats.tokensIn = (stats.tokensIn ?? 0) + tokens }
                     if let tokens = info.outputTokens { stats.tokensOut = (stats.tokensOut ?? 0) + tokens }
+                    if let tokens = info.cachedTokens { stats.tokensCached = (stats.tokensCached ?? 0) + tokens }
                 }
             }
             reply = Self.join(reply, roundText)
@@ -242,18 +252,19 @@ final class ChatOrchestrator {
     /// 最近的若干条用户与助手文字。工具调用不重放，模型需要时再查。
     /// 附带确认卡的回复后面加一句客户端注记：历史里只有文字，模型会照着“已生成确认卡”的说法
     /// 直接回答而不调用工具；注记让它看到卡片只来自工具。没有卡片的回复不加注记。
-    /// 带营养标签的用户消息重放时再附上识别结果，模型在之后几轮（如问完品名）仍拿得到 `labelScanId`。
+    /// 带营养标签的用户消息重放时照片一起带上：模型在之后几轮（如问完品名）仍看得到标签和 `labelScanId`。
+    /// 历史在缓存前缀里，重放的照片多半按缓存价计费。
     static func historyInput(
         _ history: [ChatEntry],
         limit: Int,
         cardStatus: (ChatCardRef) -> PendingStatus? = { _ in nil },
-        labelAttachment: (UUID) -> String? = { _ in nil }
+        labelImage: (UUID) -> LLMImage? = { _ in nil }
     ) -> [LLMInputItem] {
         history.suffix(max(limit, 0)).compactMap { entry in
             switch entry.role {
             case .user:
                 guard case .label(let id) = entry.cardRef else { return .user(entry.text) }
-                return .user(userText(entry.text, attachment: labelAttachment(id)))
+                return userItem(entry.text, labelScan: id, image: labelImage(id))
             case .assistant:
                 guard let ref = entry.cardRef else { return .assistant(entry.text) }
                 let status = switch cardStatus(ref) {
@@ -269,36 +280,20 @@ final class ChatOrchestrator {
         }
     }
 
-    static func userText(_ text: String, attachment: String?) -> String {
-        guard let attachment else { return text }
-        return text.isEmpty ? attachment : text + "\n\n" + attachment
+    /// 用户消息；附带标签照片时在文字后注明 `labelScanId`，照片作为图片输入。照片读不到时只留说明。
+    static func userItem(_ text: String, labelScan: UUID?, image: LLMImage?) -> LLMInputItem {
+        guard let labelScan else { return .user(text) }
+        let note = image == nil
+            ? "［客户端附件：营养标签照片，labelScanId: \(labelScan.uuidString)；照片已无法读取］"
+            : "［客户端附件：营养标签照片，labelScanId: \(labelScan.uuidString)］"
+        let body = text.isEmpty ? note : text + "\n\n" + note
+        guard let image else { return .user(body) }
+        return .userImages(body, [image])
     }
 
-    /// 营养标签识别结果的文字版。只有本地识别出的文字与候选值，没有图片，也没有本地路径。
-    func labelAttachment(_ id: UUID) -> String? {
-        guard let stored = try? services.labels.stored(id) else { return nil }
-        let candidate = stored.candidate
-        func value(_ number: Decimal?, _ unit: String) -> String {
-            number.map { "\($0) \(unit)" } ?? "未识别"
-        }
-        var lines = [
-            "［客户端附件：营养标签照片，已在本机识别；原图不发送］",
-            "labelScanId: \(id.uuidString)",
-            "识别候选（每 \(candidate.basis.map { "\($0.amount) \($0.unit.rawValue)" } ?? "基准未识别")）："
-                + "能量 \(value(candidate.energyKcal, "kcal"))\(candidate.energyKJ.map { "（标签 \($0) kJ）" } ?? "")，"
-                + "蛋白质 \(value(candidate.proteinG, "g"))，脂肪 \(value(candidate.fatG, "g"))，碳水 \(value(candidate.carbohydrateG, "g"))",
-        ]
-        if !candidate.warnings.isEmpty {
-            lines.append("需要留意：" + candidate.warnings.joined(separator: "；"))
-        }
-        // 识别出的文字行可能包含品名、配料与规格；只给前 40 行。
-        lines.append("识别到的文字：" + stored.lines.prefix(40).joined(separator: " | "))
-        lines.append("用户发营养标签照片，默认就是要把这个食品存进个人食品库：直接调用 proposeFoodChange（version.source = nutritionLabel，带上 labelScanId）生成确认卡，不要先问“要不要存”。品名从识别文字里取；品牌、包装规格识别不到就留空，不必追问。只有品名完全无法判断、或候选值缺项 / 明显不合理时才先问。用户同时说了吃了多少，再另外提出饮食记录；没说就在回复末尾提一句“吃了多少告诉我，就帮你记上”。")
-        return lines.joined(separator: "\n")
-    }
-
-    /// 系统 prompt 之后附上本轮的客户端状态：会话日期由导航决定，模型不能自己推断（agent-tools.md）。
-    func instructions(config: VitaConfig, date: LocalDate) throws -> String {
+    /// 本轮的客户端状态，作为系统消息放在本轮用户消息前：会话日期由导航决定，模型不能自己推断（agent-tools.md）。
+    /// 时间、revision 与当天记录每轮都会变，放在系统指令里会让后面的内容都无法命中缓存。
+    func clientState(date: LocalDate) throws -> String {
         let zone = timeZone()
         let today = LocalDate(date: now(), timeZone: zone)
         let day = try services.dayData.day(date)
@@ -330,6 +325,12 @@ final class ChatOrchestrator {
                 lines.append("  - \(label)［\(record.id.uuidString)］：\(items)")
             }
         }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 系统指令：配置里的系统 prompt 加个人食品库。食品库只在用户确认新食品后变化，适合留在可缓存的前缀里。
+    func instructions(config: VitaConfig) throws -> String {
+        var lines: [String] = []
         if config.context.includePersonalFoodSummary {
             // 整库注入，由模型做语义匹配，客户端不做模糊匹配（PRD §3.1 设计要点）。
             let products = try services.foods.products()
@@ -350,7 +351,8 @@ final class ChatOrchestrator {
                 }
             }
         }
-        return config.prompts.system.text + "\n\n" + lines.joined(separator: "\n")
+        guard !lines.isEmpty else { return config.prompts.system.text }
+        return config.prompts.system.text + "\n\n## 由客户端提供\n" + lines.joined(separator: "\n")
     }
 
     private static func join(_ first: String, _ second: String) -> String {

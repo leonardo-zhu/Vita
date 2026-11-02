@@ -17,7 +17,7 @@ struct UnavailableLLMClient: LLMClient {
 struct LLMRequest: Sendable {
     /// Conduit 的逻辑别名（如 `vita-chat`），来自生效配置。
     var model: String
-    /// 系统指令：配置里的系统 prompt 加本轮的客户端上下文。
+    /// 系统指令：配置里的系统 prompt 加较少变化的上下文（个人食品库）。保持稳定，前缀才能命中服务商缓存。
     var instructions: String
     var input: [LLMInputItem]
     var tools: [LLMToolDefinition]
@@ -26,15 +26,30 @@ struct LLMRequest: Sendable {
     var timeoutSeconds: Int
     var maxRetries: Int
     var streaming: Bool
+    /// `reasoning.effort`；nil 表示不传。
+    var reasoningEffort: String? = nil
+    /// 原样合并进请求体的其他参数（远程配置 `llm.extraBody`）。
+    var extraBody: [String: JSONValue] = [:]
 }
 
 /// 无状态请求的上下文：每次都由客户端完整提供（`store: false`，不用 `previous_response_id`）。
 enum LLMInputItem: Equatable, Sendable {
     case user(String)
+    /// 带图片的用户消息，如营养标签照片。
+    case userImages(String, [LLMImage])
+    /// 放在输入中间的系统消息：每轮都变的客户端状态放在这里，不打断前面可缓存的前缀。
+    case system(String)
     case assistant(String)
     /// 模型上一步发出的函数调用，回传时须原样带回，才能接上对应的输出。
     case functionCall(LLMFunctionCall)
     case functionOutput(callID: String, output: String)
+}
+
+struct LLMImage: Equatable, Sendable {
+    /// `data:image/jpeg;base64,…`
+    var dataURL: String
+    /// `input_image` 的 `detail`（low / high / xhigh）。
+    var detail: String
 }
 
 struct LLMFunctionCall: Equatable, Sendable {
@@ -64,6 +79,8 @@ struct LLMResponseInfo: Equatable, Sendable {
     var responseID: String?
     var inputTokens: Int?
     var outputTokens: Int?
+    /// 输入里命中服务商缓存的部分。
+    var cachedTokens: Int?
 }
 
 /// Conduit 统一错误类型加客户端自己的网络错误，各自对应不同的用户提示（llm-provider.md §6）。

@@ -59,6 +59,9 @@ enum RemoteConfigRejection: Error, Equatable {
 /// 与 `shared/config-schema/config.schema.json` 的取值范围一致；未知工具名不在这里拒绝，由 `ConfigResolver` 忽略。
 enum RemoteConfigValidator {
     static let supportedSchemaVersion = 1
+    static let reasoningEfforts: Set = ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+    /// 请求体里由客户端自己填的字段，`extraBody` 不能覆盖。
+    static let reservedRequestFields: Set = ["model", "instructions", "input", "tools", "stream", "store", "reasoning", "previous_response_id"]
 
     static func decode(_ data: Data) throws -> RemoteConfig {
         do {
@@ -93,6 +96,15 @@ enum RemoteConfigValidator {
             if let modelId = llm.modelId { try require((1...128).contains(modelId.count), "llm.modelId") }
             if let timeout = llm.timeoutSeconds { try require((5...180).contains(timeout), "llm.timeoutSeconds") }
             if let retries = llm.maxRetries { try require((0...3).contains(retries), "llm.maxRetries") }
+            if let effort = llm.reasoningEffort { try require(reasoningEfforts.contains(effort), "llm.reasoningEffort") }
+            if let extra = llm.extraBody {
+                try require(extra.count <= 20 && reservedRequestFields.isDisjoint(with: extra.keys), "llm.extraBody")
+            }
+        }
+        if let image = config.labelImage {
+            if let size = image.maxDimension { try require((512...4096).contains(size), "labelImage.maxDimension") }
+            if let quality = image.jpegQuality { try require((0.3...1).contains(quality), "labelImage.jpegQuality") }
+            if let detail = image.detail { try require(["low", "high", "xhigh"].contains(detail), "labelImage.detail") }
         }
         if let messages = config.context?.maxRecentMessages {
             try require((1...100).contains(messages), "context.maxRecentMessages")

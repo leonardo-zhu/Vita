@@ -64,6 +64,20 @@ struct ConfigTests {
         #expect(effective.source(of: .timeoutSeconds) == .builtin)
     }
 
+    @Test func remoteSetsModelParametersAndLabelImage() throws {
+        let config = try builtin()
+        var remote = RemoteConfig(schemaVersion: 1, configVersion: "2026-11-02.2")
+        remote.llm = .init(reasoningEffort: "minimal", extraBody: ["max_tool_calls": .number(6)])
+        remote.labelImage = .init(detail: "low")
+        let effective = ConfigResolver.resolve(builtin: config, remote: remote, override: nil)
+        #expect(effective.values.llm.reasoningEffort == "minimal")
+        #expect(effective.values.llm.extraBody == ["max_tool_calls": .number(6)])
+        #expect(effective.values.labelImage.detail == "low")
+        #expect(effective.values.labelImage.maxDimension == config.labelImage.maxDimension)
+        #expect(effective.source(of: .reasoningEffort) == .remote(configVersion: "2026-11-02.2"))
+        #expect(effective.source(of: .labelImageMaxDimension) == .builtin)
+    }
+
     @Test func localOverrideBeatsRemotePerField() throws {
         let config = try builtin()
         let remote = RemoteConfig(

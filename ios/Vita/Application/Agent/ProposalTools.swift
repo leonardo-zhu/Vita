@@ -52,7 +52,7 @@ enum ProposalArguments {
     /// `source` 只接受 nutritionLabel / manualEntry / referenceDerived；AI 估算不能沉淀为食品版本。
     struct VersionArgs: Decodable {
         var source: String
-        /// nutritionLabel：`attachNutritionLabel` 返回的识别 ID。
+        /// nutritionLabel：`attachNutritionLabel` 记下的照片 ID（消息里的 labelScanId）。
         var labelScanId: UUID?
         /// referenceDerived：起点条目；营养值由客户端从参考库复制，模型给的忽略。
         var referenceFoodId: String?
@@ -403,7 +403,7 @@ final class ProposalToolHandler {
         switch error {
         case .activeVersionChanged: .failure("revisionConflict", "这个食品在提案后已更新，请重新读取后再提出。")
         case .productNotFound: .failure("productNotFound", "个人食品库中没有这个产品。")
-        case .unknownLabel: .failure("unknownLabel", "找不到对应的营养标签识别结果。")
+        case .unknownLabel: .failure("unknownLabel", "找不到对应的营养标签照片。")
         default: .failure("invalidFood", "食品数据不合格：\(error.auditCode)。")
         }
     }

@@ -27,7 +27,7 @@ final class ChatModel {
     private(set) var outgoing: String?
     /// 发送中消息附带的标签照片，只用于显示。
     private(set) var outgoingImage: UIImage?
-    /// 待发送的营养标签照片（已压缩的 JPEG）；发送时先在本机识别，再把识别结果交给模型。
+    /// 待发送的营养标签照片（已压缩的 JPEG）；发送时存到本机，再随消息发给模型。
     private(set) var attachment: Data?
     /// 缩略图缓存：在视图取值时写入，不参与界面刷新。
     @ObservationIgnored private var thumbnails: [UUID: UIImage] = [:]
@@ -67,7 +67,7 @@ final class ChatModel {
         return UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
     }
 
-    /// 长边压到 2000 像素以内：足够本地识别，也不占太多空间。原图只存本机。
+    /// 长边压到 2000 像素以内存到本机，作为食品版本的来源依据；发给模型时再按远程配置缩放。
     private static func compressed(_ image: UIImage) -> Data? {
         let longest = max(image.size.width, image.size.height)
         let scale = min(1, 2000 / max(longest, 1))
@@ -78,7 +78,7 @@ final class ChatModel {
         return resized.jpegData(compressionQuality: 0.85)
     }
 
-    /// 消息里标签照片的缩略图，按识别记录读取本机原图。
+    /// 消息里标签照片的缩略图，按附件记录读取本机原图。
     func labelThumbnail(_ ref: ChatCardRef) -> UIImage? {
         guard case .label(let id) = ref else { return nil }
         if let cached = thumbnails[id] { return cached }
@@ -120,17 +120,17 @@ final class ChatModel {
         outgoing = text
         outgoingImage = image.flatMap(UIImage.init(data:))
         streamingText = ""
-        activity = image == nil ? .thinking : .tool("attachNutritionLabel")
+        activity = .thinking
         let date = sessionDate
         sendTask = Task {
             do {
-                // attachNutritionLabel：在本机保存原图并识别，模型只拿到识别出的文字与候选值。
+                // attachNutritionLabel：先把照片存到本机，再随消息发给模型读（ADR-016）。
                 var scanID: UUID?
                 if let image {
                     do {
-                        scanID = try await services.labels.scan(image).scanID
+                        scanID = try services.labels.scan(image).scanID
                     } catch {
-                        throw LabelAttachmentError.recognitionFailed
+                        throw LabelAttachmentError.saveFailed
                     }
                 }
                 let result = try await orchestrator.send(text, on: date, labelScan: scanID) { [weak self] progress in
@@ -145,7 +145,7 @@ final class ChatModel {
                 if draft.isEmpty { draft = text }
                 if attachment == nil { attachment = image }
                 if error is LabelAttachmentError {
-                    message = "没能识别这张照片里的文字，换一张清楚些、正对营养成分表的照片试试。"
+                    message = "没能保存这张照片，请再试一次。"
                 } else if let error = error as? LLMError {
                     message = error.userMessage
                 } else if !(error is CancellationError) {
@@ -196,9 +196,9 @@ final class ChatModel {
 
 }
 
-/// 本机识别标签照片失败（Vision 出错）。识别出空结果不算失败，交给模型去说明。
+/// 标签照片没能存到本机。
 enum LabelAttachmentError: Error {
-    case recognitionFailed
+    case saveFailed
 }
 
 /// Chat 页（PRD §3.1）：按日期组织的对话。模型只能提出确认卡，记录在用户点确认后才保存。
@@ -464,7 +464,7 @@ struct ChatView: View {
                 .clipShape(.rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
                 Text("营养标签").font(VitaType.secondary.weight(.semibold))
-                Text("发送后在本机识别，只把识别出的文字交给模型。")
+                Text("随消息发给模型读取，原图也存在本机。")
                     .font(VitaType.meta)
                     .foregroundStyle(.secondary)
             }
@@ -572,7 +572,7 @@ private struct MessageRow: View {
                         .font(VitaType.body)
                         .textSelection(.enabled)
                 }
-                // 工具执行中的状态已在步骤清单里；还没有步骤时（如识别标签）也在这里显示。
+                // 工具执行中的状态已在步骤清单里；还没有步骤时也在这里显示。
                 if let activity, activity == .thinking || steps.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)

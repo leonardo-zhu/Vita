@@ -132,15 +132,18 @@ struct ResponsesClient: LLMClient {
 
 // MARK: - 请求体
 
-/// Responses API 请求体。消息用简写形式（`role` + 字符串 `content`），函数调用与输出用 item 形式。
+/// Responses API 请求体。消息用简写形式（`role` + `content`），函数调用与输出用 item 形式。
+/// `extraBody` 的键在最后合并；客户端自己管理的字段已在配置校验时排除，这里再跳过一次。
 struct ResponsesRequestBody: Encodable {
     var model: String
     var instructions: String
     var input: [Item]
     var tools: [Tool]
     var stream: Bool
-    /// 无状态：Conduit 首期不保存会话，也不接受 `previous_response_id`（llm-provider.md §5）。
+    /// 不让服务商保存回复：上下文每次都由客户端完整提供，用不到 `previous_response_id`（llm-provider.md §5）。
     var store = false
+    var reasoningEffort: String?
+    var extraBody: [String: JSONValue]
 
     init(_ request: LLMRequest) {
         model = request.model
@@ -148,6 +151,33 @@ struct ResponsesRequestBody: Encodable {
         input = request.input.map(Item.init)
         tools = request.tools.map { Tool(name: $0.name, description: $0.description, parameters: $0.parameters) }
         stream = request.streaming
+        reasoningEffort = request.reasoningEffort
+        extraBody = request.extraBody
+    }
+
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        try container.encode(model, forKey: Key("model"))
+        try container.encode(instructions, forKey: Key("instructions"))
+        try container.encode(input, forKey: Key("input"))
+        try container.encode(tools, forKey: Key("tools"))
+        try container.encode(stream, forKey: Key("stream"))
+        try container.encode(store, forKey: Key("store"))
+        if let reasoningEffort {
+            try container.encode(["effort": reasoningEffort], forKey: Key("reasoning"))
+        }
+        for (key, value) in extraBody.sorted(by: { $0.key < $1.key })
+        where !RemoteConfigValidator.reservedRequestFields.contains(key) {
+            try container.encode(value, forKey: Key(key))
+        }
     }
 
     struct Tool: Encodable {
@@ -157,10 +187,36 @@ struct ResponsesRequestBody: Encodable {
         var parameters: JSONValue
     }
 
+    /// 带图片的用户消息用 `input_text` / `input_image` 分段，其余用字符串。
+    enum Content: Encodable {
+        case text(String)
+        case parts([Part])
+
+        struct Part: Encodable {
+            var type: String
+            var text: String?
+            var imageURL: String?
+            var detail: String?
+
+            enum CodingKeys: String, CodingKey {
+                case type, text, detail
+                case imageURL = "image_url"
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .text(let text): try container.encode(text)
+            case .parts(let parts): try container.encode(parts)
+            }
+        }
+    }
+
     struct Item: Encodable {
         var type: String?
         var role: String?
-        var content: String?
+        var content: Content?
         var callID: String?
         var name: String?
         var arguments: String?
@@ -175,10 +231,17 @@ struct ResponsesRequestBody: Encodable {
             switch item {
             case .user(let text):
                 role = "user"
-                content = text
+                content = .text(text)
+            case .userImages(let text, let images):
+                role = "user"
+                let parts = images.map { Content.Part(type: "input_image", imageURL: $0.dataURL, detail: $0.detail) }
+                content = .parts([Content.Part(type: "input_text", text: text)] + parts)
+            case .system(let text):
+                role = "system"
+                content = .text(text)
             case .assistant(let text):
                 role = "assistant"
-                content = text
+                content = .text(text)
             case .functionCall(let call):
                 type = "function_call"
                 callID = call.callID
@@ -293,12 +356,22 @@ struct ResponsesStreamParser {
 
     private struct Response: Decodable {
         struct Usage: Decodable {
+            struct InputDetails: Decodable {
+                var cachedTokens: Int?
+
+                enum CodingKeys: String, CodingKey {
+                    case cachedTokens = "cached_tokens"
+                }
+            }
+
             var inputTokens: Int?
             var outputTokens: Int?
+            var inputDetails: InputDetails?
 
             enum CodingKeys: String, CodingKey {
                 case inputTokens = "input_tokens"
                 case outputTokens = "output_tokens"
+                case inputDetails = "input_tokens_details"
             }
         }
 
@@ -309,7 +382,10 @@ struct ResponsesStreamParser {
         var error: Failure?
 
         var info: LLMResponseInfo {
-            LLMResponseInfo(responseID: id, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens)
+            LLMResponseInfo(
+                responseID: id, inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens,
+                cachedTokens: usage?.inputDetails?.cachedTokens
+            )
         }
     }
 

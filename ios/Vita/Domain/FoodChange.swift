@@ -12,7 +12,7 @@ struct FoodProductDraft: Equatable, Codable, Sendable {
 struct FoodVersionDraft: Equatable, Codable, Sendable {
     var basis: FoodVersionBasis
     var sourceKind: FoodVersionSource
-    /// nutritionLabel 必填：已在本地识别过的标签图片引用。
+    /// nutritionLabel 必填：存在本机的标签照片引用。
     var labelImageReference: String?
     /// referenceDerived 必填：作为起点的公共参考库条目。
     var derivedFromReferenceID: String?
