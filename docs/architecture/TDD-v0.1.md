@@ -17,7 +17,7 @@ SwiftUI
 Application Services
  ├─ ChatOrchestrator（工具循环）/ AgentToolRunner / ChatHistoryService
  ├─ RecordService / FoodService / GoalService / DayDataService / HealthService
- ├─ LabelScanService（attachNutritionLabel：本地存图 + OCR）
+ ├─ LabelScanService（attachNutritionLabel：本地存图，照片随消息发给模型）
  ├─ PendingService（确认门与过期处理）
  ├─ NutritionCalculator
  └─ HealthSyncService（outbox）
@@ -31,7 +31,7 @@ Domain + Repositories
 Platform adapters
  ├─ HealthKitAdapter
  ├─ LLMClient（可替换 Provider）
- └─ OCR / ImageParser
+ └─ LabelImageEncoder（标签照片按配置缩放后发给模型）
 ```
 
 ### 1.1 分层原则
@@ -39,7 +39,7 @@ Platform adapters
 - `Presentation` 不直接操作 SwiftData 或 HealthKit，只调用 Application Service。
 - `Domain` 只包含值类型、规则和协议；不依赖 SwiftUI、HealthKit 或模型 SDK。
 - `Data` 实现 Repository、SwiftData schema、静态参考库读取与本地文件存储。
-- `Platform` 封装 HealthKit、Keychain、网络模型和 OCR。每项均应可替换为测试 double。
+- `Platform` 封装 HealthKit、Keychain、网络模型和图片编码。每项均应可替换为测试 double。
 - Agent 不是业务层的特权主体；它和手工 UI 都使用同一组 Application Service。
 
 ### 1.2 推荐模块布局
@@ -55,7 +55,7 @@ ios/
     Domain/              实体、值对象、Repository 协议、计算规则
     Application/         各类 Service 与 use case
     Data/                SwiftData models、repository、JSON decoder
-    Platform/            HealthKit、LLM、Keychain、OCR、文件存储
+    Platform/            HealthKit、LLM、Keychain、文件存储与图片编码
   Resources/ReferenceFood/  已授权的只读数据集
   VitaTests/
   VitaUITests/
@@ -76,11 +76,11 @@ docs/
 | 健康平台 | HealthKit | PRD 指定的唯一直接外部健康入口。 |
 | 模型接入 | 经 Conduit 网关的 Responses API + provider-neutral `LLMClient` | 客户端用 `URLSession` 对接 Conduit 的 `/v1/responses`；上游 Provider 由 Conduit 管理；领域逻辑不绑定具体模型或 SDK。 |
 | 远程配置 | `ConfigProvider` + 静态 JSON（现阶段不签名） | prompt、模型别名、超时等可远程调整，强制规则留在代码里；见 [Vita Admin 设计](vita-admin.md)。 |
-| 图片解析 | 本地 OCR + 可选模型解析 | 先抽取文本，再将结构化候选送入确认流程；原图不应默认上传。 |
+| 图片解析 | 多模态模型直接读图 | 照片随用户消息发给模型，模型读出数值后经 `proposeFoodChange` 走确认卡；原图同时存本机作为来源依据（ADR-016）。 |
 
 MVP 不需要用户账号、业务数据后端、实时协作或云端数据库。业务数据不进入任何服务端。客户端有三个网络出口：
 
-1. **模型请求：** 全部发往独立网关 Conduit（目前上游为火山方舟）。发送的内容是用户主动发给 Agent 的文本，加上为完成该请求所需的本地数据：当天记录摘要，以及**个人食品库的结构化整库摘要**（名称、品牌、包装、ID、每基准营养；PRD §3.1 要求由模型做语义匹配，体量为几十条，可由配置 `includePersonalFoodSummary` 关闭）。健康数据只在模型调用相应工具时按需提供；营养标签原图不外发，只发本地识别出的文字。集成细节见 [模型 Provider 集成规范](../contracts/llm-provider.md)。
+1. **模型请求：** 全部发往独立网关 Conduit（目前上游为火山方舟）。发送的内容是用户主动发给 Agent 的文本，加上为完成该请求所需的本地数据：当天记录摘要，以及**个人食品库的结构化整库摘要**（名称、品牌、包装、ID、每基准营养；PRD §3.1 要求由模型做语义匹配，体量为几十条，可由配置 `includePersonalFoodSummary` 关闭）。健康数据只在模型调用相应工具时按需提供；营养标签照片按配置缩放后随消息发给模型（ADR-016）。集成细节见 [模型 Provider 集成规范](../contracts/llm-provider.md)。
 2. **远程配置拉取：** 只读下发，请求不携带用户标识，见 [Vita Admin 设计](vita-admin.md)。
 3. **诊断日志上报：** 可在设置页关闭，只含元数据，不含对话、饮食、健康数据和图片。
 
@@ -183,8 +183,9 @@ personal / reference 的数值一律由客户端重算，模型即使带了数�
 
 发送给模型的上下文由 `ChatOrchestrator` 组装，每轮读取一次生效配置，一轮中途不切换：
 
-- **系统指令**：配置中的系统 prompt，后接客户端状态——会话日期与星期、当前本地时间与时区、当天 revision、活跃 Pending ID、当天各记录与 Item 的 ID 和原始用量、个人食品库整库摘要。
-- **历史**：当前 `sessionDate` 最近 `context.maxRecentMessages` 条用户与助手文字。工具调用不重放；附带确认卡的助手消息追加一句“［客户端注］”说明卡片结局（已确认 / 已取消 / 已过期 / 待确认），避免模型只模仿“已生成确认卡”的说法而不调用工具；带 `label:` 引用的用户消息重放时附上该次识别的文字与 `labelScanId`。
+- **系统指令**：配置中的系统 prompt，后接个人食品库整库摘要。这部分很少变化，和工具定义一起构成稳定的前缀，命中服务商的隐式缓存（命中数见诊断日志 `tokensCached`）。
+- **客户端状态**：会话日期与星期、当前本地时间与时区、当天 revision、活跃 Pending ID、当天各记录与 Item 的 ID 和原始用量。每轮都变，作为一条 `system` 消息放在本轮用户消息前，不进系统指令，以免打断前面的缓存前缀。
+- **历史**：当前 `sessionDate` 最近 `context.maxRecentMessages` 条用户与助手文字。工具调用不重放；附带确认卡的助手消息追加一句“［客户端注］”说明卡片结局（已确认 / 已取消 / 已过期 / 待确认），避免模型只模仿“已生成确认卡”的说法而不调用工具；带 `label:` 引用的用户消息重放时照片与 `labelScanId` 一起重放（历史在缓存前缀里，多半按缓存价计费）。
 - **工具循环**：最多 8 轮；超出则停止并提示用户换个说法。
 - **保存**：一轮成功后才同时保存用户消息与回复；失败或用户停止时都不保存，界面把原文与照片放回输入框。本轮已生成的 Pending 保留（它不是正式数据）。
 
@@ -304,7 +305,7 @@ Vita UI 继续展示原始时间精度，不将代表性时间倒灌为业务事
 - 模型请求的上下文见 §3.4：当前 Session 摘要、个人食品库整库摘要（可配置关闭）和用户当前消息。健康原始数据只在模型调用 `getHealthSnapshot` / `getGoalRecommendation` 时传递，并标注来源。
 - 工具诊断日志用 `os.Logger`（subsystem `com.leonardo.vita`，category `agent.tools`）只记工具名与结果码，不记参数或结果内容。
 - 网络错误、模型输出无效、工具参数不合格、HealthKit 权限撤销均是可显示且可恢复的状态，不能转化成静默写入。
-- 营养标签：用户在输入框“+”拍照或从相册选图，图片压缩到长边 2000 px 存于 App Support，用 Vision 在本机识别；交给模型的只有识别文字、解析候选与 `labelScanId`，原图与本地路径都不外发。若后来选择把图像发送给模型 Provider，必须在发送前提供一次明确、可理解的同意说明。
+- 营养标签：用户在输入框“+”拍照或从相册选图，图片压缩到长边 2000 px 存于 App Support，作为 Food Version 的来源依据；发送时按远程配置 `labelImage`（长边、JPEG 质量、`detail`）再缩放，以 `input_image` 随消息发给模型，不额外弹同意说明（ADR-016）。本地路径不外发，模型只拿到 `labelScanId`。
 - 审计日志记录结构化操作与错误码，不默认保存完整对话。可在设置页提供“清除本地诊断日志”的维护入口，但不属于 MVP 核心界面。
 
 ## 9. 非目标与扩展点

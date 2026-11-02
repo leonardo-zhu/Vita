@@ -42,7 +42,7 @@
 
 输入：自然语言 `query`。输出：**个人食品库的全部产品**（`productId`、名称、品牌、包装规格、`activeVersionId`、每基准营养），`query` 只是模型想找什么的提示，客户端不据此过滤。
 
-客户端不做字符串或模糊匹配（ADR-015、PRD §3.1）：同一份整库摘要已随系统上下文提供，由模型按语义判断用户说的是哪一个；有多个可能或不确定时先问用户。
+客户端不做字符串或模糊匹配（ADR-016、PRD §3.1）：同一份整库摘要已随系统上下文提供，由模型按语义判断用户说的是哪一个；有多个可能或不确定时先问用户。
 
 ### `searchReferenceFoods`
 
@@ -124,7 +124,7 @@
 
 - `source` 只接受 `nutritionLabel` / `manualEntry` / `referenceDerived`，其他（包括 `aiEstimated`）返回 `estimateNotAllowed`。
 - `referenceDerived` 的基准与营养值由客户端从参考库复制，模型给的忽略。
-- `nutritionLabel` 的 `values` 由模型根据识别候选给出（可修正识别错误），图片引用由客户端按 `labelScanId` 查得，模型拿不到也不能伪造本地路径。
+- `nutritionLabel` 的 `values` 由模型读照片给出（能量只有千焦时由模型 ÷4.184 换算），图片引用由客户端按 `labelScanId` 查得，模型拿不到也不能伪造本地路径。
 - 提案后产品的生效版本已变化时，确认会失败并作废（`revisionConflict`）。
 - 新增错误码：`estimateNotAllowed`、`productNotFound`、`unknownLabel`、`invalidFood`。
 
@@ -151,7 +151,7 @@
 ### 手动身体数据与标签图片（client-only 入口）
 
 - `submitManualBodyMetrics`：体重、身高、体脂率、出生日期、生理性别缺失时，由 Onboarding 或设置页表单提交。仅用于目标生成，保存在目标的 evidence snapshot 中，**不写回 HealthKit**。`getHealthSnapshot` 与 `getGoalRecommendation` 返回时标注数据来源。
-- `attachNutritionLabel`：用户在 Chat 输入框“+”拍照或从相册选图，发送时客户端先在本机存图并识别；识别结果作为一段“［客户端附件］”文字附在这条用户消息后：`labelScanId`、解析出的每基准候选值（含千焦原值与需留意的问题）、前 40 行识别文字，以及处理要求。**原图与本地路径都不发送**（TDD §8）。消息以 `label:<scanId>` 引用保存，之后重放历史时附件文字随之重放。只发照片时默认意图是存入个人食品库：模型应直接调用 `proposeFoodChange`（`source = nutritionLabel`），品牌、包装识别不到就留空，不先追问；仍需 Pending 确认。
+- `attachNutritionLabel`：用户在 Chat 输入框“+”拍照或从相册选图，发送时客户端先把照片存到本机，再把它按配置缩放后作为 `input_image` 附在这条用户消息里，文字部分注明 `labelScanId`；**本地路径不发送**（TDD §8、ADR-016）。消息以 `label:<scanId>` 引用保存，之后重放历史时照片随之重放。怎么处理标签照片写在系统 prompt 里（可远程调整）：默认意图是存入个人食品库，模型直接调用 `proposeFoodChange`（`source = nutritionLabel`），品牌、包装读不到就留空，不先追问，用户没说吃了多少也不追问用量；仍需 Pending 确认。
 
 ## Pending 状态机
 

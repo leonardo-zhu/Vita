@@ -44,9 +44,10 @@ Vita 的 Agent 行为高度依赖 prompt、工具描述、模型 ID 和少量运
 
 | 分组 | 字段 | 说明 |
 | --- | --- | --- |
-| `llm` | `modelId`、`timeoutSeconds`、`maxRetries`、`streaming` | 对应 Provider 规范 §3 的用户偏好。所有模型调用统一经 Conduit，`modelId` 填 Conduit 的逻辑别名（§3.3）。 |
+| `llm` | `modelId`、`timeoutSeconds`、`maxRetries`、`streaming`、`reasoningEffort`、`extraBody` | 对应 Provider 规范 §3 的用户偏好。所有模型调用统一经 Conduit，`modelId` 填 Conduit 的逻辑别名（§3.3）。`reasoningEffort` 是 Responses 的 `reasoning.effort`，`extraBody` 原样合并进请求体（ADR-017）。 |
 | `context` | `maxRecentMessages`、`includePersonalFoodSummary` | 对应 TDD §3.4 的上下文裁剪窗口。 |
 | `prompts` | 系统 prompt、各工具的 `description` 文本 | 每项带 `id` 与 `version`。 |
+| `labelImage` | `maxDimension`、`jpegQuality`、`detail` | 营养标签照片发给模型前的缩放、压缩与 `input_image` 精度（ADR-016）。 |
 | `features` | 布尔开关 | 例如灰度新工具；开关只能**关闭或启用已随客户端发布的能力**。 |
 
 ### 3.2 不可远程下发（必须留在代码里）
@@ -84,7 +85,9 @@ Vita 的 Agent 行为高度依赖 prompt、工具描述、模型 ID 和少量运
     "modelId": "<Conduit 逻辑别名，如 vita-chat>",
     "timeoutSeconds": 60,
     "maxRetries": 1,
-    "streaming": true
+    "streaming": true,
+    "reasoningEffort": "low",
+    "extraBody": { "max_tool_calls": 8 }
   },
   "context": {
     "maxRecentMessages": 20,
@@ -97,6 +100,7 @@ Vita 的 Agent 行为高度依赖 prompt、工具描述、模型 ID 和少量运
       "proposeRecordChange": { "version": 1, "description": "..." }
     }
   },
+  "labelImage": { "maxDimension": 1600, "jpegQuality": 0.8, "detail": "high" },
   "features": {
     "exampleFlag": false
   }
@@ -145,6 +149,9 @@ Vita 的 Agent 行为高度依赖 prompt、工具描述、模型 ID 和少量运
 | `llm.modelId` | 非空字符串，长度上限。 |
 | `llm.timeoutSeconds` | 5–180。 |
 | `llm.maxRetries` | 0–3。 |
+| `llm.reasoningEffort` | `default` / `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`。 |
+| `llm.extraBody` | 最多 20 项，不能含 `model`、`instructions`、`input`、`tools`、`stream`、`store`、`reasoning`、`previous_response_id`。 |
+| `labelImage` | 长边 512–4096，JPEG 质量 0.3–1，`detail` 为 `low` / `high` / `xhigh`。 |
 | `context.maxRecentMessages` | 1–100。 |
 | `prompts.*.text/description` | 非空，长度上限（防止异常膨胀导致请求超限）。 |
 | `prompts.tools` 的键 | 必须是客户端已知工具；未知工具名忽略。 |

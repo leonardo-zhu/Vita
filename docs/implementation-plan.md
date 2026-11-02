@@ -37,13 +37,13 @@
 ## Phase 3：Nutrition DB 与标签录入
 
 - 实现 Food Product、不可变 Food Version、包装规格和引用快照。
-- 加入本地图片存储与 OCR/解析适配接口，所有解析结果走确认卡。
+- 加入本地图片存储，所有解析结果走确认卡。
 - 按《公共营养参考库规范》构建首批公共营养 JSON、中文别名与精确查询：中国来源数据（用户本地私有输入，Git 忽略）优先，USDA FoodData Central 补充中国库未覆盖的食材。
-- 实现 `attachNutritionLabel`：本地 OCR 后只把结构化候选交给模型，原图不外发。
+- 实现 `attachNutritionLabel`：照片存本机并随消息发给模型读取（2026-11-02 起，ADR-016；最初是本机 OCR 只发识别文字）。
 
 验收：历史 Item 的营养结果不随 Food Version 更新而改变；AI 估算不能被直接保存为个人食品版本。
 
-状态（2026-10-30）：客户端部分完成，正式参考库构建待做。`FoodService` 管理 Food Product 与不可变 Food Version，新建产品与新版本都经 Pending 确认，新版本让旧版本退役，提案后生效版本变化则作废；`packageConversion` 用量必须对应带包装规格的个人食品。`LabelScanService` 实现 `attachNutritionLabel`：原图存 App Support、Vision 本地识别、`NutritionLabelParser` 按坐标拼行并解析 GB 28050 格式（千焦换算千卡、排除饱和/反式脂肪、缺项给出提示）。`proposeFoodChange` 的来源只接受营养标签（须指向本地识别 ID）、用户提供或公共参考库（数值由客户端复制），AI 估算被拒绝。Data 页新增只读的营养库与参考库署名。正式参考库：`tools/reference-food/build.py` 从本地私有数据构建 `reference-foods.json`，中国食物成分表（Sanotsu 矫正版 JSON）优先、USDA FoodData Central（Foundation 2026-10-29 / SR Legacy 2018-04）补充，同一 Vita ID 以中国条目为准；精选层 85 条（中国 62、USDA 23）加中国数据自动整理的扩展层，精选层未命中时才查扩展层。已知缺口：中国数据不含调味品，酱油、白砂糖、蜂蜜暂用 USDA。
+状态（2026-10-30）：客户端部分完成，正式参考库构建待做。`FoodService` 管理 Food Product 与不可变 Food Version，新建产品与新版本都经 Pending 确认，新版本让旧版本退役，提案后生效版本变化则作废；`packageConversion` 用量必须对应带包装规格的个人食品。`LabelScanService` 实现 `attachNutritionLabel`：原图存 App Support（最初在本机用 Vision 识别、`NutritionLabelParser` 解析；2026-11-02 改为照片直接发给模型读，见 ADR-016）。`proposeFoodChange` 的来源只接受营养标签（须指向本机保存的标签照片 ID）、用户提供或公共参考库（数值由客户端复制），AI 估算被拒绝。Data 页新增只读的营养库与参考库署名。正式参考库：`tools/reference-food/build.py` 从本地私有数据构建 `reference-foods.json`，中国食物成分表（Sanotsu 矫正版 JSON）优先、USDA FoodData Central（Foundation 2026-10-29 / SR Legacy 2018-04）补充，同一 Vita ID 以中国条目为准；精选层 85 条（中国 62、USDA 23）加中国数据自动整理的扩展层，精选层未命中时才查扩展层。已知缺口：中国数据不含调味品，酱油、白砂糖、蜂蜜暂用 USDA。
 
 ## Phase 4：HealthKit 与目标
 
@@ -68,7 +68,7 @@
 
 - **模型接入**：`ResponsesClient`（`URLSession` + SSE）实现 `LLMClient`，细节见 Provider 规范 §7。
 - **工具**：`AgentToolCatalog` 定义契约里的 11 个工具与参数 schema（远程配置只能换描述）；`AgentToolRunner` 执行只读工具与 `updateGoal`，Propose 工具交给 `ProposalToolHandler`。
-- **对话编排**：`ChatOrchestrator` 的上下文、工具循环与保存规则见 TDD §3.4。个人食品库整库进上下文，由模型做语义匹配（ADR-015）。
+- **对话编排**：`ChatOrchestrator` 的上下文、工具循环与保存规则见 TDD §3.4。个人食品库整库进上下文，由模型做语义匹配（ADR-016）。
 - **Chat 页**：按日期组织会话（日历切换、跨午夜跟随今天、模型提到别的日期时给出切换按钮）；生成中显示推理摘要与工具步骤；确认卡在输入框上方，历史消息标出卡片结局；营养标签可拍照或从相册附上（契约 `attachNutritionLabel`）。
 - **设置页**：Conduit 令牌（Keychain，显示末四位）；连点版本号五次打开本地调试覆盖（模型别名、超时、系统 prompt，显示每项来源）；可重新查看首次引导。
 - **Onboarding（PRD §3.7）**：欢迎 → 连接 Apple 健康（被拒时说明去哪打开，不阻塞）→ 生成每日目标（与 Data 页共用 `GoalSetupForm`）→ 完成；每步可跳过，已有目标的用户不显示。
@@ -86,6 +86,7 @@
 | Vita Admin 首次发布 | 待做 | 已部署到 R4S（Vita Admin 设计 §14）。填管理员密码哈希、登录并注册 Passkey、发布第一版配置，再在手机设置页点“立即刷新”确认能拉到。 |
 | Admin 多语言与分页（2026-11-02） | 完成，已部署 | 界面文案移到 `admin/src/i18n/messages.ts`（中文 / 英文，类型保证键一致），顶栏和登录页有语言切换（跟随系统 / 简体中文 / English，存 cookie `vita_admin_lang`）；“试跑”改名为“Prompt 调试”，路由 `/admin/playground`；诊断页“最近的事件”最多取 500 条、前端每页 20 条。服务端只返回错误码（校验、Passkey、发布、试跑），文字由界面按语言生成。本地各页面中英文都走过一遍；顺带修了诊断页因 SQLite 行对象无法传给客户端组件而打不开的问题。33 个单测通过。 |
 | Vita Admin 收尾 | 待做 | M1–M3 都已实现（Vita Admin 设计 §14–§16）。还要：在 R4S 的 `.env` 配 Conduit 密钥让试跑可用；发布第一版配置；在 App 里确认能拉到配置、诊断日志能到达 Admin。 |
+| 标签照片交给模型 + 模型参数远程可调（2026-11-02） | 完成 | 照片随消息发给模型读，不再本机识别（ADR-016）；远程配置加 `llm.reasoningEffort`、`llm.extraBody`、`labelImage`（ADR-017），Admin 配置页与 Prompt 调试同步；每轮客户端状态改为系统消息放在用户消息前，系统指令只留 prompt 与个人食品库，便于命中服务商缓存，诊断日志加 `tokensCached`、诊断页显示命中率。标签照片的处理要求从客户端写死的附件文字移到系统 prompt（v4），去掉了“吃了多少告诉我”的固定结尾。 |
 | 诊断日志上报 | 完成 | 对话、工具、配置拉取三类元数据事件，设置页可关（Vita Admin 设计 §16）。 |
 | 真机验证 | 待做 | 本轮功能只在 iPhone 18 Pro 模拟器上验证；相机、权限弹窗与真实 Apple 健康数据需在 iPhone 上走一遍。 |
 | 模型未调用工具却声称已生成确认卡 | 观察中 | 已缓解；若仍出现，可在客户端检测“回复提到卡片但没有 Pending”并提示重试。 |

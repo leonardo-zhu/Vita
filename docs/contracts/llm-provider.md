@@ -53,6 +53,7 @@ Vita 不依赖某个社区 Swift OpenAI SDK，而是用 iOS 标准库 `URLSessio
 | **Conduit 地址** | 构建配置 | Debug 指向开发实例，Release 指向生产实例。**不可远程改，不可由用户改**（见 Vita Admin 设计 §3.2）。 |
 | Model ID | ~~用户偏好（非敏感）~~ → 生效配置（非敏感） | ~~使用用户在方舟中已开通的模型/推理端点 ID；~~ 现为 Conduit 的**逻辑别名**，来自 Vita Admin 下发的生效配置；不在源码硬编码具体模型名称。 |
 | 超时、重试和流式开关 | ~~用户偏好/应用默认值~~ → 生效配置/内置默认值 | 只重试尚未产生可观察工具副作用的网络请求。 |
+| 推理强度与其他请求参数 | 生效配置/内置默认值 | `llm.reasoningEffort` 映射为 `reasoning.effort`（`default` 不传）；`llm.extraBody` 原样合并进请求体，客户端自己填的字段不能被覆盖（ADR-017）。 |
 
 ~~这是个人自用的 BYOK（bring your own key）模型：用户故意把自己的 Ark Key 授予自己的设备。它不适合把一个共享平台 API Key 打进公开发布的 App；若未来需要共享密钥、配额控制或服务端任务，再引入 BFF。~~
 
@@ -70,7 +71,7 @@ ChatOrchestrator
 
 `LLMClient` 应只暴露三类能力：普通响应、流式响应、带工具循环的响应。上层不认识 URL、Bearer header、SSE event 名称或上游 DTO。
 
-每次请求都由客户端构造：当前 `sessionDate`、已裁剪的对话上下文、工具定义和 `requestId`（同时作为 `X-Request-Id` 头，用于与 Conduit 日志关联）。不能把整个 SwiftData 数据库、全部 HealthKit 原始历史、令牌或标签原图默认发送给模型。
+每次请求都由客户端构造：当前 `sessionDate`、已裁剪的对话上下文、工具定义和 `requestId`（同时作为 `X-Request-Id` 头，用于与 Conduit 日志关联）。不能把整个 SwiftData 数据库、全部 HealthKit 原始历史或令牌发送给模型；营养标签照片只在用户附上它的那条消息里发送（ADR-016）。
 
 ## 5. 工具循环
 
@@ -103,10 +104,11 @@ ChatOrchestrator
 
 - **流式事件**：解析 `response.output_text.delta`（正文）、`response.reasoning_summary_text.delta` / `response.reasoning_text.delta`（推理摘要，只在界面展示，不保存、不回传）、`response.output_item.done`（函数调用）、`response.completed` / `response.incomplete`（完成，补发只出现在完成事件里的函数调用）、`response.failed` 与 `error`。流在没有完成事件时结束视为连接中断。
 - **非流式**：按 `output` 顺序转成同样的事件序列（`streaming` 由生效配置决定）。
-- **请求体**：`store: false`；用户与助手消息用简写形式（`role` + 字符串 `content`），函数调用与输出用 `function_call` / `function_call_output` item 原样回传。
+- **请求体**：`store: false`；用户与助手消息用简写形式（`role` + 字符串 `content`），带标签照片的用户消息用 `input_text` + `input_image`（base64 data URL 与 `detail`）分段；每轮的客户端状态是一条 `role: system` 的消息，放在本轮用户消息前；函数调用与输出用 `function_call` / `function_call_output` item 原样回传。推理强度与 `extraBody` 见 §3。
+- **缓存**：火山方舟对 seed 2.0 之后的模型自动做前缀缓存（隐式缓存，不可关闭、不收存储费，至少 1024 token 才可能命中），与 `store` 无关；`store` 只决定服务商是否保存回复供之后检索或接 `previous_response_id`。所以请求按“越稳定越靠前”组织：系统指令（prompt + 个人食品库）、工具、历史、本轮客户端状态、本轮消息。命中数取自 `usage.input_tokens_details.cached_tokens`，记入诊断日志 `tokensCached`。需要时可经 `extraBody` 加 `prompt_cache_key` 提高命中率。
 - **重试**：只有在尚未产出任何事件时，才按 `llm.maxRetries` 重试可重试错误（502 / 503 / 504 / 网络），间隔 1 秒，避免重复的文字或工具调用。
 - **超时**：`URLRequest.timeoutInterval` 取 `llm.timeoutSeconds`；流式时是两次数据之间的最长等待。
 - **令牌**：每次请求时从 Keychain 读取，更换令牌不必重启；缺失时不发请求，直接提示去设置。
 - **错误提示**：`LLMError.userMessage` 为每类错误给出一句中文提示；401 提示更新令牌，400 显示 Conduit 返回的原因（如别名不存在）。
 
-App 将响应 ID、模型别名、请求耗时、token/费用字段（若返回）作为最小诊断信息保存（随诊断日志一起做，尚未实现；`LLMResponseInfo` 已解析出响应 ID 与 token 数），但不保存令牌或完整敏感 payload。~~Provider 的远端存储/保留选项必须以方舟当时文档为准，在设置页明确展示；~~ 现行：请求固定 `store: false`，远端保留策略由 Conduit 的隐私规则约束（默认不记录内容，见 Conduit 项目文档 §7）；Vita 不依赖远端状态保存本地会话。
+App 将模型别名、请求耗时、输入 / 输出 / 命中缓存的 token 数作为最小诊断信息，随诊断日志上报（ADR-014），但不保存令牌或完整敏感 payload。~~Provider 的远端存储/保留选项必须以方舟当时文档为准，在设置页明确展示；~~ 现行：请求固定 `store: false`，远端保留策略由 Conduit 的隐私规则约束（默认不记录内容，见 Conduit 项目文档 §7）；Vita 不依赖远端状态保存本地会话。
