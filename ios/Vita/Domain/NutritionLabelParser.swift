@@ -61,6 +61,18 @@ enum NutritionLabelParser {
         candidate.fatG = grams(in: rows, keywords: ["脂肪", "fat"], excluding: ["饱和", "反式", "saturated", "trans"])
         candidate.carbohydrateG = grams(in: rows, keywords: ["碳水化合物", "碳水", "carbohydrate"], excluding: [])
 
+        if candidate.complete == nil, let column = standardColumn(lines) {
+            if candidate.energyKcal == nil {
+                candidate.energyKJ = column.energyKJ
+                candidate.energyKcal = column.energyKcal
+                if column.energyKJ != nil { candidate.warnings.append("能量由千焦换算为千卡（÷4.184）") }
+            }
+            candidate.proteinG = candidate.proteinG ?? column.proteinG
+            candidate.fatG = candidate.fatG ?? column.fatG
+            candidate.carbohydrateG = candidate.carbohydrateG ?? column.carbohydrateG
+            candidate.warnings.append("项目名称没认清，按国标顺序（能量、蛋白质、脂肪、碳水化合物）对应数值，请核对")
+        }
+
         let missing = [
             ("能量", candidate.energyKcal), ("蛋白质", candidate.proteinG),
             ("脂肪", candidate.fatG), ("碳水化合物", candidate.carbohydrateG),
@@ -90,6 +102,51 @@ enum NutritionLabelParser {
     private static func normalize(_ row: String) -> String {
         let half = row.applyingTransform(.fullwidthToHalfwidth, reverse: false) ?? row
         return half.replacingOccurrences(of: #"(\d)[,，](\d)"#, with: "$1.$2", options: .regularExpression)
+    }
+
+    // MARK: - 按列兜底
+
+    /// 项目名称常因字小或倾斜识别不出，数值列却清楚。GB 28050 规定按能量、蛋白质、脂肪、碳水化合物、钠排列，
+    /// 所以“每100”表头下的数值列恰好是 能量 / 克 / 克 / 克（/ 毫克）时可以按顺序对应。
+    /// 多出饱和脂肪、糖等子项时顺序对不上，宁可不填。
+    private static func standardColumn(_ lines: [RecognizedTextLine]) -> NutritionLabelCandidate? {
+        guard let header = lines.first(where: {
+            let text = normalize($0.text).lowercased()
+            return text.contains("每100") || text.contains("per 100")
+        }) else { return nil }
+        let pattern = #"^\s*(\d+(?:\.\d+)?)\s*(千焦|kj|千卡|大卡|kcal|毫克|mg|克|g)"#
+        let cells: [(Decimal, String)] = lines
+            .filter { line in
+                let center = line.x + line.width / 2
+                return line.y < header.y && center > header.x && center < header.x + header.width
+            }
+            .sorted { $0.y > $1.y }
+            .compactMap { line in
+                guard let match = normalize(line.text).lowercased().firstMatch(of: pattern),
+                      let value = Decimal(string: match[0]) else { return nil }
+                let unit = switch match[1] {
+                case "千焦", "kj": "kj"
+                case "千卡", "大卡", "kcal": "kcal"
+                case "毫克", "mg": "mg"
+                default: "g"
+                }
+                return (value, unit)
+            }
+        let units = cells.map(\.1)
+        guard ["kj", "kcal"].contains(units.first), units.dropFirst().prefix(3) == ["g", "g", "g"],
+              units.count == 4 || (units.count == 5 && units[4] == "mg")
+        else { return nil }
+        var column = NutritionLabelCandidate(warnings: [])
+        if units[0] == "kj" {
+            column.energyKJ = cells[0].0
+            column.energyKcal = rounded(cells[0].0 / kilojoulesPerKilocalorie, scale: 1)
+        } else {
+            column.energyKcal = cells[0].0
+        }
+        column.proteinG = cells[1].0
+        column.fatG = cells[2].0
+        column.carbohydrateG = cells[3].0
+        return column
     }
 
     // MARK: - 匹配
