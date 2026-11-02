@@ -31,6 +31,7 @@ export interface BuiltinConfig {
   llm: LLMSettings
   context: ContextSettings
   prompts: { system: PromptText; tools: Record<string, ToolPrompt> }
+  labelImage: LabelImageSettings
   features: Record<string, boolean>
 }
 
@@ -42,14 +43,27 @@ export interface PublishedConfig {
   llm: LLMSettings
   context: ContextSettings
   prompts: { system?: PromptText; tools: Record<string, ToolPrompt> }
+  /** 早期发布的文件没有这一项，客户端回落到内置值 */
+  labelImage?: LabelImageSettings
   features: Record<string, boolean>
 }
 
+// 后加的字段带默认值：加这些字段之前保存的草稿解析时补上内置值
 const llmSchema = z.object({
   modelId: z.string(),
   timeoutSeconds: z.number().int(),
   maxRetries: z.number().int(),
   streaming: z.boolean(),
+  /** Responses 的 reasoning.effort，`default` 表示不传 */
+  reasoningEffort: z.string().default(builtinJson.llm.reasoningEffort),
+  /** 原样合并进请求体的其他参数 */
+  extraBody: z.record(z.string(), z.unknown()).default({}),
+})
+
+const labelImageSchema = z.object({
+  maxDimension: z.number().int(),
+  jpegQuality: z.number(),
+  detail: z.string(),
 })
 
 const contextSchema = z.object({
@@ -64,11 +78,13 @@ export const draftSchema = z.object({
   context: contextSchema,
   systemPrompt: z.string(),
   toolDescriptions: z.record(z.string(), z.string()),
+  labelImage: labelImageSchema.default(builtinJson.labelImage),
   features: z.record(z.string(), z.boolean()),
 })
 
 export type LLMSettings = z.infer<typeof llmSchema>
 export type ContextSettings = z.infer<typeof contextSchema>
+export type LabelImageSettings = z.infer<typeof labelImageSchema>
 export type DraftContent = z.infer<typeof draftSchema>
 
 export const builtin = builtinJson as BuiltinConfig
@@ -81,12 +97,13 @@ export function knownTools(base: BuiltinConfig = builtin): string[] {
 export function draftFromBuiltin(base: BuiltinConfig = builtin): DraftContent {
   return {
     minClientVersion: '',
-    llm: { ...base.llm },
+    llm: { ...base.llm, extraBody: { ...base.llm.extraBody } },
     context: { ...base.context },
     systemPrompt: base.prompts.system.text,
     toolDescriptions: Object.fromEntries(
       Object.entries(base.prompts.tools).map(([name, tool]) => [name, tool.description])
     ),
+    labelImage: { ...base.labelImage },
     features: { ...base.features },
   }
 }
@@ -100,7 +117,8 @@ export function draftFromPublished(
   return {
     ...draft,
     minClientVersion: published.minClientVersion ?? '',
-    llm: { ...published.llm },
+    // 早期发布的文件缺后加的字段，用内置值补齐
+    llm: { ...draft.llm, ...published.llm },
     context: { ...published.context },
     systemPrompt: published.prompts.system?.text ?? draft.systemPrompt,
     toolDescriptions: {
@@ -109,6 +127,7 @@ export function draftFromPublished(
         Object.entries(published.prompts.tools).map(([name, tool]) => [name, tool.description])
       ),
     },
+    labelImage: { ...draft.labelImage, ...published.labelImage },
     features: { ...draft.features, ...published.features },
   }
 }
@@ -190,6 +209,7 @@ export function buildPublished(
     llm: { ...draft.llm },
     context: { ...draft.context },
     prompts: { ...(system ? { system } : {}), tools },
+    labelImage: { ...draft.labelImage },
     // 开关只能启用或关闭客户端已有的能力，键以内置默认值为准
     features: Object.fromEntries(
       Object.keys(base.features).map((name) => [name, draft.features[name] ?? base.features[name]])

@@ -30,6 +30,12 @@ import type { ValidationIssue } from '@/server/config/validate'
 
 import { discardDraftAction, publishAction, saveDraftAction, type ActionResult } from '../actions'
 
+const REASONING_EFFORTS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+const IMAGE_DETAILS = ['low', 'high', 'xhigh']
+
+const select =
+  'h-8 rounded-lg border border-input bg-background px-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50'
+
 interface Props {
   initial: DraftContent
   builtin: DraftContent
@@ -51,6 +57,10 @@ export function ConfigEditor(props: Props) {
   const [pending, startTransition] = useTransition()
   const [publishOpen, setPublishOpen] = useState(false)
   const [note, setNote] = useState('')
+  // 其他请求参数的 JSON 还没写完整时不能保存
+  const [extraBodyInvalid, setExtraBodyInvalid] = useState(false)
+  // 撤销编辑时让 JSON 编辑框按草稿重新填文字
+  const [editRound, setEditRound] = useState(0)
 
   const unsaved = JSON.stringify(content) !== JSON.stringify(initial)
   const canPublish = !unsaved && props.hasPendingChanges && issues.length === 0
@@ -128,6 +138,19 @@ export function ConfigEditor(props: Props) {
             checked={content.llm.streaming}
             onChange={(v) => update((d) => ((d.llm.streaming = v), d))}
           />
+          <Field label={t.editor.effortLabel} hint={t.editor.effortHint} error={issueFor('/llm/reasoningEffort')}>
+            <select
+              className={select}
+              value={content.llm.reasoningEffort}
+              onChange={(e) => update((d) => ((d.llm.reasoningEffort = e.target.value), d))}
+            >
+              {REASONING_EFFORTS.map((effort) => (
+                <option key={effort} value={effort}>
+                  {effort === 'default' ? t.editor.effortDefault : effort}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label={t.editor.messagesLabel} error={issueFor('/context/maxRecentMessages')}>
             <NumberInput
               value={content.context.maxRecentMessages}
@@ -149,6 +172,54 @@ export function ConfigEditor(props: Props) {
               placeholder={t.editor.minClientPlaceholder}
               onChange={(e) => update((d) => ((d.minClientVersion = e.target.value), d))}
             />
+          </Field>
+          <div className="sm:col-span-2">
+            <ExtraBodyField
+              key={editRound}
+              value={content.llm.extraBody}
+              error={issueFor('/llm/extraBody')}
+              onChange={(v) => update((d) => ((d.llm.extraBody = v), d))}
+              onValidityChange={setExtraBodyInvalid}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t.editor.labelImageTitle}</CardTitle>
+          <CardDescription>{t.editor.labelImageDescription}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-3">
+          <Field label={t.editor.maxDimensionLabel} error={issueFor('/labelImage/maxDimension')}>
+            <NumberInput
+              value={content.labelImage.maxDimension}
+              onChange={(v) => update((d) => ((d.labelImage.maxDimension = v), d))}
+            />
+          </Field>
+          <Field label={t.editor.jpegQualityLabel} error={issueFor('/labelImage/jpegQuality')}>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="0.05"
+              value={Number.isFinite(content.labelImage.jpegQuality) ? content.labelImage.jpegQuality : ''}
+              onChange={(e) =>
+                update((d) => ((d.labelImage.jpegQuality = e.target.value === '' ? Number.NaN : Number(e.target.value)), d))
+              }
+            />
+          </Field>
+          <Field label={t.editor.detailLabel} error={issueFor('/labelImage/detail')}>
+            <select
+              className={select}
+              value={content.labelImage.detail}
+              onChange={(e) => update((d) => ((d.labelImage.detail = e.target.value), d))}
+            >
+              {IMAGE_DETAILS.map((detail) => (
+                <option key={detail} value={detail}>
+                  {detail}
+                </option>
+              ))}
+            </select>
           </Field>
         </CardContent>
       </Card>
@@ -253,7 +324,7 @@ export function ConfigEditor(props: Props) {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-end gap-2 px-4 py-3">
           {unsaved && (
-            <Button variant="ghost" disabled={pending} onClick={() => setContent(initial)}>
+            <Button variant="ghost" disabled={pending} onClick={() => (setContent(initial), setExtraBodyInvalid(false), setEditRound((n) => n + 1))}>
               {t.editor.undoEdits}
             </Button>
           )}
@@ -262,7 +333,7 @@ export function ConfigEditor(props: Props) {
               {t.editor.discardDraft}
             </Button>
           )}
-          <Button variant="outline" disabled={!unsaved || pending} onClick={() => run(() => saveDraftAction(content))}>
+          <Button variant="outline" disabled={!unsaved || pending || extraBodyInvalid} onClick={() => run(() => saveDraftAction(content))}>
             {t.editor.saveDraft}
           </Button>
           <Button disabled={!canPublish || pending} onClick={() => setPublishOpen(true)}>
@@ -338,6 +409,51 @@ function SwitchField({
       {label}
       <Switch checked={checked} onCheckedChange={onChange} />
     </Label>
+  )
+}
+
+/** JSON 对象的编辑框：输入时只改本地文字，能解析成对象时才写回草稿 */
+function ExtraBodyField({
+  value,
+  error,
+  onChange,
+  onValidityChange,
+}: {
+  value: Record<string, unknown>
+  error?: string
+  onChange: (value: Record<string, unknown>) => void
+  onValidityChange: (invalid: boolean) => void
+}) {
+  const t = useT()
+  const [text, setText] = useState(() => JSON.stringify(value, null, 2))
+  const [invalid, setInvalid] = useState(false)
+
+  function edit(next: string) {
+    setText(next)
+    let parsed: unknown = null
+    try {
+      parsed = next.trim() === '' ? {} : JSON.parse(next)
+    } catch {}
+    const ok = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    setInvalid(!ok)
+    onValidityChange(!ok)
+    if (ok) onChange(parsed as Record<string, unknown>)
+  }
+
+  return (
+    <Field
+      label={t.editor.extraBodyLabel}
+      hint={t.editor.extraBodyHint}
+      error={invalid ? t.editor.extraBodyInvalid : error}
+    >
+      <Textarea
+        value={text}
+        rows={4}
+        spellCheck={false}
+        className="font-mono text-sm"
+        onChange={(e) => edit(e.target.value)}
+      />
+    </Field>
   )
 }
 

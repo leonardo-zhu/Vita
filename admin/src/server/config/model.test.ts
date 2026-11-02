@@ -5,8 +5,10 @@ import {
   builtin,
   draftFromBuiltin,
   draftFromPublished,
+  draftSchema,
   knownTools,
   promptVersionHistory,
+  type PublishedConfig,
 } from './model'
 import { messages } from '@/i18n/messages'
 import { issueText } from '@/lib/issue-text'
@@ -64,6 +66,25 @@ describe('buildPublished', () => {
     expect(config.minClientVersion).toBe('0.2.0')
     expect(draftFromPublished(config)).toEqual(draft)
   })
+
+  it('fills fields added later from the built-in defaults', () => {
+    // 加推理强度、其他参数和标签照片设置之前发布的文件与保存的草稿
+    const old = buildPublished(draftFromBuiltin(), { configVersion: '2026-11-02.1', previous: null, history: {} })
+    const { reasoningEffort, extraBody, ...llm } = old.llm
+    void reasoningEffort
+    void extraBody
+    const legacy = { ...old, llm, labelImage: undefined } as unknown as PublishedConfig
+    const draft = draftFromPublished(legacy)
+    expect(draft.llm.reasoningEffort).toBe(builtin.llm.reasoningEffort)
+    expect(draft.llm.extraBody).toEqual({})
+    expect(draft.labelImage).toEqual(builtin.labelImage)
+
+    const { labelImage, ...savedDraft } = draftFromBuiltin()
+    void labelImage
+    const parsed = draftSchema.parse({ ...savedDraft, llm: llm })
+    expect(parsed.llm.reasoningEffort).toBe(builtin.llm.reasoningEffort)
+    expect(parsed.labelImage).toEqual(builtin.labelImage)
+  })
 })
 
 describe('validatePublished', () => {
@@ -89,5 +110,19 @@ describe('validatePublished', () => {
     expect(issues.map((issue) => issue.path)).toEqual(
       expect.arrayContaining(['/prompts/tools/deleteEverything', '/configVersion'])
     )
+  })
+
+  it('limits the reasoning effort, extra parameters and label photo settings', () => {
+    const config = valid()
+    config.llm.reasoningEffort = 'turbo'
+    config.llm.extraBody = { input: 'x', max_output_tokens: 100 }
+    config.labelImage = { maxDimension: 100, jpegQuality: 0.8, detail: 'ultra' }
+    const issues = validatePublished(config, { latestVersion: null })
+    expect(issues).toContainEqual(expect.objectContaining({ path: '/llm/reasoningEffort', rule: 'enum' }))
+    expect(issues).toContainEqual({ path: '/llm/extraBody', rule: 'reservedKey', param: 'input' })
+    expect(issues).toContainEqual({ path: '/labelImage/maxDimension', rule: 'minimum', param: 512 })
+    expect(issues).toContainEqual(expect.objectContaining({ path: '/labelImage/detail', rule: 'enum' }))
+    expect(issues.filter((issue) => issue.path === '/llm/extraBody')).toHaveLength(1)
+    expect(issues.map((issue) => issueText(messages.zh, issue))).toContain('其他请求参数不能包含 input，这个字段由 App 自己填')
   })
 })

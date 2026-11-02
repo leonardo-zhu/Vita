@@ -41,6 +41,7 @@ export type DiagnosticEvent =
       toolCalls?: number
       tokensIn?: number
       tokensOut?: number
+      tokensCached?: number
       createdPending?: boolean
       claimedCardWithoutTool?: boolean
       hitMaxRounds?: boolean
@@ -131,9 +132,9 @@ export function ingest(body: unknown, ip: string): IngestResult {
     `INSERT OR IGNORE INTO diagnostic_events (
        event_id, received_at, occurred_at, install_id, data_class, event_type, outcome, error_code,
        result_code, tool, tool_description_version, config_version, system_prompt_version, model_alias,
-       request_id, latency_ms, rounds, tool_calls, tokens_in, tokens_out, created_pending,
+       request_id, latency_ms, rounds, tool_calls, tokens_in, tokens_out, tokens_cached, created_pending,
        claimed_card_without_tool, hit_max_rounds, app_version, os_version)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
   const flag = (value: boolean | undefined) => (value === undefined ? null : value ? 1 : 0)
   let accepted = 0
@@ -175,6 +176,7 @@ export function ingest(body: unknown, ip: string): IngestResult {
         chat?.toolCalls ?? null,
         chat?.tokensIn ?? null,
         chat?.tokensOut ?? null,
+        chat?.tokensCached ?? null,
         flag(chat?.createdPending),
         flag(chat?.claimedCardWithoutTool),
         flag(chat?.hitMaxRounds),

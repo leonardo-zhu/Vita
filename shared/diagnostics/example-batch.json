@@ -18,6 +18,7 @@
       "toolCalls": 1,
       "tokensIn": 5120,
       "tokensOut": 340,
+      "tokensCached": 3072,
       "createdPending": true,
       "claimedCardWithoutTool": false,
       "hitMaxRounds": false

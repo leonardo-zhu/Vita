@@ -20,8 +20,27 @@ describe('trialRequestBody', () => {
     expect(body.tools.map((tool) => tool.name)).toEqual(knownTools())
     expect(body.tools.find((tool) => tool.name === 'getGoals')?.description).toBe('改过的描述')
     expect(body.tools.every((tool) => (tool.parameters as { type: string }).type === 'object')).toBe(true)
-    expect(body.instructions).toBe(`${draft.systemPrompt}\n\n## 当前状态`)
+    expect(body.instructions).toBe(draft.systemPrompt)
+    expect(body.input).toEqual([
+      { role: 'system', content: '## 当前状态' },
+      { role: 'user', content: '你好' },
+    ])
     expect(body).toMatchObject({ model: draft.llm.modelId, stream: false, store: false })
+  })
+
+  it('carries the reasoning effort and extra parameters but not over app fields', () => {
+    const draft = draftFromBuiltin()
+    draft.llm.reasoningEffort = 'minimal'
+    draft.llm.extraBody = { max_output_tokens: 4000, model: 'hijack', store: true }
+    const body = trialRequestBody(draft, '', '你好') as Record<string, unknown>
+    expect(body.reasoning).toEqual({ effort: 'minimal' })
+    expect(body.max_output_tokens).toBe(4000)
+    expect(body.model).toBe(draft.llm.modelId)
+    expect(body.store).toBe(false)
+    expect(body.input).toEqual([{ role: 'user', content: '你好' }])
+
+    draft.llm.reasoningEffort = 'default'
+    expect('reasoning' in trialRequestBody(draft, '', '你好')).toBe(false)
   })
 })
 

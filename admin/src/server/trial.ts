@@ -3,8 +3,9 @@
  * 经 Conduit 让模型跑一轮，看它怎么回答、会调用哪个工具、带什么参数。
  *
  * - 只跑第一步：工具不执行（用户数据都在手机上），模型发出的调用原样展示。
- * - 系统指令 = 配置里的系统 prompt + “当前状态”一段。App 里这段由客户端按真实数据生成，
- *   这里给一段可编辑的样例（见 sampleContext）。
+ * - 系统指令 = 配置里的系统 prompt；“当前状态”作为系统消息放在用户消息前，和 App 一样。App 里这段由
+ *   客户端按真实数据生成（个人食品库在 App 里接在系统指令末尾），这里给一段可编辑的样例（见 sampleContext）。
+ * - 推理强度与其他请求参数也按配置带上，模型不接受的参数在这里就会报出来。
  * - 用 Admin 专用的 Conduit 密钥（CONDUIT_API_KEY），不绕过网关。
  */
 import 'server-only'
@@ -56,7 +57,7 @@ export function conduitConfigured(): boolean {
   return Boolean(process.env.CONDUIT_BASE_URL && process.env.CONDUIT_API_KEY)
 }
 
-/** 和 App 的 ChatOrchestrator.instructions 同样的格式：今天、空记录、空食品库 */
+/** 和 App 的 ChatOrchestrator.clientState 同样的格式：今天、空记录、空食品库 */
 export function sampleContext(now = new Date()): string {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', {
@@ -94,12 +95,20 @@ function configFor(source: TrialSource): { content: DraftContent; configVersion:
     : { content: draftFromBuiltin(), configVersion: null }
 }
 
+/** App 自己填的字段，其他请求参数不能覆盖；同 iOS 的 RemoteConfigValidator.reservedRequestFields */
+const RESERVED_FIELDS = new Set(['model', 'instructions', 'input', 'tools', 'stream', 'store', 'reasoning', 'previous_response_id'])
+
 /** Responses API 的请求体，形状同 iOS 的 ResponsesRequestBody（非流式） */
 export function trialRequestBody(content: DraftContent, context: string, message: string) {
+  const extra = Object.fromEntries(Object.entries(content.llm.extraBody).filter(([key]) => !RESERVED_FIELDS.has(key)))
   return {
+    ...extra,
     model: content.llm.modelId,
-    instructions: context.trim() ? `${content.systemPrompt}\n\n${context.trim()}` : content.systemPrompt,
-    input: [{ role: 'user', content: message }],
+    instructions: content.systemPrompt,
+    input: [
+      ...(context.trim() ? [{ role: 'system', content: context.trim() }] : []),
+      { role: 'user', content: message },
+    ],
     tools: tools.map((tool) => ({
       type: 'function',
       name: tool.name,
@@ -108,6 +117,7 @@ export function trialRequestBody(content: DraftContent, context: string, message
     })),
     stream: false,
     store: false,
+    ...(content.llm.reasoningEffort === 'default' ? {} : { reasoning: { effort: content.llm.reasoningEffort } }),
   }
 }
 

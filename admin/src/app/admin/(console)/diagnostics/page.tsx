@@ -97,6 +97,7 @@ export default async function DiagnosticsPage({
                   <TableHead className="text-right">{t.diagnostics.failureRate}</TableHead>
                   <TableHead className="text-right">{t.diagnostics.latencyColumn}</TableHead>
                   <TableHead className="text-right">{t.diagnostics.tokensColumn}</TableHead>
+                  <TableHead className="text-right">{t.diagnostics.cacheColumn}</TableHead>
                   <TableHead className="text-right">{t.diagnostics.claimedColumn}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -111,6 +112,9 @@ export default async function DiagnosticsPage({
                     </TableCell>
                     <TableCell className="text-right">
                       {row.avgTokensIn ?? t.common.none} / {row.avgTokensOut ?? t.common.none}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {row.cacheRate === null ? t.common.none : `${(row.cacheRate * 100).toFixed(0)}%`}
                     </TableCell>
                     <TableCell className="text-right">{row.claimedCardWithoutTool}</TableCell>
                   </TableRow>

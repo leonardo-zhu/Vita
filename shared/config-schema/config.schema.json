@@ -16,7 +16,28 @@
         "modelId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "timeoutSeconds": { "type": "integer", "minimum": 5, "maximum": 180 },
         "maxRetries": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "streaming": { "type": "boolean" }
+        "streaming": { "type": "boolean" },
+        "reasoningEffort": {
+          "description": "Responses 的 reasoning.effort。default 表示不传、用模型自己的默认值；各模型对档位的映射不同，以服务商文档为准。",
+          "enum": ["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+        },
+        "extraBody": {
+          "description": "原样合并进 /v1/responses 请求体的其他参数（如 max_output_tokens、max_tool_calls、thinking、prompt_cache_key）。客户端自己管理的字段不能出现。",
+          "type": "object",
+          "maxProperties": 20,
+          "propertyNames": {
+            "not": { "enum": ["model", "instructions", "input", "tools", "stream", "store", "reasoning", "previous_response_id"] }
+          }
+        }
+      }
+    },
+    "labelImage": {
+      "description": "营养标签照片发给模型前的处理。",
+      "type": "object",
+      "properties": {
+        "maxDimension": { "type": "integer", "minimum": 512, "maximum": 4096 },
+        "jpegQuality": { "type": "number", "minimum": 0.3, "maximum": 1 },
+        "detail": { "enum": ["low", "high", "xhigh"] }
       }
     },
     "context": {

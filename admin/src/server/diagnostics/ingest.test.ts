@@ -73,6 +73,8 @@ describe('ingest', () => {
     ingest(freshBatch(), '1.2.3.4')
     const result = summary({ days: 7 })
     expect(result.chat).toMatchObject({ count: 2, errors: 1, p95: 18250, createdPending: 1 })
+    // 示例里成功的那轮输入 5120、命中缓存 3072
+    expect(result.chat.cacheRate).toBeCloseTo(0.6)
     expect(result.tools[0]).toMatchObject({ tool: 'proposeRecordChange', count: 1, failures: 0 })
     expect(result.configFetch).toEqual({ updated: 1, unchanged: 0, failed: 0 })
     expect(result.errorCodes).toEqual([{ code: 'llm.timeout', type: 'chat_turn', count: 1 }])

@@ -122,6 +122,8 @@ const MIGRATIONS = [
   );
   CREATE INDEX diagnostic_events_occurred ON diagnostic_events (occurred_at);
   CREATE INDEX diagnostic_events_install ON diagnostic_events (install_id);`,
+  // 输入里命中服务商缓存的 token 数
+  `ALTER TABLE diagnostic_events ADD COLUMN tokens_cached INTEGER;`,
 ]
 
 export function dataDir(): string {

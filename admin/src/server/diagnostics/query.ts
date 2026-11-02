@@ -57,6 +57,8 @@ export interface ChatSummary extends Latencies {
   cancelled: number
   avgTokensIn: number | null
   avgTokensOut: number | null
+  /** 输入里命中缓存的比例，没有数据时为 null */
+  cacheRate: number | null
   createdPending: number
   claimedCardWithoutTool: number
   hitMaxRounds: number
@@ -67,10 +69,18 @@ interface ChatRow {
   latency_ms: number
   tokens_in: number | null
   tokens_out: number | null
+  tokens_cached: number | null
   created_pending: number | null
   claimed_card_without_tool: number | null
   hit_max_rounds: number | null
   config_version: string | null
+}
+
+/** 输入 token 里命中缓存的比例，只算上报了缓存数的轮次（旧版 App 不报） */
+function cacheRate(rows: ChatRow[]): number | null {
+  const reported = rows.filter((row) => row.tokens_cached !== null && row.tokens_in)
+  const input = reported.reduce((sum, row) => sum + (row.tokens_in ?? 0), 0)
+  return input ? reported.reduce((sum, row) => sum + (row.tokens_cached ?? 0), 0) / input : null
 }
 
 function summarizeChats(rows: ChatRow[]): ChatSummary {
@@ -86,6 +96,7 @@ function summarizeChats(rows: ChatRow[]): ChatSummary {
     cancelled: rows.filter((row) => row.outcome === 'cancelled').length,
     avgTokensIn: avg(ok.map((row) => row.tokens_in)),
     avgTokensOut: avg(ok.map((row) => row.tokens_out)),
+    cacheRate: cacheRate(ok),
     createdPending: rows.filter((row) => row.created_pending === 1).length,
     claimedCardWithoutTool: rows.filter((row) => row.claimed_card_without_tool === 1).length,
     hitMaxRounds: rows.filter((row) => row.hit_max_rounds === 1).length,
@@ -111,7 +122,7 @@ export function summary(filter: DiagnosticsFilter): DiagnosticsSummary {
   const chatWhere = where(filter, 'chat_turn')
   const chats = db()
     .prepare(
-      `SELECT outcome, latency_ms, tokens_in, tokens_out, created_pending, claimed_card_without_tool,
+      `SELECT outcome, latency_ms, tokens_in, tokens_out, tokens_cached, created_pending, claimed_card_without_tool,
               hit_max_rounds, config_version FROM diagnostic_events WHERE ${chatWhere.sql}`
     )
     .all(...chatWhere.params) as unknown as ChatRow[]

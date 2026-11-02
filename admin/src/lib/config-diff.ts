@@ -18,8 +18,13 @@ export type ValueField =
   | 'timeoutSeconds'
   | 'maxRetries'
   | 'streaming'
+  | 'reasoningEffort'
+  | 'extraBody'
   | 'maxRecentMessages'
   | 'includePersonalFoodSummary'
+  | 'labelImageMaxDimension'
+  | 'labelImageJpegQuality'
+  | 'labelImageDetail'
 
 const VALUE_FIELDS: { field: ValueField; get: (d: DraftContent) => DiffValue }[] = [
   { field: 'minClientVersion', get: (d) => d.minClientVersion },
@@ -27,9 +32,19 @@ const VALUE_FIELDS: { field: ValueField; get: (d: DraftContent) => DiffValue }[]
   { field: 'timeoutSeconds', get: (d) => d.llm.timeoutSeconds },
   { field: 'maxRetries', get: (d) => d.llm.maxRetries },
   { field: 'streaming', get: (d) => d.llm.streaming },
+  { field: 'reasoningEffort', get: (d) => d.llm.reasoningEffort },
+  // 对象按键排序后比较，键的顺序不算改动
+  { field: 'extraBody', get: (d) => stableJSON(d.llm.extraBody) },
   { field: 'maxRecentMessages', get: (d) => d.context.maxRecentMessages },
   { field: 'includePersonalFoodSummary', get: (d) => d.context.includePersonalFoodSummary },
+  { field: 'labelImageMaxDimension', get: (d) => d.labelImage.maxDimension },
+  { field: 'labelImageJpegQuality', get: (d) => d.labelImage.jpegQuality },
+  { field: 'labelImageDetail', get: (d) => d.labelImage.detail },
 ]
+
+function stableJSON(value: Record<string, unknown>): string {
+  return JSON.stringify(Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])))
+}
 
 export function configDiff(before: DraftContent, after: DraftContent): DiffEntry[] {
   const entries: DiffEntry[] = []

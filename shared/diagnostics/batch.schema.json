@@ -52,6 +52,7 @@
         "toolCalls": { "type": "integer", "minimum": 0, "maximum": 1000 },
         "tokensIn": { "$ref": "#/$defs/count" },
         "tokensOut": { "$ref": "#/$defs/count" },
+        "tokensCached": { "$ref": "#/$defs/count", "description": "输入里命中服务商缓存的部分" },
         "createdPending": { "type": "boolean", "description": "这一轮生成了确认卡" },
         "claimedCardWithoutTool": { "type": "boolean", "description": "回复说生成了确认卡，但没有调用提案工具" },
         "hitMaxRounds": { "type": "boolean" }

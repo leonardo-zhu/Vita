@@ -20,6 +20,9 @@ export type IssueRule =
   | 'maxLength'
   | 'pattern'
   | 'type'
+  | 'enum'
+  | 'reservedKey'
+  | 'tooManyKeys'
   | 'unknownTool'
   | 'versionNotNewer'
   | 'aliasMissing'
@@ -48,6 +51,12 @@ function fromAjv(error: ErrorObject): ValidationIssue {
       return { path, rule: 'pattern' }
     case 'type':
       return { path, rule: 'type', param: String(p.type) }
+    case 'enum':
+      return { path, rule: 'enum', param: (p.allowedValues as unknown[]).join(' / ') }
+    case 'propertyNames':
+      return { path, rule: 'reservedKey', param: p.propertyName as string }
+    case 'maxProperties':
+      return { path, rule: 'tooManyKeys', param: p.limit as number }
     default:
       return { path, rule: 'other', param: error.message }
   }
@@ -59,7 +68,9 @@ export function validatePublished(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   if (!validateSchema(config)) {
-    issues.push(...(validateSchema.errors ?? []).map(fromAjv))
+    // propertyNames 不通过时 ajv 还会报一条内层的 not，只留外层那条
+    const errors = (validateSchema.errors ?? []).filter((e) => !e.schemaPath.includes('/propertyNames/'))
+    issues.push(...errors.map(fromAjv))
   }
   const tools = new Set(knownTools(options.base ?? builtin))
   for (const name of Object.keys(config.prompts.tools)) {
