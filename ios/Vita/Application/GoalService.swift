@@ -3,6 +3,14 @@ import SwiftData
 
 enum GoalServiceError: Error, Equatable {
     case invalidTargets
+    /// 要改回随活动计算，但还没有自动设定过目标。
+    case noEnergyPlan
+}
+
+/// `updateGoal` 对能量规则的修改：只改给出的部分。
+struct EnergyPlanChange: Equatable, Sendable {
+    var kind: EnergyPlan.Kind?
+    var adjustment: EnergyPlan.Adjustment?
 }
 
 /// 每日目标。更新不覆盖旧行，而是追加一行更高 revision 的记录（TDD §3.2）；
@@ -22,15 +30,22 @@ final class GoalService {
     @discardableResult
     func commitInitialGoals(_ recommendation: GoalRecommendation, effectiveFrom: LocalDate) throws -> GoalSnapshot {
         try appendGoal(
-            recommendation.targets, origin: .initialRecommendation, effectiveFrom: effectiveFrom,
-            evidenceData: JSONColumn.encode(recommendation)
+            recommendation.targets, energyPlan: recommendation.energyPlan, origin: .initialRecommendation,
+            effectiveFrom: effectiveFrom, evidenceData: JSONColumn.encode(recommendation)
         ).current
     }
 
     /// 用户明确指令修改目标（`updateGoal`）：只改给出的项，其余沿用当前目标；返回旧值与新值供复述。
+    /// 给出能量数值时改为固定能量目标；`energyPlan` 改目标类型或调整幅度，并恢复随活动计算（ADR-018）。
     @discardableResult
-    func updateGoal(_ changes: GoalTargets, effectiveFrom: LocalDate, requestID: UUID? = nil) throws -> (previous: GoalSnapshot?, current: GoalSnapshot) {
-        let current = try activeGoal(on: effectiveFrom)?.targets ?? GoalTargets()
+    func updateGoal(
+        _ changes: GoalTargets,
+        energyPlan: EnergyPlanChange? = nil,
+        effectiveFrom: LocalDate,
+        requestID: UUID? = nil
+    ) throws -> (previous: GoalSnapshot?, current: GoalSnapshot) {
+        let active = try activeGoal(on: effectiveFrom)
+        let current = active?.targets ?? GoalTargets()
         let merged = GoalTargets(
             energyKcal: changes.energyKcal ?? current.energyKcal,
             proteinG: changes.proteinG ?? current.proteinG,
@@ -40,7 +55,28 @@ final class GoalService {
         guard Nutrient.allCases.allSatisfy({ changes.target(for: $0).map { $0 > 0 } ?? true }) else {
             throw GoalServiceError.invalidTargets
         }
-        return try appendGoal(merged, origin: .explicitUserCommand, effectiveFrom: effectiveFrom, requestID: requestID)
+        var plan = changes.energyKcal == nil ? active?.energyPlan : nil
+        if let change = energyPlan {
+            // 恢复随活动计算需要设定时的 BMR 与平时活动；从没自动设定过的目标要先在 Data 页生成一次。
+            guard var base = try plan ?? latestEnergyPlan() else { throw GoalServiceError.noEnergyPlan }
+            if let kind = change.kind {
+                base.kind = kind
+                base.adjustment = EnergyPlan.defaultAdjustment(for: kind)
+            }
+            if let adjustment = change.adjustment { base.adjustment = adjustment }
+            guard base.isValid else { throw GoalServiceError.invalidTargets }
+            plan = base
+        }
+        return try appendGoal(merged, energyPlan: plan, origin: .explicitUserCommand, effectiveFrom: effectiveFrom, requestID: requestID)
+    }
+
+    /// 最近一次自动设定的能量规则，用来从固定目标“改回自动”。
+    private func latestEnergyPlan() throws -> EnergyPlan? {
+        try context.fetch(FetchDescriptor<DailyGoal>())
+            .map { try $0.snapshot() }
+            .filter { $0.energyPlan != nil }
+            .max { $0.revision < $1.revision }?
+            .energyPlan
     }
 
     /// 某日生效的目标：`effectiveFrom` 不晚于该日的行中，日期最晚、revision 最高的一行。
@@ -56,6 +92,7 @@ final class GoalService {
     @discardableResult
     func appendGoal(
         _ targets: GoalTargets,
+        energyPlan: EnergyPlan? = nil,
         origin: GoalOrigin,
         effectiveFrom: LocalDate,
         evidenceData: Data? = nil,
@@ -69,7 +106,7 @@ final class GoalService {
         let previous = try activeGoal(on: effectiveFrom)
         let nextRevision = (try context.fetch(FetchDescriptor<DailyGoal>()).map(\.revision).max() ?? 0) + 1
         let goal = DailyGoal(
-            effectiveFrom: effectiveFrom, targets: targets, origin: origin,
+            effectiveFrom: effectiveFrom, targets: targets, energyPlan: energyPlan, origin: origin,
             evidenceData: evidenceData, revision: nextRevision, now: now()
         )
         context.insert(goal)

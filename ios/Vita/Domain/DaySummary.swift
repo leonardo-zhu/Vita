@@ -42,6 +42,8 @@ struct GoalSnapshot: Equatable, Sendable {
     var targets: GoalTargets
     var origin: GoalOrigin
     var revision: Int
+    /// 有它时能量目标每天按活动计算（ADR-018），`targets.energyKcal` 是设定时按平时活动算的参考值。
+    var energyPlan: EnergyPlan? = nil
 }
 
 /// 一天的营养汇总。总量每次由 Item 快照重算，不作为持久化的真相（TDD §4.2）。
@@ -62,15 +64,28 @@ struct DaySummary: Equatable, Sendable {
     var includedItemCount: Int
     var excludedItemCount: Int
     var estimatedItemCount: Int
+    /// 生效目标。能量目标随活动计算时，`targets.energyKcal` 已换成这一天算出的值。
     var goal: GoalSnapshot?
+    /// 能量目标随活动计算时的来历（ADR-018）；固定目标为 nil。
+    var energy: EnergyTarget?
+    /// 截至现在的热量收支；没有活动数据或没有随活动计算的目标时为 nil。
+    var balance: EnergyBalance?
 
-    init(items: [(snapshot: NutritionSnapshot, includeInSummary: Bool)], goal: GoalSnapshot?) {
+    init(
+        items: [(snapshot: NutritionSnapshot, includeInSummary: Bool)],
+        goal: GoalSnapshot?,
+        energy: EnergyTarget? = nil,
+        balance: EnergyBalance? = nil
+    ) {
         let included = items.filter(\.includeInSummary)
         totals = included.reduce(.zero) { $0 + $1.snapshot.values }
         includedItemCount = included.count
         excludedItemCount = items.count - included.count
         estimatedItemCount = included.filter { $0.snapshot.nutritionSource == .aiEstimated }.count
         self.goal = goal
+        self.energy = energy
+        self.balance = balance
+        if let energy { self.goal?.targets.energyKcal = energy.targetKcal }
     }
 
     var progress: [Progress] {

@@ -46,8 +46,10 @@ enum SampleData {
 
     private static func seedRecords(_ services: AppServices, on today: LocalDate, timeZone: TimeZone, milkVersionID: UUID) throws {
         if try services.goals.activeGoal(on: today) == nil {
+            // 能量目标随活动计算（BMR 1650、平时活动 450、减脂 85%）；模拟器没有健康数据时按平时活动估算。
             try services.goals.appendGoal(
-                GoalTargets(energyKcal: 1800, proteinG: 130, fatG: 60, carbohydrateG: 180),
+                GoalTargets(energyKcal: 1790, proteinG: 130, fatG: 60, carbohydrateG: 180),
+                energyPlan: EnergyPlan(kind: .lose, adjustment: .fraction(EnergyTargetPolicy.defaultLoseFraction), bmrKcal: 1650, baselineActivityKcal: 450, baselineEstimated: false),
                 origin: .manualOnboarding,
                 effectiveFrom: today
             )

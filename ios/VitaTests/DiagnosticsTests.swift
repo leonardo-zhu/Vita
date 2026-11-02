@@ -158,7 +158,7 @@ struct DiagnosticsRecordingTests {
         let tool = try #require(recorder.events.first { $0.type == .toolCall })
         #expect(tool.tool == "getGoals")
         #expect(tool.resultCode == "ok")
-        #expect(tool.toolDescriptionVersion == 1)
+        #expect(tool.toolDescriptionVersion == 2)
 
         let turn = try #require(recorder.events.first { $0.type == .chatTurn })
         #expect(turn.outcome == "ok")

@@ -7,6 +7,7 @@ import SwiftData
 final class DailyGoal {
     @Attribute(.unique) var id: UUID
     var effectiveFromKey: String
+    /// 目标值，加上可选的 `energyPlan`（同一个 JSON 对象，旧数据没有这个键）。
     var targetsData: Data
     var originRaw: String
     /// 目标生成依据（HealthKit 读数、公式、是否估算），格式随 Phase 4 定义。
@@ -15,10 +16,13 @@ final class DailyGoal {
     var createdAt: Date
     var updatedAt: Date
 
-    init(id: UUID = UUID(), effectiveFrom: LocalDate, targets: GoalTargets, origin: GoalOrigin, evidenceData: Data?, revision: Int, now: Date) {
+    init(
+        id: UUID = UUID(), effectiveFrom: LocalDate, targets: GoalTargets, energyPlan: EnergyPlan? = nil,
+        origin: GoalOrigin, evidenceData: Data?, revision: Int, now: Date
+    ) {
         self.id = id
         self.effectiveFromKey = effectiveFrom.isoString
-        self.targetsData = JSONColumn.encode(targets)
+        self.targetsData = JSONColumn.encode(StoredTargets(targets: targets, energyPlan: energyPlan))
         self.originRaw = origin.rawValue
         self.evidenceData = evidenceData
         self.revision = revision
@@ -27,12 +31,40 @@ final class DailyGoal {
     }
 
     func snapshot() throws -> GoalSnapshot {
-        GoalSnapshot(
+        let stored = try JSONColumn.decode(StoredTargets.self, from: targetsData)
+        return GoalSnapshot(
             id: id,
             effectiveFrom: LocalDate(isoString: effectiveFromKey)!,
-            targets: try JSONColumn.decode(GoalTargets.self, from: targetsData),
+            targets: stored.targets,
             origin: GoalOrigin(rawValue: originRaw) ?? .explicitUserCommand,
-            revision: revision
+            revision: revision,
+            energyPlan: stored.energyPlan
         )
+    }
+}
+
+/// 目标列的形状：营养素目标平铺，`energyPlan` 是可选的同级键，所以早先只存了 `GoalTargets` 的行照样能读。
+private struct StoredTargets: Codable {
+    var targets: GoalTargets
+    var energyPlan: EnergyPlan?
+
+    init(targets: GoalTargets, energyPlan: EnergyPlan?) {
+        self.targets = targets
+        self.energyPlan = energyPlan
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case energyPlan
+    }
+
+    init(from decoder: Decoder) throws {
+        targets = try GoalTargets(from: decoder)
+        energyPlan = try decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(EnergyPlan.self, forKey: .energyPlan)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try targets.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(energyPlan, forKey: .energyPlan)
     }
 }

@@ -47,9 +47,23 @@ final class DayDataService {
     private let goals: GoalService
     private let sourceLabels: SourceLabeler
     private let syncState: (UUID) -> SyncState?
+    private let activity: (LocalDate) -> DayActivity?
+    private let now: () -> Date
+    private let timeZone: () -> TimeZone
 
-    init(context: ModelContext, referenceFoods: ReferenceFoodCatalog, goals: GoalService, syncState: @escaping (UUID) -> SyncState? = { _ in nil }) {
+    init(
+        context: ModelContext,
+        referenceFoods: ReferenceFoodCatalog,
+        goals: GoalService,
+        activity: @escaping (LocalDate) -> DayActivity? = { _ in nil },
+        now: @escaping () -> Date = Date.init,
+        timeZone: @escaping () -> TimeZone = { .current },
+        syncState: @escaping (UUID) -> SyncState? = { _ in nil }
+    ) {
         self.syncState = syncState
+        self.activity = activity
+        self.now = now
+        self.timeZone = timeZone
         self.context = context
         self.referenceFoods = referenceFoods
         self.goals = goals
@@ -63,12 +77,31 @@ final class DayDataService {
             .sorted { ($0.sortTime, $0.createdAt) < ($1.sortTime, $1.createdAt) }
             .map(makeRecord)
         let items = records.flatMap(\.items).map { (snapshot: $0.snapshot, includeInSummary: $0.includeInSummary) }
-        return DayData(
-            date: date,
-            revision: session?.revision ?? 0,
-            records: records,
-            summary: DaySummary(items: items, goal: try goals.activeGoal(on: date))
-        )
+        let goal = try goals.activeGoal(on: date)
+        var summary = DaySummary(items: items, goal: goal)
+        if let plan = goal?.energyPlan {
+            // 能量目标与收支按当天活动计算（TDD §6.2），不存储。
+            let day = energyDay(date)
+            let activity = activity(date)
+            summary = DaySummary(
+                items: items, goal: goal,
+                energy: EnergyTargetPolicy.target(plan: plan, activity: activity, day: day),
+                balance: EnergyTargetPolicy.balance(
+                    bmrKcal: plan.bmrKcal, activity: activity, day: day, consumedKcal: summary.totals.energyKcal
+                )
+            )
+        }
+        return DayData(date: date, revision: session?.revision ?? 0, records: records, summary: summary)
+    }
+
+    private func energyDay(_ date: LocalDate) -> EnergyTargetPolicy.Day {
+        let zone = timeZone()
+        let today = LocalDate(date: now(), timeZone: zone)
+        if date < today { return .past }
+        if date > today { return .future }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        return .today(elapsed: now().timeIntervalSince(calendar.startOfDay(for: now())))
     }
 
     private func makeRecord(_ record: ConsumptionRecord) throws -> DayData.Record {

@@ -48,8 +48,14 @@ final class DayDataModel {
         }
     }
 
+    /// 读健康数据，同时刷新活动缓存（能量目标随活动计算），再按新读数重算页面。周视图刷新这一周。
     func loadHealth() async {
         snapshot = await health.snapshot(on: date)
+        if mode == .week {
+            let start = date.startOfWeek
+            await health.refreshActivity(on: (0..<7).map { start.adding(days: $0) }.filter { $0 <= today })
+        }
+        reload()
     }
 
     func connectHealth() async {
@@ -126,10 +132,12 @@ struct DataView: View {
         .onAppear { model.reload() }
         .onChange(of: model.date) { model.reload() }
         .onChange(of: model.mode) { model.reload() }
-        .task(id: model.date) { await model.loadHealth() }
+        .task(id: "\(model.date.isoString)-\(model.mode)") { await model.loadHealth() }
         // 进入页面与回到前台时补同步，并刷新同步标记。
         .task { await syncHealth() }
-        .onChange(of: scenePhase) { if scenePhase == .active { Task { await syncHealth() } } }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await model.loadHealth(); await syncHealth() } }
+        }
     }
 
     private var datePager: some View {
@@ -164,6 +172,8 @@ struct DataView: View {
                 onConnectHealth: { Task { await model.connectHealth(); await syncHealth() } },
                 onRetrySync: { Task { await syncHealth() } }
             )
+            // 每天一个视图身份：切换日期时直接换成那天的内容，不从前一天的进度圆环动画过去（否则卡片高度变化时圆环会跟着位移动画、看起来漂移）。
+            .id(day.date)
         case .week(let week):
             WeekOverview(week: week, today: model.today) { date in
                 model.date = date
@@ -331,11 +341,24 @@ private struct EnergyCard: View {
                     .frame(width: 84, height: 84)
                 }
             }
-            // 目标已按每日总消耗（含活动）推算，运动消耗只作参考，不再加进“还可以吃”，避免重复计算。
-            HStack(spacing: 0) {
-                EquationTerm(value: target, label: "目标")
-                EquationTerm(value: consumed, label: "已摄入")
-                EquationTerm(value: activeEnergy, label: "运动消耗")
+            if let energy = summary.energy {
+                // 能量目标随活动计算（ADR-018）：第三项是截至现在的热量收支，下面一行说明目标怎么来的。
+                HStack(spacing: 0) {
+                    EquationTerm(value: target, label: "目标")
+                    EquationTerm(value: consumed, label: "已摄入")
+                    EquationTerm(
+                        value: summary.balance.map { abs($0.balanceKcal) },
+                        label: (summary.balance?.balanceKcal ?? 0) > 0 ? "热量盈余" : "热量缺口"
+                    )
+                }
+                EnergyExplanation(energy: energy, isToday: isToday)
+            } else {
+                // 固定目标已按每日总消耗（含活动）推算，运动消耗只作参考，不再加进“还可以吃”，避免重复计算。
+                HStack(spacing: 0) {
+                    EquationTerm(value: target, label: "目标")
+                    EquationTerm(value: consumed, label: "已摄入")
+                    EquationTerm(value: activeEnergy, label: "运动消耗")
+                }
             }
             HStack {
                 if summary.estimatedItemCount > 0 {
@@ -376,6 +399,37 @@ private struct BigNumber: View {
                 .contentTransition(.numericText())
             Text(unit).font(VitaType.body).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// 随活动计算的能量目标怎么来的：消耗 = 基础 + 活动，再减去缺口（或加上盈余）；运动比平时多时说明计入了多少。
+private struct EnergyExplanation: View {
+    let energy: EnergyTarget
+    let isToday: Bool
+
+    private func kcal(_ value: Decimal) -> String { DisplayFormat.number(value, digits: 0) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let adjustment = energy.adjustmentKcal
+            let sign = adjustment < 0 ? "−" : "+"
+            Text("消耗约 \(kcal(energy.tdeeKcal))（基础 \(kcal(energy.bmrKcal)) + 活动 \(kcal(energy.countedActivityKcal))）"
+                 + (adjustment == 0 ? "" : " \(sign) \(adjustment < 0 ? "缺口" : "盈余") \(kcal(abs(adjustment)))"))
+            if energy.projectedActivityKcal > energy.baselineActivityKcal {
+                let extra = energy.projectedActivityKcal - energy.baselineActivityKcal
+                Text("\(isToday ? "今天" : "这天")活动比平时多 \(kcal(extra))，计入一半 +\(kcal(energy.countedActivityKcal - energy.baselineActivityKcal))")
+            } else if energy.activityEstimated {
+                Text("没有读到\(isToday ? "今天" : "这天")的活动数据，按平时 \(kcal(energy.baselineActivityKcal)) 估计")
+            } else if isToday {
+                Text("今天的活动按已消耗加上剩余时段的平时水平估计，随实际消耗更新")
+            }
+            if energy.raisedToBMR {
+                Text("目标不低于基础代谢，已按基础代谢计")
+            }
+        }
+        .font(VitaType.meta)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

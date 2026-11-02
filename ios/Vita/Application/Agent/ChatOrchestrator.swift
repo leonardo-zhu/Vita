@@ -151,6 +151,8 @@ final class ChatOrchestrator {
         stats.configVersion = config.configVersion
         stats.modelAlias = config.llm.modelId
         stats.systemPromptVersion = config.prompts.system.version
+        // 能量目标随当天活动计算，先读一次最新的活动（TDD §6.2）。
+        await services.health.refreshActivity(on: [date])
         let history = try services.chatHistory.messages(on: date)
         try services.pending.expireDue()
 

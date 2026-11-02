@@ -118,7 +118,7 @@ struct GoalRecommendationPolicyTests {
         snapshot.heightCm = .value(175, source: .healthKit, measuredAt: nil)
         snapshot.dateOfBirth = .value(LocalDate(isoString: "1996-05-20")!, source: .manual, measuredAt: nil)
         snapshot.sex = .value(.male, source: .healthKit, measuredAt: nil)
-        if let active { snapshot.activeEnergyKcal = .value(active, source: .healthKit, measuredAt: nil) }
+        if let active { snapshot.averageActiveEnergyKcal = .value(active, source: .healthKit, measuredAt: nil) }
         return snapshot
     }
 
@@ -130,8 +130,11 @@ struct GoalRecommendationPolicyTests {
         #expect(result.input.ageYears == 30)
         #expect(result.bmrKcal == dec("1648.8"))
         #expect(result.tdeeEstimated)
-        // TDEE = 1648.75 × 1.375 = 2267.03；能量目标 90% ≈ 2040，蛋白 1.8 × 70 = 126。
-        #expect(result.targets.energyKcal == 2040)
+        // 平时消耗 = 1648.75 × 1.375 = 2267.03；默认减脂 85% ≈ 1930，蛋白 1.8 × 70 = 126。
+        #expect(result.targets.energyKcal == 1930)
+        #expect(result.energyPlan?.kind == .lose)
+        #expect(result.energyPlan?.adjustment == .fraction(dec("0.85")))
+        #expect(result.energyPlan?.baselineEstimated == true)
         #expect(result.targets.proteinG == 126)
         #expect(result.input.ageSource == .manual)
     }
@@ -142,7 +145,8 @@ struct GoalRecommendationPolicyTests {
         }
         #expect(!result.tdeeEstimated)
         #expect(result.tdeeKcal == dec("2148.8"))
-        #expect(result.targets.energyKcal == 1930)
+        #expect(result.targets.energyKcal == 1830)
+        #expect(result.energyPlan?.baselineActivityKcal == 500)
     }
 
     @Test func weightIsAHardRequirement() {
@@ -199,7 +203,8 @@ struct HealthServiceTests {
         let (previous, current) = try services.goals.updateGoal(GoalTargets(proteinG: 150), effectiveFrom: Fixtures.day)
         #expect(previous?.targets.proteinG == 126)
         #expect(current.targets.proteinG == 150)
-        #expect(current.targets.energyKcal == 2040)
+        #expect(current.targets.energyKcal == 1930)
+        #expect(current.energyPlan == first.energyPlan)
         #expect(current.origin == .explicitUserCommand)
         // 改回去也只是再追加一行。
         try services.goals.updateGoal(GoalTargets(proteinG: 126), effectiveFrom: Fixtures.day)

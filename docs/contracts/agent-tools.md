@@ -130,13 +130,15 @@
 
 ### `updateGoal`
 
-输入：`energyKcal`、`proteinG`、`fatG`、`carbohydrateG` 中的一项或多项（正数，只传要改的项）和必填的 `userCommand`（用户原话，作为指令证据）。新值从当前会话日期起生效。客户端仅接受完整明确指令；建议性语言应由模型在聊天中澄清后再调用。成功后递增 Goal revision 并记录审计日志。
+输入：`energyKcal`、`proteinG`、`fatG`、`carbohydrateG` 中的一项或多项（正数，只传要改的项）和必填的 `userCommand`（用户原话，作为指令证据）。新值从当前会话日期起生效。
+
+能量目标有两种模式（TDD §6.2、ADR-018）：给了 `energyKcal` 就是**固定**目标；`goalType`（`maintain` / `lose` / `gain`，调整用该类型默认值）、`energyPercent`（吃到每日消耗的百分比，50–150）、`energyAdjustmentKcal`（每天相对消耗的千卡，缺口为负，−1500 到 +1500）或 `energyAuto: true`（沿用上次的类型与调整）任一出现，就是**随活动计算**。两种不能同时给（`invalidField`）；从没自动设定过目标时恢复随活动计算返回 `noEnergyPlan`，请用户先在 Data 页生成一次。`getGoals` 与本工具的结果都带 `energyMode`（`auto` / `fixed`）、`energyPlan` 与当天的 `energyToday`（平时活动、活动预估、计入的活动、消耗、调整）。客户端仅接受完整明确指令；建议性语言应由模型在聊天中澄清后再调用。成功后递增 Goal revision 并记录审计日志。
 
 结果必须返回**旧值与新值**，模型据此复述。没有专门的撤销机制：用户想反悔时，以明确指令（如“改回 160g”）再次调用 `updateGoal` 即可；旧值可由 `getGoals` 的 revision 历史取得。
 
 ### `getGoalRecommendation`
 
-只读。客户端用 `GoalRecommendationPolicy`（TDD §6.2）基于 HealthKit 读数与手动补录数据计算，返回输入项（含来源：HealthKit / 手动 / 估算）、公式、结果与缺失项。体重缺失时返回“无法生成”。**模型不自行计算目标数值。**
+只读。客户端用 `GoalRecommendationPolicy`（TDD §6.2）基于 HealthKit 读数（含近 7 天日均活动）与手动补录数据计算，默认目标类型为减脂（85%），返回输入项（含来源：HealthKit / 手动 / 估算）、公式、结果与缺失项。体重缺失时返回“无法生成”。**模型不自行计算目标数值。**
 
 首次生成目标属于“一次性确认”，不走 Pending：模型展示预览，用户在目标预览卡上点击确认后由客户端调用 `commitInitialGoals` 写入（`origin = initialRecommendation`）。
 

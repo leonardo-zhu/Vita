@@ -11,7 +11,7 @@ struct GoalRecommendation: Equatable, Codable, Sendable {
         var ageSource: MetricSource
         var sex: BiologicalSex
         var sexSource: MetricSource
-        /// 当日活动能量；没有时按轻度活动系数估算。
+        /// 平时活动：最近 7 天的日均活动能量（早期版本存的是设定当天的活动）；没有时按轻度活动系数估算。
         var activeEnergyKcal: Decimal?
     }
 
@@ -21,6 +21,8 @@ struct GoalRecommendation: Equatable, Codable, Sendable {
     /// TDEE 是否按 BMR × 1.375 估算（缺少活动能量）。
     var tdeeEstimated: Bool
     var targets: GoalTargets
+    /// 能量目标的规则（ADR-018）；`targets.energyKcal` 是按平时活动算出的参考值。早期的建议没有它。
+    var energyPlan: EnergyPlan?
     var generatedAt: Date
     var policyVersion: Int
 }
@@ -37,12 +39,18 @@ enum MissingMetric: String, Codable, Sendable {
 
 /// 默认目标建议（TDD §6.2）。所有系数集中在这里，不散落在 prompt 中；这是可调的默认建议，不是医疗建议。
 enum GoalRecommendationPolicy {
-    static let version = 1
+    static let version = 2
     static let lightActivityFactor = Decimal(string: "1.375")!
     static let proteinGramsPerKg = Decimal(string: "1.8")!
-    static let energyFraction = Decimal(string: "0.9")!
 
-    static func recommend(snapshot: HealthSnapshot, on date: LocalDate, now: Date) -> GoalRecommendationResult {
+    /// 默认按减脂（85%）生成；类型与调整可在设定页改。
+    static func recommend(
+        snapshot: HealthSnapshot,
+        on date: LocalDate,
+        now: Date,
+        kind: EnergyPlan.Kind = .lose,
+        adjustment: EnergyPlan.Adjustment? = nil
+    ) -> GoalRecommendationResult {
         var missing: [MissingMetric] = []
         if snapshot.bodyMassKg.value == nil { missing.append(.bodyMass) }
         if snapshot.heightCm.value == nil { missing.append(.height) }
@@ -57,10 +65,16 @@ enum GoalRecommendationPolicy {
 
         let age = age(of: birth, on: date)
         let bmr = mifflinStJeor(weightKg: weight, heightCm: height, ageYears: age, sex: sex)
-        let active = snapshot.activeEnergyKcal.value
-        let tdee = active.map { bmr + $0 } ?? bmr * lightActivityFactor
+        let active = snapshot.averageActiveEnergyKcal.value
+        let baseline = active ?? bmr * EnergyTargetPolicy.estimatedActivityShareOfBMR
+        let plan = EnergyPlan(
+            kind: kind, adjustment: adjustment ?? EnergyPlan.defaultAdjustment(for: kind),
+            bmrKcal: rounded(bmr, to: Decimal(string: "0.1")!), baselineActivityKcal: rounded(baseline, to: 1),
+            baselineEstimated: active == nil
+        )
+        let tdee = bmr + baseline
         let targets = GoalTargets(
-            energyKcal: rounded(tdee * energyFraction, to: 10),
+            energyKcal: EnergyTargetPolicy.target(plan: plan, activity: nil, day: .future).targetKcal,
             proteinG: rounded(weight * proteinGramsPerKg, to: 1)
         )
         return .ready(GoalRecommendation(
@@ -72,6 +86,7 @@ enum GoalRecommendationPolicy {
             tdeeKcal: rounded(tdee, to: Decimal(string: "0.1")!),
             tdeeEstimated: active == nil,
             targets: targets,
+            energyPlan: plan,
             generatedAt: now,
             policyVersion: version
         ))

@@ -79,7 +79,8 @@ final class AgentToolRunner {
                 let matches = services.container.referenceFoods.search(query, aliases: aliases)
                 return try Self.encode(ReferenceSearchOut(matches: matches))
             case "getGoals":
-                return try Self.encode(GoalOut(try services.goals.activeGoal(on: sessionDate)))
+                // 能量目标随活动计算时，返回当天算出的值和来历（DayDataService 已按最新活动算好）。
+                return try Self.encode(GoalOut(try services.dayData.day(sessionDate).summary))
             case "getHealthSnapshot":
                 return try Self.encode(HealthOut(await services.health.snapshot(on: sessionDate)))
             case "getGoalRecommendation":
@@ -132,13 +133,52 @@ final class AgentToolRunner {
             energyKcal: try value("energyKcal"), proteinG: try value("proteinG"),
             fatG: try value("fatG"), carbohydrateG: try value("carbohydrateG")
         )
-        guard Nutrient.allCases.contains(where: { changes.target(for: $0) != nil }) else {
+        let plan = try energyPlanChange(arguments)
+        if changes.energyKcal != nil, plan != nil {
+            throw Failure("invalidField", "energyKcal 是固定目标，不能和 goalType / energyPercent / energyAdjustmentKcal / energyAuto 同时给。")
+        }
+        guard Nutrient.allCases.contains(where: { changes.target(for: $0) != nil }) || plan != nil else {
             throw Failure("missingField", "没有给出要修改的目标数值。")
         }
-        let (previous, current) = try services.goals.updateGoal(changes, effectiveFrom: sessionDate, requestID: requestID)
-        var outcome = try Self.encode(GoalUpdateOut(previous: previous.map(GoalOut.Targets.init), current: GoalOut.Targets(current), effectiveFrom: sessionDate.isoString))
+        let previousDay = try services.dayData.day(sessionDate).summary
+        do {
+            _ = try services.goals.updateGoal(changes, energyPlan: plan, effectiveFrom: sessionDate, requestID: requestID)
+        } catch GoalServiceError.noEnergyPlan {
+            throw Failure("noEnergyPlan", "还没有自动设定过目标，没法按活动计算。请用户在 Data 页的目标设定里生成一次。")
+        } catch GoalServiceError.invalidTargets {
+            throw Failure("invalidField", "目标数值不合理（比例 50%–150%，千卡 −1500 到 +1500，其他须为正数）。")
+        }
+        let currentDay = try services.dayData.day(sessionDate).summary
+        guard let current = currentDay.goal else { throw Failure("internal", "目标保存后读取失败。") }
+        var outcome = try Self.encode(GoalUpdateOut(
+            previous: previousDay.goal.map { GoalOut.Targets($0, energy: previousDay.energy) },
+            current: GoalOut.Targets(current, energy: currentDay.energy),
+            effectiveFrom: sessionDate.isoString
+        ))
         outcome.goalChanged = true
         return outcome
+    }
+
+    /// `goalType` / `energyPercent` / `energyAdjustmentKcal` / `energyAuto`：任何一个都表示能量目标随活动计算。
+    private func energyPlanChange(_ arguments: JSONValue) throws -> EnergyPlanChange? {
+        var change = EnergyPlanChange()
+        var given = false
+        if let raw = arguments["goalType"]?.stringValue {
+            guard let kind = EnergyPlan.Kind(rawValue: raw) else { throw Failure("invalidField", "goalType 只能是 maintain / lose / gain。") }
+            change.kind = kind
+            given = true
+        }
+        if case .number(let percent) = arguments["energyPercent"] {
+            change.adjustment = .fraction(Decimal(string: String(percent))! / 100)
+            given = true
+        }
+        if case .number(let kcal) = arguments["energyAdjustmentKcal"] {
+            if change.adjustment != nil { throw Failure("invalidField", "energyPercent 与 energyAdjustmentKcal 只能给一个。") }
+            change.adjustment = .kcal(Decimal(string: String(kcal))!)
+            given = true
+        }
+        if arguments["energyAuto"] == .bool(true) { given = true }
+        return given ? change : nil
     }
 
     // MARK: - 参数与编码
@@ -299,7 +339,7 @@ private struct DayOut: Encodable {
         writable = isSessionDate
         records = day.records.map(RecordOut.init)
         totals = NutrientsOut(day.summary.totals)
-        goal = day.summary.goal.map { GoalOut.Targets($0) }
+        goal = day.summary.goal.map { GoalOut.Targets($0, energy: day.summary.energy) }
         activePending = pending.map { PendingOut(id: $0.id, expiresAt: $0.expiresAt) }
     }
 }
@@ -364,8 +404,16 @@ private struct GoalOut: Encodable {
         var carbohydrateG: Decimal?
         var effectiveFrom: String
         var origin: String
+        /// `auto`：能量目标随当天活动计算；`fixed`：固定值。
+        var energyMode: String
+        var energyPlan: EnergyPlanOut?
+        /// 当天能量目标的来历（auto 时）。
+        var energyToday: EnergyTodayOut?
 
-        init(_ goal: GoalSnapshot) {
+        init(_ goal: GoalSnapshot, energy: EnergyTarget? = nil) {
+            energyMode = goal.energyPlan == nil ? "fixed" : "auto"
+            energyPlan = goal.energyPlan.map(EnergyPlanOut.init)
+            energyToday = energy.map(EnergyTodayOut.init)
             energyKcal = goal.targets.energyKcal.map { rounded($0, 0) }
             proteinG = goal.targets.proteinG.map { rounded($0, 0) }
             fatG = goal.targets.fatG.map { rounded($0, 0) }
@@ -375,12 +423,49 @@ private struct GoalOut: Encodable {
         }
     }
 
+    struct EnergyPlanOut: Encodable {
+        var goalType: String
+        var energyPercent: Decimal?
+        var energyAdjustmentKcal: Decimal?
+        var bmrKcal: Decimal
+
+        init(_ plan: EnergyPlan) {
+            goalType = plan.kind.rawValue
+            switch plan.adjustment {
+            case .fraction(let fraction): energyPercent = rounded(fraction * 100, 0)
+            case .kcal(let kcal): energyAdjustmentKcal = rounded(kcal, 0)
+            }
+            bmrKcal = rounded(plan.bmrKcal, 0)
+        }
+    }
+
+    struct EnergyTodayOut: Encodable {
+        var baselineActivityKcal: Decimal
+        var projectedActivityKcal: Decimal
+        var countedActivityKcal: Decimal
+        var tdeeKcal: Decimal
+        var adjustmentKcal: Decimal
+        var activityEstimated: Bool
+
+        init(_ energy: EnergyTarget) {
+            baselineActivityKcal = rounded(energy.baselineActivityKcal, 0)
+            projectedActivityKcal = rounded(energy.projectedActivityKcal, 0)
+            countedActivityKcal = rounded(energy.countedActivityKcal, 0)
+            tdeeKcal = rounded(energy.tdeeKcal, 0)
+            adjustmentKcal = rounded(energy.adjustmentKcal, 0)
+            activityEstimated = energy.activityEstimated
+        }
+    }
+
     var goal: Targets?
     var note: String?
 
-    init(_ goal: GoalSnapshot?) {
-        self.goal = goal.map(Targets.init)
-        note = goal == nil ? "还没有每日目标。可调用 getGoalRecommendation 预览建议，再请用户在 Data 页的目标设定里确认。" : nil
+    init(_ summary: DaySummary) {
+        goal = summary.goal.map { Targets($0, energy: summary.energy) }
+        note = summary.goal == nil
+            ? "还没有每日目标。可调用 getGoalRecommendation 预览建议，再请用户在 Data 页的目标设定里确认。"
+            : summary.energy == nil ? nil
+            : "能量目标随当天活动计算：消耗 = BMR + 计入的活动（超出平时的部分计入一半），再按 energyPlan 调整；数值会随一天的活动变化。"
     }
 }
 
@@ -457,7 +542,7 @@ private struct RecommendationOut: Encodable {
                     "ageYears": "\(input.ageYears) (\(input.ageSource.rawValue))",
                     "sex": "\(input.sex.rawValue) (\(input.sexSource.rawValue))",
                 ],
-                formula: "Mifflin–St Jeor BMR；TDEE = BMR + 当日活动能量（缺失时 BMR × 1.375）；能量 = 90% TDEE；蛋白质 = 1.8 g/kg"
+                formula: "Mifflin–St Jeor BMR；平时消耗 = BMR + 近 7 天日均活动（数据不足时 BMR × 1.375）；默认减脂吃到 85%，每天按当天活动重算；蛋白质 = 1.8 g/kg"
             )
             note = "这只是预览，没有保存。请用户在 Data 页“生成每日目标”里确认。"
         case .missing(let metrics):

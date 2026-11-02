@@ -40,6 +40,8 @@ struct HealthSnapshot: Equatable, Codable, Sendable {
     var sex: HealthReading<BiologicalSex>
     /// 当日活动能量（千卡）。
     var activeEnergyKcal: HealthReading<Decimal>
+    /// 这一天之前 7 个完整日的日均活动能量（千卡），有数据的天数不足 3 天时没有。
+    var averageActiveEnergyKcal: HealthReading<Decimal> = .noData
     /// 前一晚睡眠时长（小时）。
     var sleepHours: HealthReading<Decimal>
     /// 是否已向用户请求过 HealthKit 授权；未请求时各项都是 noData。

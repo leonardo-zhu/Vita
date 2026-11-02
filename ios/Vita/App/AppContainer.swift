@@ -81,7 +81,11 @@ final class AppServices {
         records = RecordService(context: context, referenceFoods: container.referenceFoods, now: now, timeZone: timeZone, observer: healthSync)
         goals = GoalService(context: context, now: now)
         let sync = healthSync
-        dayData = DayDataService(context: context, referenceFoods: container.referenceFoods, goals: goals) { sync.state(for: $0) }
+        let health = health
+        dayData = DayDataService(
+            context: context, referenceFoods: container.referenceFoods, goals: goals,
+            activity: { health.cachedActivity(on: $0) }, now: now, timeZone: timeZone
+        ) { sync.state(for: $0) }
         foods = FoodService(context: context, referenceFoods: container.referenceFoods, now: now)
         pending = PendingService(context: context, records: records, foods: foods, now: now, timeZone: timeZone)
         chatHistory = ChatHistoryService(context: context, now: now, timeZone: timeZone)

@@ -88,7 +88,25 @@
         "type": "object",
         "properties": {
           "energyKcal": {
-            "type": "number"
+            "type": "number",
+            "description": "固定的能量目标；给出后不再随活动变化"
+          },
+          "goalType": {
+            "type": "string",
+            "enum": ["maintain", "lose", "gain"],
+            "description": "目标类型；能量目标恢复随活动计算，调整幅度用该类型的默认值"
+          },
+          "energyPercent": {
+            "type": "number",
+            "description": "吃到每日消耗的百分比，如 85；能量目标随活动计算"
+          },
+          "energyAdjustmentKcal": {
+            "type": "number",
+            "description": "每天相对消耗多吃或少吃的千卡，缺口为负，如 -400；能量目标随活动计算"
+          },
+          "energyAuto": {
+            "type": "boolean",
+            "description": "true 时能量目标改回随活动计算，沿用上次的类型与调整"
           },
           "proteinG": {
             "type": "number"

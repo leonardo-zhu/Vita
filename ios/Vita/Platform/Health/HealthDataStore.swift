@@ -52,6 +52,8 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     private var _failuresRemaining = 0
     var body = ManualBodyMetrics(enteredAt: .distantPast)
     var activeEnergy: Decimal?
+    /// 按日期给不同的活动能量；没列出的日子用 `activeEnergy`。
+    var activeEnergyByDate: [LocalDate: Decimal] = [:]
     var sleep: Decimal?
 
     init(writeAuthorization: HealthWriteAuthorization = .authorized) {
@@ -86,7 +88,7 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     func latestBodyFatFraction() async throws -> (Decimal, Date)? { body.bodyFatFraction.map { ($0, body.enteredAt) } }
     func dateOfBirth() throws -> LocalDate? { body.dateOfBirth }
     func biologicalSex() throws -> BiologicalSex? { body.sex }
-    func activeEnergyKcal(on date: LocalDate, timeZone: TimeZone) async throws -> Decimal? { activeEnergy }
+    func activeEnergyKcal(on date: LocalDate, timeZone: TimeZone) async throws -> Decimal? { activeEnergyByDate[date] ?? activeEnergy }
     func sleepHours(endingOn date: LocalDate, timeZone: TimeZone) async throws -> Decimal? { sleep }
 
     func save(_ samples: [DietarySample]) async throws -> [UUID] {

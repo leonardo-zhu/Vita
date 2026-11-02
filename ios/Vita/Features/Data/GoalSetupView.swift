@@ -30,15 +30,25 @@ struct GoalSetupForm: View {
     @State private var snapshot: HealthSnapshot?
     @State private var editing: MissingMetric?
     @State private var message: String?
+    /// 目标类型与能量调整（ADR-018）：默认减脂 85%；也可以按千卡设定。
+    @State private var kind: EnergyPlan.Kind = .lose
+    @State private var byPercent = true
+    @State private var percent = 85
+    @State private var kcal = -400
+
+    private var adjustment: EnergyPlan.Adjustment {
+        kind == .maintain ? .fraction(1) : byPercent ? .fraction(Decimal(percent) / 100) : .kcal(Decimal(kcal))
+    }
 
     private var result: GoalRecommendationResult? {
-        snapshot.map { GoalRecommendationPolicy.recommend(snapshot: $0, on: date, now: Date()) }
+        snapshot.map { GoalRecommendationPolicy.recommend(snapshot: $0, on: date, now: Date(), kind: kind, adjustment: adjustment) }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 metricsCard
+                planCard
                 if case .ready(let recommendation) = result {
                     RecommendationCard(recommendation: recommendation)
                 } else if case .missing(let missing) = result {
@@ -105,14 +115,54 @@ struct GoalSetupForm: View {
                 MetricRow(metric: .dateOfBirth, value: snapshot.dateOfBirth.value.map { "\($0.year) 年 \($0.month) 月 \($0.day) 日" }, source: snapshot.dateOfBirth.source) { editing = .dateOfBirth }
                 MetricRow(metric: .sex, value: snapshot.sex.value.map(\.label), source: snapshot.sex.source) { editing = .sex }
                 HStack {
-                    Text("今日活动消耗").foregroundStyle(.secondary)
+                    Text("平时活动（近 7 天日均）").foregroundStyle(.secondary)
                     Spacer()
-                    Text(snapshot.activeEnergyKcal.value.map { DisplayFormat.number($0, digits: 0) + " 千卡" } ?? "没有数据，按轻度活动估算")
-                        .foregroundStyle(snapshot.activeEnergyKcal.value == nil ? .secondary : .primary)
+                    Text(snapshot.averageActiveEnergyKcal.value.map { DisplayFormat.number($0, digits: 0) + " 千卡" } ?? "数据不足，按轻度活动估算")
+                        .foregroundStyle(snapshot.averageActiveEnergyKcal.value == nil ? .secondary : .primary)
                 }
                 .font(VitaType.body)
             } else {
                 ProgressView().frame(maxWidth: .infinity)
+            }
+        }
+        .vitaCard(padding: 20)
+    }
+
+    /// 目标类型与每天的缺口 / 盈余。比例与千卡都能设，结果统一按千卡显示。
+    private var planCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            CardHeader(title: "目标类型", systemImage: "figure.walk")
+            Picker("目标类型", selection: $kind) {
+                ForEach(EnergyPlan.Kind.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: kind) {
+                percent = kind == .gain ? 110 : 85
+                kcal = kind == .gain ? 300 : -400
+            }
+            if kind != .maintain {
+                Picker("调整方式", selection: $byPercent) {
+                    Text("按比例").tag(true)
+                    Text("按千卡").tag(false)
+                }
+                .pickerStyle(.segmented)
+                if byPercent {
+                    Stepper(value: $percent, in: kind == .lose ? 70...95 : 105...120) {
+                        Text("吃到每日消耗的 \(percent)%").font(VitaType.body)
+                    }
+                } else {
+                    Stepper(value: $kcal, in: kind == .lose ? -1000...(-100) : 100...800, step: 50) {
+                        Text("每天\(kind == .lose ? "少" : "多")吃 \(abs(kcal)) 千卡").font(VitaType.body)
+                    }
+                }
+            }
+            if let plan = readyRecommendation?.energyPlan {
+                let target = EnergyTargetPolicy.target(plan: plan, activity: nil, day: .future)
+                Text(target.adjustmentKcal == 0
+                     ? "按平时活动，每天吃到消耗持平。"
+                     : "按平时活动，每天\(target.adjustmentKcal < 0 ? "缺口" : "盈余")约 \(DisplayFormat.number(abs(target.adjustmentKcal), digits: 0)) 千卡。")
+                    .font(VitaType.secondary)
+                    .foregroundStyle(.secondary)
             }
         }
         .vitaCard(padding: 20)
@@ -190,9 +240,10 @@ private struct RecommendationCard: View {
             Group {
                 Text("基础代谢 BMR = 10 × 体重 + 6.25 × 身高 − 5 × 年龄 \(recommendation.input.sex == .male ? "+ 5" : recommendation.input.sex == .female ? "− 161" : "− 78") = \(DisplayFormat.number(recommendation.bmrKcal, digits: 0)) 千卡")
                 Text(recommendation.tdeeEstimated
-                     ? "每日总消耗 TDEE ≈ BMR × 1.375（轻度活动，估算）= \(DisplayFormat.number(recommendation.tdeeKcal, digits: 0)) 千卡"
-                     : "每日总消耗 TDEE = BMR + 今日活动消耗 = \(DisplayFormat.number(recommendation.tdeeKcal, digits: 0)) 千卡")
-                Text("能量目标 = 90% × TDEE；蛋白质目标 = 1.8 g × 体重")
+                     ? "平时每日消耗 ≈ BMR × 1.375（轻度活动，估算）= \(DisplayFormat.number(recommendation.tdeeKcal, digits: 0)) 千卡"
+                     : "平时每日消耗 = BMR + 近 7 天日均活动 = \(DisplayFormat.number(recommendation.tdeeKcal, digits: 0)) 千卡")
+                Text("能量目标每天按当天活动重算：活动多的日子会高一些（超出平时的部分计入一半），没怎么动的日子会低一些，最低不低于基础代谢。")
+                Text("蛋白质目标 = 1.8 g × 体重")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -312,6 +363,16 @@ extension BiologicalSex {
         case .female: "女"
         case .male: "男"
         case .other: "其他"
+        }
+    }
+}
+
+extension EnergyPlan.Kind {
+    var label: String {
+        switch self {
+        case .maintain: "维持"
+        case .lose: "减脂"
+        case .gain: "增肌"
         }
     }
 }
