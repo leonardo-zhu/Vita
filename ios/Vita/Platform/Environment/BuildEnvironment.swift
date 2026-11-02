@@ -56,6 +56,21 @@ enum AppVersion {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     }
 
+    /// 构建号：构建时的提交数，每次提交后构建都会变大。
+    static var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
+    }
+
+    /// 构建时的提交（短哈希），带 `+` 表示当时有未提交的改动。
+    static var commit: String? {
+        Bundle.main.object(forInfoDictionaryKey: "VitaGitCommit") as? String
+    }
+
+    /// 设置页显示：`0.2.0 (58 · 450cdd8)`。
+    static var display: String {
+        "\(current) (\(build)\(commit.map { " · \($0)" } ?? ""))"
+    }
+
     /// 系统版本，如 `27.0` 或 `27.0.1`，诊断日志用。
     static var os: String {
         let v = ProcessInfo.processInfo.operatingSystemVersion

@@ -294,7 +294,7 @@ struct SettingsView: View {
     private var aboutCard: some View {
         VStack(spacing: 0) {
             // 连点五次版本号打开调试覆盖。
-            row("版本", AppVersion.current)
+            row("版本", AppVersion.display)
                 .contentShape(.rect)
                 .onTapGesture {
                     versionTaps += 1
