@@ -277,6 +277,7 @@ Vita 的营养数据匹配采用三级优先级：
 - 写入目的：为未来与 Google Health、Apple Health 等生态做**双向联动与数据备份**——蛋白质等关键营养数据写入 Apple Health 后，可以被其他消费 Apple Health 数据的 App/服务读取和确认。
 - 只有已经由用户确认并正式落库的数据才允许同步写入 Apple Health。
 - 写入 Apple Health 的数据是 Vita 数据的外部同步结果，不替代 Vita 自己的 Consumption Record 与 Nutrition DB。
+- 体脂秤例外：Vita 可以通过蓝牙连接阿福体脂秤（AFU-WL-TZ-A1），把称重锁定后的体重与体脂率写入 Apple Health（Body Mass、Body Fat Percentage）。这两项仍以 Apple Health 为主数据，Vita 只是代替厂商 App 写入；写入权限与膳食写入在同一次授权里申请（授权状态分开判断）；连接健康时还没申请过的，进入身体成分页时补问。没有写入权限或设备不支持时，结果存为手动补录，只用于生成目标。体脂率暂按 BMI、年龄、性别估算（与秤上显示不一致，校准方案见《Vita 身体成分模块》[Vita-Body-Composition.md](Vita-Body-Composition.md)），没测到阻抗时不写体脂率。打开称重页时同步秤里的离线记录。
 
 **HealthKit 写入的修改与删除同步**：
 
