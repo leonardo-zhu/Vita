@@ -95,6 +95,7 @@ struct DataView: View {
     }
 
     @State private var isSettingGoal = false
+    @State private var isWeighing = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -121,6 +122,9 @@ struct DataView: View {
                 }
             }
             .sheet(isPresented: $isPickingDate) { datePicker }
+            .navigationDestination(isPresented: $isWeighing) { BodyCompositionView(services: services) }
+            // 称完回来刷新体重、体脂率。
+            .onChange(of: isWeighing) { if !isWeighing { Task { await model.loadHealth() } } }
             .sheet(isPresented: $isSettingGoal) {
                 GoalSetupView(services: services, date: model.date) {
                     isSettingGoal = false
@@ -170,6 +174,7 @@ struct DataView: View {
                 healthAvailable: services.health.isAvailable,
                 onSetGoal: { isSettingGoal = true },
                 onConnectHealth: { Task { await model.connectHealth(); await syncHealth() } },
+                onWeigh: { isWeighing = true },
                 onRetrySync: { Task { await syncHealth() } }
             )
             // 每天一个视图身份：切换日期时直接换成那天的内容，不从前一天的进度圆环动画过去（否则卡片高度变化时圆环会跟着位移动画、看起来漂移）。
@@ -234,6 +239,7 @@ private struct DayDashboard: View {
     let healthAvailable: Bool
     let onSetGoal: () -> Void
     let onConnectHealth: () -> Void
+    let onWeigh: () -> Void
     let onRetrySync: () -> Void
 
     private var needsSyncAttention: Bool {
@@ -246,7 +252,7 @@ private struct DayDashboard: View {
             MacroCard(summary: day.summary)
             if needsSyncAttention { syncAttention }
             MealsSection(day: day)
-            HealthSection(snapshot: snapshot, isAvailable: healthAvailable, onConnect: onConnectHealth)
+            HealthSection(snapshot: snapshot, isAvailable: healthAvailable, onConnect: onConnectHealth, onWeigh: onWeigh)
         }
     }
 

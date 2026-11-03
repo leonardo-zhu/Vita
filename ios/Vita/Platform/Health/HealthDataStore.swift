@@ -8,6 +8,14 @@ struct DietarySample: Equatable, Codable, Sendable {
     var metadata: [String: String]
 }
 
+/// 体脂秤测得、写入 Apple 健康的一次称重。
+struct BodyMeasurementSample: Equatable, Codable, Sendable {
+    var bodyMassKg: Decimal
+    /// 0–1；没测到阻抗或缺资料时不写。
+    var bodyFatFraction: Decimal?
+    var date: Date
+}
+
 enum HealthWriteAuthorization: Equatable, Sendable {
     case notDetermined, denied, authorized
 }
@@ -41,6 +49,13 @@ protocol HealthDataStore: Sendable {
     func save(_ samples: [DietarySample]) async throws -> [UUID]
     /// 删除 Vita 写入过的 Sample；已经不存在的忽略。
     func delete(_ uuids: [UUID]) async throws
+
+    /// 体重的写入状态（体脂率随体重一起申请）。
+    func bodyWriteAuthorization() -> HealthWriteAuthorization
+    /// 返回写入的 Sample UUID，删除这次称重时用。
+    func saveBodyMeasurement(_ sample: BodyMeasurementSample) async throws -> [UUID]
+    /// 删除 Vita 写入过的体重、体脂率 Sample；已经不存在的忽略。
+    func deleteBodyMeasurements(_ uuids: [UUID]) async throws
 }
 
 /// 内存实现：测试、预览与不支持 HealthKit 的环境使用。可注入失败与权限状态。
@@ -50,6 +65,11 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     private var _requested = false
     private var _samples: [UUID: DietarySample] = [:]
     private var _failuresRemaining = 0
+    private var _bodyWrite: HealthWriteAuthorization = .notDetermined
+    /// 申请授权时用户对体重写入的答复。
+    var bodyWriteAnswer: HealthWriteAuthorization = .authorized
+    private var _bodySamples: [BodyMeasurementSample] = []
+    private var _bodySampleIDs: [UUID: BodyMeasurementSample] = [:]
     var body = ManualBodyMetrics(enteredAt: .distantPast)
     var activeEnergy: Decimal?
     /// 按日期给不同的活动能量；没列出的日子用 `activeEnergy`。
@@ -67,6 +87,9 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
 
     func setWriteAuthorization(_ value: HealthWriteAuthorization) { lock.withLock { _write = value } }
 
+    /// 写入过的称重。
+    var bodySamples: [BodyMeasurementSample] { lock.withLock { _bodySamples } }
+
     /// 接下来 `count` 次写入或删除失败（模拟网络、存储错误）。
     func failNext(_ count: Int) { lock.withLock { _failuresRemaining = count } }
 
@@ -79,7 +102,12 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
         }
     }
 
-    func requestAuthorization() async throws { lock.withLock { _requested = true } }
+    func requestAuthorization() async throws {
+        lock.withLock {
+            _requested = true
+            if _bodyWrite == .notDetermined { _bodyWrite = bodyWriteAnswer }
+        }
+    }
     func hasRequestedAuthorization() async -> Bool { lock.withLock { _requested } }
     func writeAuthorization() -> HealthWriteAuthorization { lock.withLock { _write } }
 
@@ -107,5 +135,33 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         try checkFailure()
         lock.withLock { uuids.forEach { _samples.removeValue(forKey: $0) } }
+    }
+
+    func bodyWriteAuthorization() -> HealthWriteAuthorization { lock.withLock { _bodyWrite } }
+
+    /// 用户在健康 App 里关掉了体重写入。
+    func revokeBodyWrite() { lock.withLock { _bodyWrite = .denied } }
+
+    func saveBodyMeasurement(_ sample: BodyMeasurementSample) async throws -> [UUID] {
+        guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
+        try checkFailure()
+        let ids = (sample.bodyFatFraction == nil ? [UUID()] : [UUID(), UUID()])
+        lock.withLock {
+            _bodySamples.append(sample)
+            ids.forEach { _bodySampleIDs[$0] = sample }
+            body.bodyMassKg = sample.bodyMassKg
+            body.bodyFatFraction = sample.bodyFatFraction ?? body.bodyFatFraction
+            body.enteredAt = sample.date
+        }
+        return ids
+    }
+
+    func deleteBodyMeasurements(_ uuids: [UUID]) async throws {
+        guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
+        try checkFailure()
+        lock.withLock {
+            let removed = uuids.compactMap { _bodySampleIDs.removeValue(forKey: $0) }
+            _bodySamples.removeAll { sample in removed.contains(sample) && !_bodySampleIDs.values.contains(sample) }
+        }
     }
 }

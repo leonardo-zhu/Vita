@@ -6,7 +6,7 @@ import SwiftData
 enum DataResetPart: String, CaseIterable, Identifiable, Sendable {
     /// 饮食记录、会话、确认卡、个人食品库、营养标签与图片、审计事件，以及本地的健康同步队列与映射。
     case records
-    /// 每日目标、补录的身体数据、首次引导完成标记。
+    /// 每日目标、补录的身体数据、体脂秤称重记录、首次引导完成标记。
     case goals
     /// 本地调试覆盖（vita-admin.md §9）。
     case debugOverride
@@ -51,6 +51,7 @@ final class DataResetService {
         if parts.contains(.goals) {
             try deleteAll(DailyGoal.self)
             try deleteAll(ManualBodyMetricsEntry.self)
+            try deleteAll(ScaleWeighing.self)
             defaults.removeObject(forKey: OnboardingState.key)
         }
         try context.save()

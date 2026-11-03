@@ -67,6 +67,7 @@ final class AppServices {
     let pending: PendingService
     let labels: LabelScanService
     let health: HealthService
+    let bodyComposition: BodyCompositionService
     let healthSync: HealthSyncService
     let chatHistory: ChatHistoryService
     let dataReset: DataResetService
@@ -78,6 +79,7 @@ final class AppServices {
         self.container = container
         healthSync = HealthSyncService(context: context, store: container.healthStore, now: now)
         health = HealthService(context: context, store: container.healthStore, now: now, timeZone: timeZone)
+        bodyComposition = BodyCompositionService(context: context, store: container.healthStore, health: health, now: now, timeZone: timeZone)
         records = RecordService(context: context, referenceFoods: container.referenceFoods, now: now, timeZone: timeZone, observer: healthSync)
         goals = GoalService(context: context, now: now)
         let sync = healthSync

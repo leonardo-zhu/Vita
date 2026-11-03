@@ -285,7 +285,7 @@ struct SettingsView: View {
     static func detail(of part: DataResetPart) -> String {
         switch part {
         case .records: "饮食记录、对话、确认卡、个人食品库、营养标签照片（Apple 健康里的不动）"
-        case .goals: "每日目标、补录的身体数据；下次打开重走首次引导"
+        case .goals: "每日目标、补录的身体数据、体脂秤称重记录；下次打开重走首次引导"
         case .debugOverride: "本地覆盖的模型别名、超时与 prompt"
         case .token: "清掉后需要重新填写"
         }

@@ -22,18 +22,21 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
 
     private static var writeTypes: Set<HKSampleType> { Set(dietaryTypes.values) }
 
+    /// 体脂秤写入的类型：和膳食一起申请，但授权状态分开判断（膳食写入被拒不影响称重写入）。
+    private static var bodyWriteTypes: Set<HKSampleType> { [HKQuantityType(.bodyMass), HKQuantityType(.bodyFatPercentage)] }
+
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
     func requestAuthorization() async throws {
         guard isAvailable else { throw HealthStoreError.unavailable }
-        try await store.requestAuthorization(toShare: Self.writeTypes, read: Self.readTypes)
+        // 膳食与体脂秤的写入一次申请完；已经答复过的类型系统不会再问，只列出新的。
+        try await store.requestAuthorization(toShare: Self.writeTypes.union(Self.bodyWriteTypes), read: Self.readTypes)
     }
 
+    /// iOS 不告诉 App 读取是否被允许，只能看写入：任何一项写入有过答复，就说明问过了。
     func hasRequestedAuthorization() async -> Bool {
-        guard isAvailable,
-              let status = try? await store.statusForAuthorizationRequest(toShare: Self.writeTypes, read: Self.readTypes)
-        else { return false }
-        return status == .unnecessary
+        guard isAvailable else { return false }
+        return Self.writeTypes.union(Self.bodyWriteTypes).contains { store.authorizationStatus(for: $0) != .notDetermined }
     }
 
     func writeAuthorization() -> HealthWriteAuthorization {
@@ -132,6 +135,46 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         let predicate = HKQuery.predicateForObjects(with: Set(uuids))
         for type in Self.writeTypes {
+            try await store.deleteObjects(of: type, predicate: predicate)
+        }
+    }
+
+    func bodyWriteAuthorization() -> HealthWriteAuthorization {
+        guard isAvailable else { return .denied }
+        return switch store.authorizationStatus(for: HKQuantityType(.bodyMass)) {
+        case .sharingAuthorized: .authorized
+        case .sharingDenied: .denied
+        default: .notDetermined
+        }
+    }
+
+    func saveBodyMeasurement(_ sample: BodyMeasurementSample) async throws -> [UUID] {
+        guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
+        let metadata: [String: Any] = [HKMetadataKeyWasUserEntered: false]
+        var objects = [
+            HKQuantitySample(
+                type: HKQuantityType(.bodyMass),
+                quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: NSDecimalNumber(decimal: sample.bodyMassKg).doubleValue),
+                start: sample.date, end: sample.date, metadata: metadata
+            ),
+        ]
+        // 体脂率允许单独被拒；被拒时只写体重。
+        if let fat = sample.bodyFatFraction, store.authorizationStatus(for: HKQuantityType(.bodyFatPercentage)) == .sharingAuthorized {
+            objects.append(HKQuantitySample(
+                type: HKQuantityType(.bodyFatPercentage),
+                quantity: HKQuantity(unit: .percent(), doubleValue: NSDecimalNumber(decimal: fat).doubleValue),
+                start: sample.date, end: sample.date, metadata: metadata
+            ))
+        }
+        try await store.save(objects)
+        return objects.map(\.uuid)
+    }
+
+    func deleteBodyMeasurements(_ uuids: [UUID]) async throws {
+        guard !uuids.isEmpty else { return }
+        guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
+        let predicate = HKQuery.predicateForObjects(with: Set(uuids))
+        for type in Self.bodyWriteTypes {
             try await store.deleteObjects(of: type, predicate: predicate)
         }
     }

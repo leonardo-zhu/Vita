@@ -5,12 +5,19 @@ struct HealthSection: View {
     let snapshot: HealthSnapshot?
     let isAvailable: Bool
     let onConnect: () -> Void
+    let onWeigh: () -> Void
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("健康").font(.title3.weight(.semibold)).padding(.horizontal, 4)
+            HStack {
+                Text("健康").font(.title3.weight(.semibold))
+                Spacer()
+                Button("身体成分", systemImage: "scalemass", action: onWeigh)
+                    .font(VitaType.body.weight(.medium))
+            }
+            .padding(.horizontal, 4)
             if !isAvailable {
                 Text("这台设备不支持 Apple 健康。")
                     .font(VitaType.body)
@@ -46,7 +53,7 @@ struct HealthSection: View {
             symbol: "heart.fill",
             tint: .pink,
             title: "连接 Apple 健康",
-            message: "读取体重、睡眠和活动，并把确认的饮食写回健康。",
+            message: "读取体重、睡眠和活动，并把确认的饮食和体脂秤称重写回健康。",
             actionTitle: "连接 Apple 健康",
             action: onConnect
         )

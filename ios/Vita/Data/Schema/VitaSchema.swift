@@ -15,6 +15,7 @@ enum VitaSchemaV1: VersionedSchema {
             PendingAction.self,
             NutritionLabelScan.self,
             HealthSyncOperation.self, HealthSyncMapping.self, ManualBodyMetricsEntry.self,
+            ScaleWeighing.self,
         ]
     }
 }
