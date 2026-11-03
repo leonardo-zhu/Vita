@@ -17,6 +17,8 @@ final class ScaleWeighing {
     var profileData: Data
     /// 写进 Apple 健康的 Sample；删除这次称重时一起删。
     var healthSampleIDsData: Data
+    /// 用户照着秤屏幕记下的体脂率（千分比），用来校准（身体成分模块 §4.2）。
+    var scaleBodyFatPermille: Int?
     var createdAt: Date
 
     init(
@@ -40,7 +42,12 @@ final class ScaleWeighing {
         set { healthSampleIDsData = JSONColumn.encode(newValue) }
     }
 
-    func snapshot() throws -> BodyWeighing {
+    var scaleBodyFatFraction: Decimal? {
+        get { scaleBodyFatPermille.map { Decimal($0) / 1000 } }
+        set { scaleBodyFatPermille = newValue.map { NSDecimalNumber(decimal: $0 * 1000).rounding(accordingToBehavior: nil).intValue } }
+    }
+
+    func snapshot(calibration: BodyFatModel? = nil) throws -> BodyWeighing {
         BodyWeighing(
             id: id,
             measuredAt: measuredAt,
@@ -49,7 +56,9 @@ final class ScaleWeighing {
             source: WeighingSource(rawValue: sourceRaw) ?? .live,
             timeReliable: timeReliable,
             profile: try JSONColumn.decode(WeighingProfile.self, from: profileData),
-            inAppleHealth: !healthSampleIDs.isEmpty
+            inAppleHealth: !healthSampleIDs.isEmpty,
+            scaleBodyFatFraction: scaleBodyFatFraction,
+            calibration: calibration
         )
     }
 }

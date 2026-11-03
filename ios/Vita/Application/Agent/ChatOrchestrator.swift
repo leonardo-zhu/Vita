@@ -29,6 +29,7 @@ struct ChatProgress: Equatable, Sendable {
             case "searchReferenceFoods": "查公共营养库"
             case "getGoals": "查看目标"
             case "getHealthSnapshot": "读取健康数据"
+            case "getBodyComposition": "读取身体成分"
             case "getGoalRecommendation": "计算目标建议"
             case "attachNutritionLabel": "读取营养标签"
             case "updateGoal": "修改目标"

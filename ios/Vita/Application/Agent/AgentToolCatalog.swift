@@ -5,7 +5,7 @@ import Foundation
 enum AgentToolCatalog {
     static let readTools: Set<String> = [
         "getDaySummary", "getRecordDetail", "searchPersonalFoods", "searchReferenceFoods",
-        "getGoals", "getHealthSnapshot", "getGoalRecommendation",
+        "getGoals", "getHealthSnapshot", "getBodyComposition", "getGoalRecommendation",
     ]
 
     static var names: Set<String> { readTools.union(ProposalToolHandler.toolNames).union(["updateGoal"]) }

@@ -169,6 +169,30 @@ enum BodyComposition {
         }
     }
 
+    /// 体型：BMI 与体脂率的九宫格（身体成分模块 §4.5）。不带来新信息，只是便于理解；只有已知区间的人群（成年男性）给出。
+    static func bodyType(bmi: Decimal?, bodyFatFraction: Decimal?, sex: BiologicalSex?) -> (name: String, explanation: String)? {
+        guard sex == .male, let bmi, let fat = bodyFatFraction,
+              let bmiRange = Ranges.male(weight: 0)[.bmi], let fatRange = Ranges.male(weight: 0)[.bodyFat] else { return nil }
+        // 列：BMI 偏低 / 标准 / 偏高及以上；行：体脂偏低 / 标准 / 偏高 / 过高。
+        let column = min(bmiRange.bounds.firstIndex { bmi < $0 } ?? 3, 2)
+        let row = fatRange.bounds.firstIndex { fat < $0 } ?? 3
+        let table: [[(String, String)]] = [
+            [("偏瘦", "体重和脂肪都偏少。"), ("偏瘦肌肉型", "体脂低，体重正常，肌肉比例较高。"), ("肌肉型", "BMI 偏高但体脂低，多出的是肌肉。")],
+            [("偏瘦", "体脂正常，但体重偏轻。"), ("标准", "体重和体脂都在标准范围。"), ("结实", "BMI 偏高但体脂正常，肌肉较多。")],
+            [("隐形肥胖", "体重偏轻，但脂肪比例偏高，肌肉偏少。"), ("脂肪偏多", "BMI 正常，但脂肪比例略高。"), ("偏胖", "BMI 和体脂都略高。")],
+            [("隐形肥胖", "体重不重，但脂肪比例过高。"), ("隐形肥胖", "BMI 正常，但脂肪比例过高。"), ("肥胖", "BMI 和体脂都过高。")],
+        ]
+        return table[row][column]
+    }
+
+    /// 每个点往前 `days` 天（含当天）内所有点的平均，用来抹平喝水、进食带来的单次波动。`points` 按时间升序。
+    static func movingAverage(_ points: [(date: Date, value: Double)], days: Int = 7) -> [(date: Date, value: Double)] {
+        points.map { point in
+            let window = points.filter { $0.date <= point.date && point.date.timeIntervalSince($0.date) < Double(days) * 86400 }
+            return (point.date, window.map(\.value).reduce(0, +) / Double(window.count))
+        }
+    }
+
     /// 去脂体重中各成分的比例，取官方两组样本的平均。官方的具体公式拿不到，这些是近似。
     enum Ratios {
         static let boneOfLean = Decimal(string: "0.0546")!

@@ -2,10 +2,15 @@ import SwiftUI
 
 /// 一次称重的全部身体成分指标（身体成分模块 §6）：按核心、脂肪、肌肉与水分分组，
 /// 每项带判定标签；点开看区间刻度与解释。除体重外都是估算，页面上明确标出。
+/// 可以记下这次秤屏幕上显示的体脂率，用来校准（§4.2）。
 struct WeighingDetailView: View {
-    let weighing: BodyWeighing
+    let services: AppServices
+    @State var weighing: BodyWeighing
 
     @State private var expanded: BodyMetricKind?
+    @State private var readingText = ""
+    @State private var readingError: String?
+    @FocusState private var readingFocused: Bool
 
     private var metrics: [BodyMetric] { BodyComposition.metrics(for: weighing) }
 
@@ -14,6 +19,7 @@ struct WeighingDetailView: View {
             VStack(spacing: 16) {
                 header
                 if weighing.bodyFatFraction == nil { missingFatNotice }
+                if weighing.impedance != nil { scaleReadingCard }
                 ForEach(BodyMetricGroup.allCases, id: \.self) { group in
                     let items = metrics.filter { $0.kind.group == group }
                     if !items.isEmpty { section(group, items) }
@@ -28,6 +34,66 @@ struct WeighingDetailView: View {
         .background { VitaTheme.background }
         .navigationTitle(Text(weighing.measuredAt, format: .dateTime.month().day()))
         .navigationBarTitleDisplayMode(.inline)
+        .scrollDismissesKeyboard(.interactively)
+        .onAppear { readingText = weighing.scaleBodyFatFraction.map { DisplayFormat.number($0 * 100, digits: 1) } ?? "" }
+    }
+
+    // MARK: - 秤读数
+
+    private var scaleReadingCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("秤上显示的体脂率").font(VitaType.body.weight(.medium))
+            Text("称完时秤屏幕上会显示体脂率。记下它，攒够 \(BodyFatCalibration.minimumSamples) 组后 Vita 就能算出和秤一样的数。")
+                .font(VitaType.secondary)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                HStack(spacing: 4) {
+                    TextField("例如 21.4", text: $readingText)
+                        .keyboardType(.decimalPad)
+                        .focused($readingFocused)
+                        .monospacedDigit()
+                    Text("%").foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 12))
+                Button(weighing.scaleBodyFatFraction == nil ? "保存" : "更新") { Task { await saveReading() } }
+                    .glassButton(prominent: true)
+                    .disabled(readingText.trimmingCharacters(in: .whitespaces).isEmpty)
+                if weighing.scaleBodyFatFraction != nil {
+                    Button("清除") { readingText = ""; Task { await saveReading() } }.glassButton()
+                }
+            }
+            if let readingError {
+                Text(readingError).font(VitaType.secondary).foregroundStyle(VitaTheme.caution)
+            }
+        }
+        .vitaCard()
+    }
+
+    private func saveReading() async {
+        readingError = nil
+        let trimmed = readingText.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
+        let fraction: Decimal?
+        if trimmed.isEmpty {
+            fraction = nil
+        } else if trimmed.wholeMatch(of: /\d{1,2}(\.\d{1,2})?/) != nil, let percent = Decimal(string: trimmed) {
+            // 先整串校验：Decimal(string:) 遇到 "21.421.4" 会只读前半截而不报错。
+            fraction = percent / 100
+        } else {
+            readingError = "请填数字，例如 21.4。"
+            return
+        }
+        do {
+            try await services.bodyComposition.setScaleBodyFat(fraction, for: weighing.id)
+            readingFocused = false
+            if let updated = try services.bodyComposition.weighings().first(where: { $0.id == weighing.id }) { weighing = updated }
+            readingText = weighing.scaleBodyFatFraction.map { DisplayFormat.number($0 * 100, digits: 1) } ?? ""
+        } catch HealthServiceError.invalidMetrics {
+            readingError = "体脂率应在 2% 到 70% 之间。"
+        } catch {
+            readingError = "保存失败，请再试一次。"
+        }
     }
 
     private var header: some View {
@@ -43,6 +109,14 @@ struct WeighingDetailView: View {
                     .accessibilityLabel(weighing.inAppleHealth ? "已写入 Apple 健康" : "未写入 Apple 健康")
             }
             subtitle.font(VitaType.secondary).foregroundStyle(.secondary)
+            if let type = BodyComposition.bodyType(bmi: weighing.bmi, bodyFatFraction: weighing.bodyFatFraction, sex: weighing.profile.sex) {
+                Divider()
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("体型").font(VitaType.secondary).foregroundStyle(.secondary)
+                    Text(type.name).font(VitaType.body.weight(.semibold))
+                    Text(type.explanation).font(VitaType.secondary).foregroundStyle(.secondary)
+                }
+            }
         }
         .vitaCard()
     }
@@ -88,8 +162,8 @@ struct WeighingDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     Text(metric.kind.title).foregroundStyle(.primary)
-                    if metric.kind.isEstimate {
-                        Text("估算").font(VitaType.meta).foregroundStyle(.secondary)
+                    if let tag = tag(for: metric.kind) {
+                        Text(tag).font(VitaType.meta).foregroundStyle(.secondary)
                     }
                     Spacer()
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
@@ -114,6 +188,17 @@ struct WeighingDetailView: View {
         .font(VitaType.body)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// 体脂率标出来源；由它换算的指标仍标“估算”（比例系数是近似）。
+    private func tag(for kind: BodyMetricKind) -> String? {
+        guard kind.isEstimate else { return nil }
+        guard kind == .bodyFat, let source = weighing.bodyFat?.source else { return "估算" }
+        return switch source {
+        case .scaleReading: "秤读数"
+        case .calibrated: "已校准"
+        case .estimated: "估算"
+        }
     }
 
     static func format(_ value: Decimal, _ kind: BodyMetricKind) -> String {

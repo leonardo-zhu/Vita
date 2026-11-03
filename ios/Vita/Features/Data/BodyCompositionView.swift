@@ -38,6 +38,7 @@ struct BodyCompositionView: View {
                 if let latest { resultCard(latest) }
                 if syncedCount > 0 { syncedNotice }
                 if history.count >= 2 { trendCard }
+                calibrationCard
                 historySection
             }
             .padding(16)
@@ -79,6 +80,8 @@ struct BodyCompositionView: View {
             connect()
         }
         .onDisappear { connection.stop() }
+        // 从详情页回来时，填过的秤读数可能改了校准。
+        .onAppear { reloadHistory() }
     }
 
     /// 没人站在秤上时只占一行。
@@ -160,7 +163,7 @@ struct BodyCompositionView: View {
             }
             if let weighing = latest.weighing, weighing.bodyFatFraction != nil {
                 NavigationLink {
-                    WeighingDetailView(weighing: weighing)
+                    WeighingDetailView(services: services, weighing: weighing)
                 } label: {
                     HStack {
                         Text("查看全部指标").font(VitaType.body.weight(.medium))
@@ -186,6 +189,7 @@ struct BodyCompositionView: View {
                 TrendPoint(id: weighing.id, date: weighing.measuredAt, value: Self.plotValue($0.value, trend))
             }
         }
+        let average = BodyComposition.movingAverage(points.map { ($0.date, $0.value) })
         return VStack(alignment: .leading, spacing: 14) {
             CardHeader(title: "趋势", systemImage: "chart.line.uptrend.xyaxis") {
                 Text(trend.unit).font(.caption).foregroundStyle(.secondary)
@@ -197,16 +201,28 @@ struct BodyCompositionView: View {
             if points.count >= 2 {
                 Chart {
                     ForEach(points) { point in
-                        LineMark(x: .value("时间", point.date), y: .value(trend.title, point.value))
+                        LineMark(x: .value("时间", point.date), y: .value(trend.title, point.value), series: .value("系列", "单次"))
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(VitaTheme.protein.opacity(0.35))
+                        PointMark(x: .value("时间", point.date), y: .value(trend.title, point.value))
+                            .foregroundStyle(VitaTheme.protein.opacity(0.6))
+                            .symbolSize(18)
+                    }
+                    ForEach(average, id: \.date) { point in
+                        LineMark(x: .value("时间", point.date), y: .value(trend.title, point.value), series: .value("系列", "7 天均值"))
                             .interpolationMethod(.monotone)
                             .foregroundStyle(VitaTheme.protein)
-                        PointMark(x: .value("时间", point.date), y: .value(trend.title, point.value))
-                            .foregroundStyle(VitaTheme.protein)
-                            .symbolSize(24)
+                            .lineStyle(StrokeStyle(lineWidth: 2.5))
                     }
                 }
                 .chartYScale(domain: .automatic(includesZero: false))
                 .chartYAxis { AxisMarks(position: .leading) }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) {
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
+                    }
+                }
                 .frame(height: 180)
             } else {
                 Text("有阻抗的称重少于两次，还画不出\(trend.title)趋势。")
@@ -214,11 +230,41 @@ struct BodyCompositionView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             }
-            if trend != .weight {
-                Text("估算值，按体重、阻抗和身高、年龄、性别算出。").font(.caption2).foregroundStyle(.tertiary)
+            Text("粗线是 7 天均值。喝水、进食、运动都会让单次读数波动（体脂率一天内能差 1–3%），固定在早上起床、如厕后、吃喝前称，看均线比看单次可靠。")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .vitaCard(padding: 20)
+    }
+
+    // MARK: - 校准
+
+    private var calibrationCard: some View {
+        let status = (try? services.bodyComposition.calibration()) ?? .none
+        return VStack(alignment: .leading, spacing: 10) {
+            CardHeader(title: "体脂率校准", systemImage: "slider.horizontal.3", tint: VitaTheme.fat) {
+                Text(status.applied == nil ? "\(status.readingCount)/\(BodyFatCalibration.minimumSamples)" : "已校准")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(calibrationText(status)).font(VitaType.secondary).foregroundStyle(.secondary)
+            if let user = connection.user {
+                Text("写进秤里的资料：\(user.heightCm) cm · \(user.ageYears) 岁 · \(user.isMale ? "男" : "女")。秤按它算体脂，来自 Apple 健康，每次连接时写入。")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
         .vitaCard(padding: 20)
+    }
+
+    private func calibrationText(_ status: BodyFatCalibrationStatus) -> String {
+        if let model = status.applied {
+            return "已按 \(model.sampleCount) 组读数算出秤的公式，和秤显示平均差 \(DisplayFormat.number(Decimal(model.meanAbsoluteError * 100), digits: 2))%。体脂率和由它换算的指标都已按新公式更新。"
+        }
+        if let model = status.model {
+            return "已记 \(status.readingCount) 组，但和公式对不上（平均差 \(DisplayFormat.number(Decimal(model.meanAbsoluteError * 100), digits: 1))%）。确认填的是同一次称重时秤上的数，或再多记几组。"
+        }
+        return "现在的体脂率按 BMI 估算，和秤显示的会不一样。称完在记录详情里填上秤屏幕显示的体脂率，攒够 \(BodyFatCalibration.minimumSamples) 组（体重最好有些变化，比如早晚各一次），Vita 就能算出和秤一样的数。不填也不影响使用。"
     }
 
     private struct TrendPoint: Identifiable {
@@ -300,7 +346,7 @@ struct BodyCompositionView: View {
     private func historyRow(_ weighing: BodyWeighing) -> some View {
         HStack(spacing: 12) {
             NavigationLink {
-                WeighingDetailView(weighing: weighing)
+                WeighingDetailView(services: services, weighing: weighing)
             } label: {
                 historyRowContent(weighing).contentShape(.rect)
             }

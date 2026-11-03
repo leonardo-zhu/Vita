@@ -55,7 +55,8 @@ final class BodyCompositionService {
             impedance: measurement.impedance, source: source, timeReliable: source == .live || reliableTime != nil,
             profile: weighingProfile, healthSampleIDs: [], now: now()
         )
-        let weighing = try entry.snapshot()
+        let model = try calibration().applied
+        let weighing = try entry.snapshot(calibration: model)
         let metrics = ManualBodyMetrics(bodyMassKg: weighing.weightKg, bodyFatFraction: weighing.bodyFatFraction, enteredAt: date)
         guard metrics.isValid else { throw HealthServiceError.invalidMetrics }
 
@@ -74,20 +75,64 @@ final class BodyCompositionService {
         context.insert(entry)
         context.insert(AuditEvent(operation: "health.scaleMeasurement", result: .success, createdAt: now()))
         try context.save()
-        return (try entry.snapshot(), destination)
+        return (try entry.snapshot(calibration: model), destination)
     }
 
-    /// 全部称重，新的在前。
+    /// 全部称重，新的在前；体脂率按当前校准算（读时计算，校准更新后历史一起变）。
     func weighings() throws -> [BodyWeighing] {
+        let model = try calibration().applied
+        return try entries().map { try $0.snapshot(calibration: model) }
+    }
+
+    /// 由全部记下的秤读数拟合。读数很少，每次现算。
+    func calibration() throws -> BodyFatCalibrationStatus {
+        let samples = try entries().compactMap { entry -> BodyFatCalibration.Sample? in
+            guard let observed = entry.scaleBodyFatFraction, let a = entry.impedanceA, let b = entry.impedanceB,
+                  let height = try entry.snapshot().profile.heightCm else { return nil }
+            return .init(weightKg: Decimal(entry.weightGrams) / 1000, heightCm: height, impedance: .init(a: a, b: b), observed: observed)
+        }
+        return BodyFatCalibrationStatus(readingCount: samples.count, model: BodyFatCalibration.fit(samples))
+    }
+
+    /// 记下（或清掉）这次称重时秤屏幕上的体脂率。采用的校准公式因此变化时，重写健康里的体脂率与去脂体重，
+    /// 让健康里的历史和 Vita 显示一致。
+    func setScaleBodyFat(_ fraction: Decimal?, for id: UUID) async throws {
+        guard let entry = try entry(id) else { return }
+        if let fraction, !(Decimal(string: "0.02")!...Decimal(string: "0.7")!).contains(fraction) {
+            throw HealthServiceError.invalidMetrics
+        }
+        let before = try calibration().applied
+        entry.scaleBodyFatFraction = fraction
+        context.insert(AuditEvent(operation: "health.scaleReading", result: .success, createdAt: now()))
+        try context.save()
+        let after = try calibration().applied
+        try await rewriteHealth(only: before == after ? [entry] : try entries(), calibration: after)
+    }
+
+    /// 体脂率变了的称重，删掉健康里的旧 Sample 再写新的。没有写入权限时不动（健康里留着旧值）。
+    private func rewriteHealth(only targets: [ScaleWeighing], calibration: BodyFatModel?) async throws {
+        guard store.isAvailable, store.bodyWriteAuthorization() == .authorized else { return }
+        for entry in targets where !entry.healthSampleIDs.isEmpty {
+            let weighing = try entry.snapshot(calibration: calibration)
+            try await store.deleteBodyMeasurements(entry.healthSampleIDs)
+            entry.healthSampleIDs = try await store.saveBodyMeasurement(
+                BodyMeasurementSample(bodyMassKg: weighing.weightKg, bodyFatFraction: weighing.bodyFatFraction, date: weighing.measuredAt)
+            )
+            try context.save()
+        }
+    }
+
+    private func entries() throws -> [ScaleWeighing] {
         try context.fetch(FetchDescriptor<ScaleWeighing>(sortBy: [SortDescriptor(\.measuredAt, order: .reverse)]))
-            .map { try $0.snapshot() }
+    }
+
+    private func entry(_ id: UUID) throws -> ScaleWeighing? {
+        try context.fetch(FetchDescriptor<ScaleWeighing>(predicate: #Predicate { $0.id == id })).first
     }
 
     /// 删除一次称重，连同写进 Apple 健康的体重、体脂率。没有权限删健康里的那份时只删本地。
     func delete(_ id: UUID) async throws -> WeighingDeletion {
-        guard let entry = try context.fetch(FetchDescriptor<ScaleWeighing>(predicate: #Predicate { $0.id == id })).first else {
-            return .deleted
-        }
+        guard let entry = try entry(id) else { return .deleted }
         var result = WeighingDeletion.deleted
         let sampleIDs = entry.healthSampleIDs
         if !sampleIDs.isEmpty {
@@ -111,7 +156,7 @@ final class BodyCompositionService {
     /// 没允许就申请一次全部健康权限：已经答复过的类型系统不会再问，只列出没问过的。
     private func canWriteToHealth() async -> Bool {
         guard store.isAvailable else { return false }
-        if store.bodyWriteAuthorization() != .authorized {
+        if store.hasUndeterminedBodyWrite() || store.bodyWriteAuthorization() != .authorized {
             do { try await store.requestAuthorization() } catch { Self.log.error("health authorization failed: \(error, privacy: .public)") }
         }
         let authorization = store.bodyWriteAuthorization()

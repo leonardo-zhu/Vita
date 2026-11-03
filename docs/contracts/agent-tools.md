@@ -16,7 +16,7 @@
 
 | 级别 | 工具 | 行为 |
 | --- | --- | --- |
-| Read | `getDaySummary`、`getRecordDetail`、`searchPersonalFoods`、`searchReferenceFoods`、`getGoals`、`getHealthSnapshot`、`getGoalRecommendation` | 仅读取或由客户端计算预览；历史日期可读。`getGoalRecommendation` 不写入任何数据。 |
+| Read | `getDaySummary`、`getRecordDetail`、`searchPersonalFoods`、`searchReferenceFoods`、`getGoals`、`getHealthSnapshot`、`getBodyComposition`、`getGoalRecommendation` | 仅读取或由客户端计算预览；历史日期可读。`getGoalRecommendation` 不写入任何数据。 |
 | Propose | `proposeRecordChange`、`proposeFoodChange`、`proposeRecordDeletion` | 校验输入后创建或替换该日期唯一的 Pending；不写正式业务数据。 |
 | Direct command | `updateGoal` | 仅在用户指令明确、参数完整时直接执行；否则模型先在对话中取得确认，不创建 Pending。 |
 | Client-only commit | `confirmPending`、`cancelPending`、`expirePending`、`runHealthSync`、`commitInitialGoals`、`submitManualBodyMetrics`、`attachNutritionLabel` | 不暴露给模型。由卡片交互、表单、系统选择器、时钟或应用服务调用。 |
@@ -148,6 +148,7 @@
 - `getRecordDetail`：`recordId`，只能读当前会话日期的记录。
 - `searchReferenceFoods`：`query` 与可选 `aliases`，精确命中最多返回 10 条；0 条或多条时附 `note` 提示改写或询问。
 - `getGoals`、`getHealthSnapshot`、`getGoalRecommendation`：无参数，读当前会话日期。
+- `getBodyComposition`：可选 `days`（1–365，默认 30）。返回最近一次称重的全部身体成分指标（名称、数值、单位、是否估算、判定）与体脂率来源（`scaleReading` 秤读数 / `calibrated` 校准公式 / `estimated` BMI 估算），`days` 天内每次称重的体重、体脂率、去脂体重、肌肉量及截至该次的 7 天均值，以及校准状态。时间是本地 ISO 8601。只读，不按会话日期过滤（见《Vita 身体成分模块》）。
 - 数值保留一位小数（目标与千卡取整）。
 
 ### 手动身体数据与标签图片（client-only 入口）

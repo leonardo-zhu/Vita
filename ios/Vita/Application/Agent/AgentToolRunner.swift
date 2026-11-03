@@ -83,6 +83,14 @@ final class AgentToolRunner {
                 return try Self.encode(GoalOut(try services.dayData.day(sessionDate).summary))
             case "getHealthSnapshot":
                 return try Self.encode(HealthOut(await services.health.snapshot(on: sessionDate)))
+            case "getBodyComposition":
+                let days = arguments["days"]?.intValue ?? 30
+                guard (1...365).contains(days) else { throw Failure("invalidField", "days 应在 1 到 365 之间。") }
+                let since = now().addingTimeInterval(-Double(days) * 86400)
+                return try Self.encode(BodyCompositionOut(
+                    weighings: try services.bodyComposition.weighings(), since: since,
+                    calibration: try services.bodyComposition.calibration()
+                ))
             case "getGoalRecommendation":
                 let snapshot = await services.health.snapshot(on: sessionDate)
                 return try Self.encode(RecommendationOut(GoalRecommendationPolicy.recommend(snapshot: snapshot, on: sessionDate, now: now())))
@@ -508,6 +516,86 @@ private struct HealthOut: Encodable {
         sex = reading(snapshot.sex) { $0.rawValue }
         activeEnergyKcal = reading(snapshot.activeEnergyKcal) { rounded($0, 0) }
         sleepHours = reading(snapshot.sleepHours) { rounded($0) }
+    }
+}
+
+private struct BodyCompositionOut: Encodable {
+    struct Metric: Encodable {
+        var name: String
+        var value: Decimal
+        var unit: String
+        var estimated: Bool
+        var rating: String?
+    }
+
+    struct Latest: Encodable {
+        var measuredAt: String
+        var timeReliable: Bool
+        var bodyFatSource: String?
+        var metrics: [Metric]
+    }
+
+    struct Weighing: Encodable {
+        /// 本地时间，ISO 8601。
+        var measuredAt: String
+        var weightKg: Decimal
+        var bodyFatPercent: Decimal?
+        var leanMassKg: Decimal?
+        var muscleMassKg: Decimal?
+        /// 截至这次称重的 7 天平均。
+        var weightKg7DayAverage: Decimal
+        var bodyFatPercent7DayAverage: Decimal?
+    }
+
+    var latest: Latest?
+    var weighings: [Weighing]
+    var calibration: String
+    var note: String
+
+    init(weighings all: [BodyWeighing], since: Date, calibration status: BodyFatCalibrationStatus) {
+        if let first = all.first {
+            latest = Latest(
+                measuredAt: Self.time(first.measuredAt), timeReliable: first.timeReliable,
+                bodyFatSource: first.bodyFat.map { "\($0.source)" },
+                metrics: BodyComposition.metrics(for: first).map {
+                    Metric(
+                        name: $0.kind.title,
+                        value: rounded($0.kind.isPercent ? $0.value * 100 : $0.value, $0.kind.digits),
+                        unit: $0.kind.unit, estimated: $0.kind.isEstimate, rating: $0.rating?.label
+                    )
+                }
+            )
+        }
+        let ascending = Array(all.reversed())
+        let weightAverage = BodyComposition.movingAverage(ascending.map { ($0.measuredAt, NSDecimalNumber(decimal: $0.weightKg).doubleValue) })
+        let withFat = ascending.filter { $0.bodyFatFraction != nil }
+        let fatAverage = Dictionary(
+            uniqueKeysWithValues: zip(withFat.map(\.id), BodyComposition.movingAverage(withFat.map {
+                ($0.measuredAt, NSDecimalNumber(decimal: $0.bodyFatFraction! * 100).doubleValue)
+            }).map(\.value))
+        )
+        weighings = zip(ascending, weightAverage).filter { $0.0.measuredAt >= since }.map { weighing, average in
+            let metrics = Dictionary(uniqueKeysWithValues: BodyComposition.metrics(for: weighing).map { ($0.kind, $0.value) })
+            return Weighing(
+                measuredAt: Self.time(weighing.measuredAt),
+                weightKg: rounded(weighing.weightKg, 2),
+                bodyFatPercent: weighing.bodyFatFraction.map { rounded($0 * 100) },
+                leanMassKg: metrics[.leanMass].map { rounded($0) },
+                muscleMassKg: metrics[.muscleMass].map { rounded($0) },
+                weightKg7DayAverage: rounded(Decimal(average.value), 2),
+                bodyFatPercent7DayAverage: fatAverage[weighing.id].map { rounded(Decimal($0)) }
+            )
+        }
+        calibration = if let model = status.applied {
+            "已按 \(model.sampleCount) 组秤读数校准，体脂率与秤显示一致"
+        } else {
+            "未校准（已记 \(status.readingCount) 组秤读数），体脂率按 BMI 估算，可能与秤显示不同"
+        }
+        note = all.isEmpty ? "还没有体脂秤称重记录。" : "除体重、BMI 外都是估算；比较趋势用 7 天平均。"
+    }
+
+    private static func time(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day().time(includingFractionalSeconds: false))
     }
 }
 

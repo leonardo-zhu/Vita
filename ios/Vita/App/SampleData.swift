@@ -16,6 +16,7 @@ enum SampleData {
     }
 
     static func seedToday(_ services: AppServices) throws {
+        try seedWeighings(services)
         let timeZone = TimeZone.current
         let today = LocalDate(date: Date(), timeZone: timeZone)
         let day = try services.dayData.day(today)
@@ -42,6 +43,25 @@ enum SampleData {
         milk.activeVersionID = version.id
         try context.save()
         try seedRecords(services, on: today, timeZone: timeZone, milkVersionID: version.id)
+    }
+
+    /// 近两周的体脂秤称重，用来看身体成分页的趋势和详情。直接写入本地表、不写 Apple 健康（样例不该进健康）。
+    private static func seedWeighings(_ services: AppServices) throws {
+        let context = services.container.modelContainer.mainContext
+        guard try context.fetchCount(FetchDescriptor<ScaleWeighing>()) == 0 else { return }
+        let profile = WeighingProfile(heightCm: 175, ageYears: 26, sex: .male)
+        let readings: [(days: Double, grams: Int, impedance: Int)] = [
+            (13, 75_600, 498), (12, 75_350, 505), (10, 75_200, 510), (9, 75_400, 502), (7, 74_900, 516),
+            (6, 75_050, 512), (4, 74_700, 521), (3, 74_850, 518), (1, 74_500, 525), (0, 74_450, 528),
+        ]
+        for reading in readings {
+            context.insert(ScaleWeighing(
+                measuredAt: Date().addingTimeInterval(-reading.days * 86400 - 3600), weightGrams: reading.grams,
+                impedance: .init(a: reading.impedance + 60, b: reading.impedance), source: .live, timeReliable: true,
+                profile: profile, healthSampleIDs: [], now: Date()
+            ))
+        }
+        try context.save()
     }
 
     private static func seedRecords(_ services: AppServices, on today: LocalDate, timeZone: TimeZone, milkVersionID: UUID) throws {

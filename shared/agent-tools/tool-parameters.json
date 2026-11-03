@@ -76,6 +76,20 @@
       }
     },
     {
+      "name": "getBodyComposition",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "往前看多少天的称重，默认 30。"
+          }
+        }
+      }
+    },
+    {
       "name": "getGoalRecommendation",
       "parameters": {
         "type": "object",

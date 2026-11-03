@@ -50,6 +50,8 @@ protocol HealthDataStore: Sendable {
     /// 删除 Vita 写入过的 Sample；已经不存在的忽略。
     func delete(_ uuids: [UUID]) async throws
 
+    /// 体重、体脂率、去脂体重里还有没问过的（新版本加了类型时会这样），需要再申请一次。
+    func hasUndeterminedBodyWrite() -> Bool
     /// 体重的写入状态（体脂率随体重一起申请）。
     func bodyWriteAuthorization() -> HealthWriteAuthorization
     /// 返回写入的 Sample UUID，删除这次称重时用。
@@ -138,6 +140,7 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     }
 
     func bodyWriteAuthorization() -> HealthWriteAuthorization { lock.withLock { _bodyWrite } }
+    func hasUndeterminedBodyWrite() -> Bool { lock.withLock { _bodyWrite == .notDetermined } }
 
     /// 用户在健康 App 里关掉了体重写入。
     func revokeBodyWrite() { lock.withLock { _bodyWrite = .denied } }

@@ -40,7 +40,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_NSHealthShareUsageDescription: Vita 读取身高、体重、体脂率、出生日期、性别、睡眠和活动能量，用来生成每日目标并展示健康数据。
         INFOPLIST_KEY_NSCameraUsageDescription: Vita 用相机拍营养成分表，照片发给模型读出营养数值，帮你存进个人食品库；原图也存在这台设备上。
-        INFOPLIST_KEY_NSHealthUpdateUsageDescription: Vita 把你确认过的饮食记录（能量、蛋白质、脂肪、碳水），以及体脂秤称出的体重和体脂率写入 Apple 健康。
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: Vita 把你确认过的饮食记录（能量、蛋白质、脂肪、碳水），以及体脂秤称出的体重、体脂率和去脂体重写入 Apple 健康。
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Vita 用蓝牙连接阿福体脂秤，读取体重和体脂测量结果。
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Vita/Info.plist

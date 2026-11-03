@@ -208,11 +208,31 @@ struct BodyWeighing: Equatable, Identifiable, Sendable {
     let timeReliable: Bool
     let profile: WeighingProfile
     let inAppleHealth: Bool
+    /// 用户照着秤屏幕记下的体脂率（0–1），用来校准。
+    var scaleBodyFatFraction: Decimal? = nil
+    /// 已采用的校准公式；没有时按 BMI 估算。
+    var calibration: BodyFatModel? = nil
+
+    enum BodyFatSource: Equatable, Sendable {
+        /// 秤屏幕上的读数，用户记下的。
+        case scaleReading
+        /// 按校准后的公式（用上阻抗）算出，应与秤显示一致。
+        case calibrated
+        /// 按 BMI、年龄、性别估算，与秤显示会有出入。
+        case estimated
+    }
 
     /// 没测到阻抗（穿鞋、没站稳）或缺资料时为 nil。
-    var bodyFatFraction: Decimal? {
+    var bodyFatFraction: Decimal? { bodyFat?.value }
+
+    var bodyFat: (value: Decimal, source: BodyFatSource)? {
+        if let scaleBodyFatFraction { return (scaleBodyFatFraction, .scaleReading) }
         guard impedance != nil else { return nil }
+        if let calibrated = calibration?.predict(weightKg: weightKg, heightCm: profile.heightCm, impedance: impedance) {
+            return (calibrated, .calibrated)
+        }
         return BodyFatEstimate.fraction(weightKg: weightKg, heightCm: profile.heightCm, ageYears: profile.ageYears, sex: profile.sex)
+            .map { ($0, .estimated) }
     }
 
     var bmi: Decimal? {

@@ -168,6 +168,55 @@ struct BodyCompositionServiceTests {
         #expect(try services.bodyComposition.weighings().isEmpty)
     }
 
+    @Test func scaleReadingReplacesTheEstimateAndRewritesHealth() async throws {
+        let (weighing, _) = try await record()
+        try await services.bodyComposition.setScaleBodyFat(Decimal(string: "0.214")!, for: weighing.id)
+        let updated = try #require(try services.bodyComposition.weighings().first)
+        #expect(updated.bodyFat?.source == .scaleReading)
+        #expect(updated.bodyFatFraction == Decimal(string: "0.214")!)
+        #expect(store.bodySamples.map(\.bodyFatFraction) == [Decimal(string: "0.214")!])
+        #expect(try services.bodyComposition.calibration().readingCount == 1)
+    }
+
+    @Test func calibrationAppliesToEveryWeighingOnceItFits() async throws {
+        store.body.heightCm = 175
+        var ids: [UUID] = []
+        for reading in BodyFatCalibrationTests.readings {
+            let measurement = ScaleMeasurement(
+                weightKg: Decimal(reading.weight), isStable: true, isFinal: true, impedance: .init(a: reading.impedance + 60, b: reading.impedance)
+            )
+            ids.append(try await record(measurement).0.id)
+        }
+        let extra = try await record(ScaleMeasurement(weightKg: Decimal(string: "74.8")!, isStable: true, isFinal: true, impedance: .init(a: 575, b: 515))).0
+        #expect(extra.bodyFat?.source == .estimated)
+        for (id, reading) in zip(ids, BodyFatCalibrationTests.readings) {
+            try await services.bodyComposition.setScaleBodyFat(
+                BodyFatCalibrationTests.scaleFormula(weightKg: reading.weight, heightCm: 175, impedance: reading.impedance), for: id
+            )
+        }
+        #expect(try services.bodyComposition.calibration().applied != nil)
+        let calibrated = try #require(try services.bodyComposition.weighings().first { $0.id == extra.id })
+        #expect(calibrated.bodyFat?.source == .calibrated)
+        let expected = BodyFatCalibrationTests.scaleFormula(weightKg: 74.8, heightCm: 175, impedance: 515)
+        #expect(abs(NSDecimalNumber(decimal: calibrated.bodyFatFraction! - expected).doubleValue) < 0.002)
+        // 健康里的那份也换成了校准后的值，没有留下旧 Sample。
+        #expect(store.bodySamples.count == 7)
+        #expect(store.bodySamples.contains { $0.bodyFatFraction == calibrated.bodyFatFraction })
+    }
+
+    @Test func agentReadsBodyComposition() async throws {
+        _ = try await record()
+        let tools = AgentToolRunner(services: services, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
+        let output = await tools.run(
+            LLMFunctionCall(callID: "c", name: "getBodyComposition", arguments: #"{"days":7}"#), sessionDate: Fixtures.day, requestID: UUID()
+        ).output
+        #expect(output.contains(#""name":"去脂体重""#))
+        #expect(output.contains(#""bodyFatSource":"estimated""#))
+        #expect(output.contains("未校准"))
+        let invalid = await tools.run(LLMFunctionCall(callID: "c", name: "getBodyComposition", arguments: #"{"days":0}"#), sessionDate: Fixtures.day, requestID: UUID())
+        #expect(invalid.output.contains("invalidField"))
+    }
+
     @Test func deletingAWeighingAlsoDeletesItFromHealth() async throws {
         let (weighing, _) = try await record()
         #expect(try await services.bodyComposition.delete(weighing.id) == .deleted)
@@ -233,8 +282,65 @@ struct BodyCompositionTests {
         #expect(Set(metrics(fat: nil).keys) == [.weight, .bmi])
     }
 
+    @Test func classifiesBodyTypeFromBMIAndBodyFat() {
+        #expect(BodyComposition.bodyType(bmi: Decimal(string: "24.8"), bodyFatFraction: Decimal(string: "0.214"), sex: .male)?.name == "偏胖")
+        #expect(BodyComposition.bodyType(bmi: 26, bodyFatFraction: Decimal(string: "0.15"), sex: .male)?.name == "结实")
+        #expect(BodyComposition.bodyType(bmi: 22, bodyFatFraction: Decimal(string: "0.26"), sex: .male)?.name == "隐形肥胖")
+        #expect(BodyComposition.bodyType(bmi: 22, bodyFatFraction: Decimal(string: "0.15"), sex: .male)?.name == "标准")
+        #expect(BodyComposition.bodyType(bmi: 22, bodyFatFraction: Decimal(string: "0.15"), sex: .female) == nil)
+    }
+
     @Test func noRatingsWithoutAKnownRange() {
         #expect(metrics(sex: .female).values.allSatisfy { $0.rating == nil })
+    }
+}
+
+struct BodyFatCalibrationTests {
+    /// 假设秤按这个公式算，显示取到 0.1%。
+    static func scaleFormula(weightKg: Double, heightCm: Double, impedance: Int) -> Decimal {
+        let feature = (heightCm / 100) * (heightCm / 100) / Double(impedance)
+        let value = -32 * feature + 0.0035 * weightKg + 0.17
+        return Decimal((value * 1000).rounded()) / 1000
+    }
+
+    static let readings: [(weight: Double, impedance: Int)] = [(73.2, 560), (73.9, 540), (74.5, 522), (75.1, 505), (75.8, 498), (76.4, 481)]
+
+    private func samples(_ readings: [(weight: Double, impedance: Int)] = readings) -> [BodyFatCalibration.Sample] {
+        readings.map {
+            BodyFatCalibration.Sample(
+                weightKg: Decimal($0.weight), heightCm: 175, impedance: .init(a: $0.impedance + 60, b: $0.impedance),
+                observed: Self.scaleFormula(weightKg: $0.weight, heightCm: 175, impedance: $0.impedance)
+            )
+        }
+    }
+
+    @Test func recoversTheScaleFormulaFromSixReadings() throws {
+        let model = try #require(BodyFatCalibration.fit(samples()))
+        #expect(model.channel == .b)
+        #expect(BodyFatCalibration.isUsable(model))
+        let predicted = try #require(model.predict(weightKg: 74.8, heightCm: 175, impedance: .init(a: 575, b: 515)))
+        #expect(abs(NSDecimalNumber(decimal: predicted - Self.scaleFormula(weightKg: 74.8, heightCm: 175, impedance: 515)).doubleValue) < 0.002)
+    }
+
+    @Test func needsSixReadings() {
+        #expect(BodyFatCalibration.fit(Array(samples().prefix(5))) == nil)
+    }
+
+    @Test func rejectsReadingsThatDoNotFitTheFormula() throws {
+        var noisy = samples()
+        noisy = noisy.enumerated().map { index, sample in
+            .init(weightKg: sample.weightKg, heightCm: sample.heightCm, impedance: sample.impedance,
+                  observed: sample.observed + (index.isMultiple(of: 2) ? Decimal(string: "0.03")! : Decimal(string: "-0.03")!))
+        }
+        let model = try #require(BodyFatCalibration.fit(noisy))
+        #expect(!BodyFatCalibration.isUsable(model))
+    }
+
+    @Test func movingAverageCoversTheLastSevenDays() {
+        let day: TimeInterval = 86400
+        let start = Fixtures.now
+        let averaged = BodyComposition.movingAverage([(start, 70), (start + day, 72), (start + 7 * day, 80)])
+        #expect(averaged.map(\.value) == [70, 71, 76])
     }
 }
 

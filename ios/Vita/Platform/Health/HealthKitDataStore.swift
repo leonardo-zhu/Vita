@@ -23,7 +23,9 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
     private static var writeTypes: Set<HKSampleType> { Set(dietaryTypes.values) }
 
     /// 体脂秤写入的类型：和膳食一起申请，但授权状态分开判断（膳食写入被拒不影响称重写入）。
-    private static var bodyWriteTypes: Set<HKSampleType> { [HKQuantityType(.bodyMass), HKQuantityType(.bodyFatPercentage)] }
+    private static var bodyWriteTypes: Set<HKSampleType> {
+        [HKQuantityType(.bodyMass), HKQuantityType(.bodyFatPercentage), HKQuantityType(.leanBodyMass)]
+    }
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -139,6 +141,10 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
         }
     }
 
+    func hasUndeterminedBodyWrite() -> Bool {
+        isAvailable && Self.bodyWriteTypes.contains { store.authorizationStatus(for: $0) == .notDetermined }
+    }
+
     func bodyWriteAuthorization() -> HealthWriteAuthorization {
         guard isAvailable else { return .denied }
         return switch store.authorizationStatus(for: HKQuantityType(.bodyMass)) {
@@ -158,13 +164,23 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
                 start: sample.date, end: sample.date, metadata: metadata
             ),
         ]
-        // 体脂率允许单独被拒；被拒时只写体重。
-        if let fat = sample.bodyFatFraction, store.authorizationStatus(for: HKQuantityType(.bodyFatPercentage)) == .sharingAuthorized {
-            objects.append(HKQuantitySample(
-                type: HKQuantityType(.bodyFatPercentage),
-                quantity: HKQuantity(unit: .percent(), doubleValue: NSDecimalNumber(decimal: fat).doubleValue),
-                start: sample.date, end: sample.date, metadata: metadata
-            ))
+        // 体脂率、去脂体重允许单独被拒；被拒的不写。
+        if let fat = sample.bodyFatFraction {
+            if store.authorizationStatus(for: HKQuantityType(.bodyFatPercentage)) == .sharingAuthorized {
+                objects.append(HKQuantitySample(
+                    type: HKQuantityType(.bodyFatPercentage),
+                    quantity: HKQuantity(unit: .percent(), doubleValue: NSDecimalNumber(decimal: fat).doubleValue),
+                    start: sample.date, end: sample.date, metadata: metadata
+                ))
+            }
+            if store.authorizationStatus(for: HKQuantityType(.leanBodyMass)) == .sharingAuthorized {
+                let lean = sample.bodyMassKg * (1 - fat)
+                objects.append(HKQuantitySample(
+                    type: HKQuantityType(.leanBodyMass),
+                    quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: NSDecimalNumber(decimal: lean).doubleValue),
+                    start: sample.date, end: sample.date, metadata: metadata
+                ))
+            }
         }
         try await store.save(objects)
         return objects.map(\.uuid)
