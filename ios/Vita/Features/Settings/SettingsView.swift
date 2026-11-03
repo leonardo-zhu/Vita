@@ -45,9 +45,11 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
             }
-            .sheet(isPresented: $isEditingToken, onDismiss: loadToken) {
-                TokenEntrySheet(isReplacing: tokenSuffix != nil) { token in
+            // 在设置里推入一页，不再叠一层弹窗（叠在设置弹窗上会被键盘挡住、中间空一大块）。
+            .navigationDestination(isPresented: $isEditingToken) {
+                TokenEntryView(isReplacing: tokenSuffix != nil) { token in
                     try secrets.write(token, for: .conduitToken)
+                    loadToken()
                 }
             }
             .alert("提示", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
@@ -402,7 +404,7 @@ private struct SettingsField: View {
 }
 
 /// 填写或更换令牌。用系统的粘贴按钮读取剪贴板，不触发“允许粘贴”询问；默认遮盖，可切换显示。
-private struct TokenEntrySheet: View {
+private struct TokenEntryView: View {
     let isReplacing: Bool
     let save: (String) throws -> Void
     @Environment(\.dismiss) private var dismiss
@@ -414,62 +416,68 @@ private struct TokenEntrySheet: View {
     private var trimmed: String { token.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationStack {
+        ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("在 Conduit 的应用 Vita 里生成一把访问令牌，复制后粘贴到这里。")
-                    .font(VitaType.body)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Group {
-                        if reveals {
-                            TextField("访问令牌", text: $token)
-                        } else {
-                            SecureField("访问令牌", text: $token)
-                        }
-                    }
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                    .focused($focused)
-                    Button(reveals ? "隐藏" : "显示", systemImage: reveals ? "eye.slash" : "eye") { reveals.toggle() }
-                        .labelStyle(.iconOnly)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("在 Conduit 的应用 Vita 里生成一把访问令牌，复制后粘贴到这里。")
+                        .font(VitaType.body)
                         .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 14))
-                PasteButton(payloadType: String.self) { strings in
-                    if let first = strings.first { token = first.trimmingCharacters(in: .whitespacesAndNewlines) }
-                }
-                .buttonBorderShape(.capsule)
-                .labelStyle(.titleAndIcon)
-                if failed {
-                    Text("保存失败，请再试一次。").font(VitaType.secondary).foregroundStyle(VitaTheme.caution)
-                }
-                Spacer()
-                Button {
-                    do {
-                        try save(trimmed)
-                        dismiss()
-                    } catch {
-                        failed = true
+                    HStack(spacing: 10) {
+                        Group {
+                            if reveals {
+                                TextField("访问令牌", text: $token)
+                            } else {
+                                SecureField("访问令牌", text: $token)
+                            }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
+                        .focused($focused)
+                        .submitLabel(.done)
+                        .onSubmit(commit)
+                        Button(reveals ? "隐藏" : "显示", systemImage: reveals ? "eye.slash" : "eye") { reveals.toggle() }
+                            .labelStyle(.iconOnly)
+                            .foregroundStyle(.secondary)
+                        PasteButton(payloadType: String.self) { strings in
+                            if let first = strings.first { token = first.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonBorderShape(.circle)
                     }
-                } label: {
+                    .padding(.leading, 14)
+                    .padding(.trailing, 6)
+                    .padding(.vertical, 6)
+                    .frame(minHeight: 48)
+                    .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 14))
+                    if failed {
+                        Text("保存失败，请再试一次。").font(VitaType.secondary).foregroundStyle(VitaTheme.caution)
+                    }
+                }
+                .vitaCard()
+                Button(action: commit) {
                     Text(isReplacing ? "保存新令牌" : "保存").font(.body.weight(.semibold)).frame(maxWidth: .infinity)
                 }
                 .controlSize(.large)
                 .glassButton(prominent: true)
                 .disabled(trimmed.isEmpty)
             }
-            .padding(20)
-            .navigationTitle(isReplacing ? "更换令牌" : "填写令牌")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-            }
+            .padding(16)
         }
-        .tint(VitaTheme.intake)
-        .presentationDetents([.medium])
+        .scrollDismissesKeyboard(.interactively)
+        .background { VitaTheme.background }
+        .navigationTitle(isReplacing ? "更换令牌" : "填写令牌")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear { focused = true }
+    }
+
+    private func commit() {
+        guard !trimmed.isEmpty else { return }
+        do {
+            try save(trimmed)
+            dismiss()
+        } catch {
+            failed = true
+        }
     }
 }
