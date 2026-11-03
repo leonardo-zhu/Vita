@@ -184,6 +184,60 @@ struct BodyCompositionServiceTests {
     }
 }
 
+/// 用蚂蚁阿福「身材管理」的样本 A（76.80 kg、体脂 21.4%、男）核对换算（身体成分模块 §3.2）。
+struct BodyCompositionTests {
+    private func metrics(weight: String = "76.8", fat: String? = "0.214", sex: BiologicalSex? = .male) -> [BodyMetricKind: BodyMetric] {
+        let list = BodyComposition.metrics(
+            weightKg: Decimal(string: weight)!, bmi: Decimal(string: "24.8"), bodyFatFraction: fat.flatMap { Decimal(string: $0) }, sex: sex
+        )
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.kind, $0) })
+    }
+
+    private func close(_ value: Decimal?, _ expected: String, within tolerance: String = "0.35") -> Bool {
+        guard let value else { return false }
+        return abs(NSDecimalNumber(decimal: value - Decimal(string: expected)!).doubleValue) <= Double(tolerance)!
+    }
+
+    @Test func matchesVendorSampleWithinTolerance() {
+        let m = metrics()
+        #expect(close(m[.fatMass]?.value, "16.4", within: "0.05"))
+        #expect(close(m[.leanMass]?.value, "60.4", within: "0.05"))
+        #expect(close(m[.boneMass]?.value, "3.3", within: "0.05"))
+        #expect(close(m[.muscleMass]?.value, "57.1", within: "0.05"))
+        #expect(close(m[.basalMetabolism]?.value, "1674", within: "1"))
+        #expect(close(m[.waterMass]?.value, "44.8"))
+        #expect(close(m[.skeletalMuscleMass]?.value, "33.0"))
+        #expect(close(m[.proteinMass]?.value, "11.6"))
+        #expect(close(m[.subcutaneousFatMass]?.value, "11.8", within: "0.05"))
+    }
+
+    @Test func ratesMaleRangesLikeTheVendor() {
+        let m = metrics()
+        #expect(m[.bodyFat]?.rating == .high)
+        #expect(m[.fatMass]?.rating == .high)
+        #expect(m[.muscleRate]?.rating == .standard)
+        #expect(m[.muscleMass]?.rating == .standard)
+        #expect(m[.waterRate]?.rating == .standard)
+        #expect(m[.bmi]?.rating == .high)
+        #expect(m[.basalMetabolism]?.rating == nil)
+    }
+
+    @Test func rangeBoundaryBelongsToTheHigherBand() {
+        let range = BodyRange(bounds: [Decimal(string: "0.10")!, Decimal(string: "0.20")!], ratings: [.low, .standard, .high])
+        #expect(range.rating(of: Decimal(string: "0.0999")!) == .low)
+        #expect(range.rating(of: Decimal(string: "0.10")!) == .standard)
+        #expect(range.rating(of: Decimal(string: "0.20")!) == .high)
+    }
+
+    @Test func onlyWeightAndBMIWithoutBodyFat() {
+        #expect(Set(metrics(fat: nil).keys) == [.weight, .bmi])
+    }
+
+    @Test func noRatingsWithoutAKnownRange() {
+        #expect(metrics(sex: .female).values.allSatisfy { $0.rating == nil })
+    }
+}
+
 private extension Data {
     init(hex: String) {
         self.init(hex.split(separator: " ").map { UInt8($0, radix: 16)! })

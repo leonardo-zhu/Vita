@@ -1,7 +1,9 @@
+import Charts
 import SwiftUI
 
-/// 身体成分（身体成分模块 §6）：打开即找秤，先同步秤里的离线记录，称重锁定后存下并写入 Apple 健康
-/// （没允许时存为手动补录）；下面是全部称重历史，可删除（连同健康里的那份）。
+/// 身体成分（身体成分模块 §6）：趋势与全部称重历史，可删除（连同健康里的那份）。
+/// 打开就在后台连秤并同步离线记录（秤熄屏后仍在广播，真机上熄屏 17 分钟后仍能连上）；
+/// 站上去才展开称重卡片，锁定后存下并写入 Apple 健康（没允许时存为手动补录）。
 struct BodyCompositionView: View {
     let services: AppServices
 
@@ -13,6 +15,12 @@ struct BodyCompositionView: View {
     @State private var manualCount = 0
     @State private var pendingDeletion: BodyWeighing?
     @State private var message: String?
+    @State private var trend: BodyMetricKind = .weight
+    /// 找了一阵还没找到秤：提示靠近或踩一下。
+    @State private var searchIsSlow = false
+
+    /// 趋势图可选的指标。
+    private static let trendKinds: [BodyMetricKind] = [.weight, .bodyFat, .leanMass, .muscleMass]
 
     /// 这次打开页面后站上去称的那一次。
     private struct Latest {
@@ -26,9 +34,10 @@ struct BodyCompositionView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                weightCard
+                if connection.live != nil || connection.phase == .finished { weightCard } else { scaleStatus }
                 if let latest { resultCard(latest) }
                 if syncedCount > 0 { syncedNotice }
+                if history.count >= 2 { trendCard }
                 historySection
             }
             .padding(16)
@@ -62,14 +71,38 @@ struct BodyCompositionView: View {
         }
         .task {
             reloadHistory()
+            // 先问完健康授权再连秤：同步时才弹窗的话，保存一直等着，秤收不到确认就不发实时体重。
             await services.bodyComposition.prepareHealthWrite()
             connection.onFinal = { measurement in Task { await save(measurement) } }
             connection.onOfflineRecord = { await saveOffline($0) }
-            connection.start()
-            profile = await services.health.snapshot(on: LocalDate(date: Date(), timeZone: .current))
-            connection.user = profile.flatMap(scaleUser)
+            connection.user = scaleUser(await loadProfile())
+            connect()
         }
         .onDisappear { connection.stop() }
+    }
+
+    /// 没人站在秤上时只占一行。
+    private var scaleStatus: some View {
+        HStack(spacing: 10) {
+            if [.idle, .searching, .connecting].contains(connection.phase) && !connection.seemsBusy {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: connection.phase == .waiting ? "checkmark.circle.fill" : "exclamationmark.circle")
+                    .foregroundStyle(connection.phase == .waiting ? VitaTheme.intake : VitaTheme.caution)
+            }
+            Text(statusText).font(VitaType.secondary).foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .vitaCard(padding: 14)
+    }
+
+    private func connect() {
+        searchIsSlow = false
+        connection.start()
+        Task {
+            try? await Task.sleep(for: .seconds(20))
+            if [.searching, .connecting].contains(connection.phase) { searchIsSlow = true }
+        }
     }
 
     // MARK: - 称重
@@ -102,11 +135,11 @@ struct BodyCompositionView: View {
             return "连不上秤：它可能正连着蚂蚁阿福等其他 App，请先把那个 App 关掉"
         }
         return switch connection.phase {
-        case .idle: "准备中"
+        case .idle, .searching, .connecting: searchIsSlow ? "还没找到体脂秤：靠近一些，或踩一下秤面" : "正在连接体脂秤"
         case .unavailable(let reason): reason
-        case .searching: "正在找秤，请踩一下秤面唤醒"
-        case .connecting: "找到秤，正在连接"
-        case .waiting: connection.live?.isStable == true ? "读数稳定，正在测量体脂" : "已连接，请光脚站上去"
+        case .waiting:
+            connection.live == nil ? "体脂秤已连接，光脚站上去就能称重"
+                : connection.live?.isStable == true ? "读数稳定，正在测量体脂" : "请站稳"
         case .finished: "称重完成"
         }
     }
@@ -125,10 +158,77 @@ struct BodyCompositionView: View {
                     .font(VitaType.secondary)
                     .foregroundStyle(.secondary)
             }
+            if let weighing = latest.weighing, weighing.bodyFatFraction != nil {
+                NavigationLink {
+                    WeighingDetailView(weighing: weighing)
+                } label: {
+                    HStack {
+                        Text("查看全部指标").font(VitaType.body.weight(.medium))
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(VitaTheme.intake)
+            }
             Divider()
             saveStatus(latest)
         }
         .vitaCard()
+    }
+
+    // MARK: - 趋势
+
+    private var trendCard: some View {
+        let points = history.reversed().compactMap { weighing in
+            BodyComposition.metrics(for: weighing).first { $0.kind == trend }.map {
+                TrendPoint(id: weighing.id, date: weighing.measuredAt, value: Self.plotValue($0.value, trend))
+            }
+        }
+        return VStack(alignment: .leading, spacing: 14) {
+            CardHeader(title: "趋势", systemImage: "chart.line.uptrend.xyaxis") {
+                Text(trend.unit).font(.caption).foregroundStyle(.secondary)
+            }
+            Picker("指标", selection: $trend) {
+                ForEach(Self.trendKinds, id: \.self) { Text($0.title) }
+            }
+            .pickerStyle(.segmented)
+            if points.count >= 2 {
+                Chart {
+                    ForEach(points) { point in
+                        LineMark(x: .value("时间", point.date), y: .value(trend.title, point.value))
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(VitaTheme.protein)
+                        PointMark(x: .value("时间", point.date), y: .value(trend.title, point.value))
+                            .foregroundStyle(VitaTheme.protein)
+                            .symbolSize(24)
+                    }
+                }
+                .chartYScale(domain: .automatic(includesZero: false))
+                .chartYAxis { AxisMarks(position: .leading) }
+                .frame(height: 180)
+            } else {
+                Text("有阻抗的称重少于两次，还画不出\(trend.title)趋势。")
+                    .font(VitaType.secondary)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+            if trend != .weight {
+                Text("估算值，按体重、阻抗和身高、年龄、性别算出。").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .vitaCard(padding: 20)
+    }
+
+    private struct TrendPoint: Identifiable {
+        let id: UUID
+        let date: Date
+        let value: Double
+    }
+
+    private static func plotValue(_ value: Decimal, _ kind: BodyMetricKind) -> Double {
+        NSDecimalNumber(decimal: kind.isPercent ? value * 100 : value).doubleValue
     }
 
     @ViewBuilder
@@ -199,21 +299,12 @@ struct BodyCompositionView: View {
 
     private func historyRow(_ weighing: BodyWeighing) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(weighing.measuredAt, format: .dateTime.month().day()).font(VitaType.body.weight(.medium))
-                Text(weighing.timeReliable ? weighing.measuredAt.formatted(.dateTime.hour().minute()) : "同步")
-                    .font(VitaType.meta)
-                    .foregroundStyle(.secondary)
+            NavigationLink {
+                WeighingDetailView(weighing: weighing)
+            } label: {
+                historyRowContent(weighing).contentShape(.rect)
             }
-            .frame(width: 64, alignment: .leading)
-            Text("\(DisplayFormat.number(weighing.weightKg, digits: 2)) kg").monospacedDigit()
-            if let fat = weighing.bodyFatFraction {
-                Text("体脂 \(DisplayFormat.number(fat * 100, digits: 1))%").monospacedDigit().foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: weighing.inAppleHealth ? "heart.fill" : "heart.slash")
-                .foregroundStyle(weighing.inAppleHealth ? AnyShapeStyle(.pink) : AnyShapeStyle(.tertiary))
-                .accessibilityLabel(weighing.inAppleHealth ? "已写入 Apple 健康" : "未写入 Apple 健康")
+            .buttonStyle(.plain)
             Menu("更多", systemImage: "ellipsis") {
                 Button("删除", systemImage: "trash", role: .destructive) { pendingDeletion = weighing }
             }
@@ -223,6 +314,38 @@ struct BodyCompositionView: View {
         .font(VitaType.body)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    private func historyRowContent(_ weighing: BodyWeighing) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(DisplayFormat.number(weighing.weightKg, digits: 2)).font(.body.weight(.semibold)).monospacedDigit()
+                    Text("kg").font(VitaType.meta).foregroundStyle(.secondary)
+                    if let fat = weighing.bodyFatFraction {
+                        Text("体脂 \(DisplayFormat.number(fat * 100, digits: 1))%")
+                            .font(VitaType.secondary)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
+                    }
+                }
+                Group {
+                    if weighing.timeReliable {
+                        Text(weighing.measuredAt, format: .dateTime.month().day().hour().minute())
+                    } else {
+                        Text("\(weighing.measuredAt, format: .dateTime.month().day()) · 同步")
+                    }
+                }
+                .font(VitaType.meta)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+            Spacer()
+            Image(systemName: weighing.inAppleHealth ? "heart.fill" : "heart.slash")
+                .foregroundStyle(weighing.inAppleHealth ? AnyShapeStyle(.pink) : AnyShapeStyle(.tertiary))
+                .accessibilityLabel(weighing.inAppleHealth ? "已写入 Apple 健康" : "未写入 Apple 健康")
+        }
     }
 
     private func metric(_ title: String, _ value: String, _ unit: String) -> some View {
@@ -303,6 +426,6 @@ struct BodyCompositionView: View {
 
     private func weighAgain() {
         latest = nil
-        connection.start()
+        connect()
     }
 }
