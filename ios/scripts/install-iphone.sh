@@ -1,18 +1,18 @@
-#!/bin/zsh
+#!/bin/sh
 # 把当前代码构建并装到连着的 iPhone 上，然后打开 Vita。
 # 免费开发者证书签的包 7 天后过期，过期后重跑一次即可（数据不会丢）。
 #
-# 用法：ios/scripts/install-iphone.sh            自动选第一台已配对的真机
+# 用法：ios/scripts/install-iphone.sh            自动选第一台已配对的真机（用 sh 或 zsh 执行也行）
 #       DEVICE=<UDID 或名字> ios/scripts/install-iphone.sh
 #
 # 手机要已和这台 Mac 配对（同一 Wi-Fi 或数据线），并开着开发者模式。
-set -euo pipefail
+set -eu
 
-ios_dir=${0:A:h:h}
+ios_dir=$(cd "$(dirname "$0")/.." && pwd)
 derived="$ios_dir/build/DerivedData"
 
 device=${DEVICE:-}
-if [[ -z $device ]]; then
+if [ -z "$device" ]; then
   device=$(xcrun devicectl list devices --json-output /dev/stdout 2>/dev/null | python3 -c '
 import json, sys
 devices = json.load(sys.stdin)["result"]["devices"]
@@ -22,12 +22,12 @@ phones = [d for d in devices if d["hardwareProperties"].get("reality") == "physi
 print(phones[0]["hardwareProperties"]["udid"] if phones else "")
 ')
 fi
-if [[ -z $device ]]; then
+if [ -z "$device" ]; then
   echo "没找到已配对的 iPhone：用数据线连上，或确认手机和 Mac 在同一 Wi-Fi 且已信任这台电脑。" >&2
   exit 1
 fi
 
-if [[ -n $(git -C "$ios_dir" status --porcelain -- . ../shared) ]]; then
+if [ -n "$(git -C "$ios_dir" status --porcelain -- . ../shared)" ]; then
   echo "提示：有未提交的改动，装上的版本号会带 +。"
 fi
 
