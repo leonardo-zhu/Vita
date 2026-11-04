@@ -769,3 +769,54 @@ export const ImportResponse = z.object({
   dailyEnergyKcal: z.record(LocalDate, z.number()),
 })
 export type ImportResponse = z.infer<typeof ImportResponse>
+
+// MARK: - 直接编辑（M4，PRD v2.0 §4.1）。App 的 Data 页与 Admin 都用；不走确认卡，校验、审计、健康同步与确认卡相同
+
+/** PATCH /v1/days/:date/records/:id：改时间（只能在同一天里）、餐次名或备注。没给的项不变，给 null 清空。 */
+export const RecordUpdateRequest = z.object({
+  expectedRevision: z.number().int(),
+  eventTime: EventTime.optional(),
+  mealLabel: z.string().max(40).nullish(),
+  note: z.string().max(500).nullish(),
+})
+export type RecordUpdateRequest = z.infer<typeof RecordUpdateRequest>
+
+/**
+ * PATCH /v1/days/:date/records/:id/items/:itemId：改一项的用量，按这一项自己的营养快照重算（食品后来出了新版本也不影响）。
+ * quantity 是新的用量；factor 是倍数（数值与用量一起乘，适合没有克数的“一份”）。两者给一个。
+ */
+export const ItemAmountRequest = z
+  .object({
+    expectedRevision: z.number().int(),
+    quantity: Quantity.nullish(),
+    factor: z.number().positive().max(20).nullish(),
+    originalAmountText: z.string().max(100).nullish(),
+  })
+  .refine((body) => Boolean(body.quantity) !== Boolean(body.factor), { message: 'quantity 与 factor 给且只给一个' })
+export type ItemAmountRequest = z.infer<typeof ItemAmountRequest>
+
+/** 记录编辑接口的响应：编辑后这一天的数据。删除整条记录、删除一项（DELETE，带 ?expectedRevision=）也返回它。 */
+export const DayEditResponse = DayResponse
+export type DayEditResponse = z.infer<typeof DayEditResponse>
+
+/** PATCH /v1/foods/:id：改名称、品牌、包装规格、备注。没给的项不变，给 null 清空。 */
+export const FoodProductUpdate = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  brandOrSupplier: z.string().max(80).nullish(),
+  package: Quantity.nullish(),
+  note: z.string().max(500).nullish(),
+})
+export type FoodProductUpdate = z.infer<typeof FoodProductUpdate>
+
+/** POST /v1/foods/:id/versions：手动改营养值，存为新版本并切换生效版本；旧版本保留，已有记录不变。 */
+export const FoodVersionRequest = z.object({
+  /** 编辑时看到的生效版本；期间被别处改过时返回 409 activeVersionChanged。 */
+  expectedActiveVersionId: z.uuid().nullable(),
+  basis: FoodVersionBasis,
+  sourceNote: z.string().max(200).nullish(),
+})
+export type FoodVersionRequest = z.infer<typeof FoodVersionRequest>
+
+/** GET / PATCH /v1/foods/:id 与 POST /v1/foods/:id/versions。DELETE /v1/foods/:id 返回 204。 */
+export const FoodProductResponse = z.object({ product: FoodProduct })
+export type FoodProductResponse = z.infer<typeof FoodProductResponse>

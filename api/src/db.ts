@@ -211,6 +211,8 @@ const MIGRATIONS = [
   `-- 一条消息可以带多张标签照片（批量录入）：按顺序存 JSON 数组。card_ref 仍记第一张，只认一张的旧客户端照样显示
   ALTER TABLE chat_messages ADD COLUMN label_scan_ids TEXT;
   ALTER TABLE chat_traces ADD COLUMN label_scan_ids TEXT;`,
+  `-- 删除个人食品（M4）：只做标记，不再出现在食品库与模型的上下文里；已有记录的营养快照与来源名不受影响
+  ALTER TABLE food_products ADD COLUMN deleted_at TEXT;`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

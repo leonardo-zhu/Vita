@@ -54,7 +54,7 @@ export class FoodService {
   /** 按名称排序。 */
   products(): FoodProduct[] {
     const { database } = this.context
-    const products = database.prepare('SELECT * FROM food_products ORDER BY name').all() as unknown as ProductRow[]
+    const products = database.prepare('SELECT * FROM food_products WHERE deleted_at IS NULL ORDER BY name').all() as unknown as ProductRow[]
     const versions = database.prepare('SELECT * FROM food_versions ORDER BY created_at DESC, rowid DESC').all() as unknown as VersionRow[]
     return products.map((product) => toProduct(product, versions.filter((version) => version.product_id === product.id)))
   }
@@ -83,6 +83,83 @@ export class FoodService {
     } catch (error) {
       const code = error instanceof ServiceError ? error.auditCode : 'food.persistence'
       audit(database, { actor: options.actor, action, result: 'failure', errorCode: code, requestId: options.requestId, at: now() })
+      throw error
+    }
+  }
+
+  // MARK: - 用户直接编辑（PRD v2.0 §4.1）。营养值不能就地改：改营养存为新版本，旧版本保留，已有记录的快照不变
+
+  product(id: string): FoodProduct {
+    const row = this.context.database.prepare('SELECT * FROM food_products WHERE id = ? AND deleted_at IS NULL').get(id) as ProductRow | undefined
+    if (!row) throw new ServiceError('food', 'productNotFound')
+    const versions = this.context.database
+      .prepare('SELECT * FROM food_versions WHERE product_id = ? ORDER BY created_at DESC, rowid DESC')
+      .all(id) as unknown as VersionRow[]
+    return toProduct(row, versions)
+  }
+
+  /** 改名称、品牌、包装规格、备注；没给的项不变。 */
+  updateProduct(
+    id: string,
+    changes: { name?: string; brandOrSupplier?: string | null; package?: FoodProduct['package']; note?: string | null },
+    origin: WriteOrigin,
+  ): FoodProduct {
+    const { database, now } = this.context
+    return this.write('food.edit', id, origin, () => {
+      const current = this.product(id)
+      const name = changes.name === undefined ? current.name : changes.name.trim()
+      if (!name) throw new ServiceError('food', 'emptyName')
+      const pack = changes.package === undefined ? current.package : changes.package
+      if (pack && !(pack.amount > 0)) throw new ServiceError('food', 'invalidPackage')
+      const brand = changes.brandOrSupplier === undefined ? current.brandOrSupplier : changes.brandOrSupplier?.trim() || null
+      const note = changes.note === undefined ? current.note : changes.note?.trim() || null
+      database
+        .prepare('UPDATE food_products SET name = ?, brand_or_supplier = ?, package = ?, note = ?, updated_at = ? WHERE id = ?')
+        .run(name, brand, pack ? JSON.stringify(pack) : null, note, now().toISOString(), id)
+      return this.product(id)
+    })
+  }
+
+  /** 手动改营养值：存为新版本（manualEntry）并切换生效版本。expectedActiveVersionId 防止和别处的修改互相覆盖。 */
+  addManualVersion(
+    id: string,
+    expectedActiveVersionId: string | null,
+    basis: FoodVersionBasis,
+    sourceNote: string | null,
+    origin: WriteOrigin,
+  ): FoodProduct {
+    this.apply(
+      {
+        kind: 'addVersion',
+        productId: id,
+        expectedActiveVersionId,
+        version: { basis, sourceKind: 'manualEntry', labelScanId: null, derivedFromReferenceId: null, sourceNote: sourceNote?.trim() || '手动修改' },
+      },
+      origin,
+    )
+    return this.product(id)
+  }
+
+  /** 删除只做标记：不再出现在食品库和模型的上下文里，也不能再用来记新的；已有记录照旧。 */
+  deleteProduct(id: string, origin: WriteOrigin) {
+    const { database, now } = this.context
+    this.write('food.delete', id, origin, () => {
+      this.product(id)
+      database.prepare('UPDATE food_products SET deleted_at = ?, updated_at = ? WHERE id = ?').run(now().toISOString(), now().toISOString(), id)
+    })
+  }
+
+  private write<T>(action: string, id: string, origin: WriteOrigin, body: () => T): T {
+    const { database, now } = this.context
+    try {
+      return transaction(database, () => {
+        const result = body()
+        audit(database, { actor: origin.actor, action, targetId: id, result: 'success', requestId: origin.requestId, at: now() })
+        return result
+      })
+    } catch (error) {
+      const code = error instanceof ServiceError ? error.auditCode : 'food.persistence'
+      audit(database, { actor: origin.actor, action, targetId: id, result: 'failure', errorCode: code, requestId: origin.requestId, at: now() })
       throw error
     }
   }
@@ -118,7 +195,7 @@ export class FoodService {
       }
 
       case 'addVersion': {
-        const product = database.prepare('SELECT * FROM food_products WHERE id = ?').get(change.productId) as ProductRow | undefined
+        const product = database.prepare('SELECT * FROM food_products WHERE id = ? AND deleted_at IS NULL').get(change.productId) as ProductRow | undefined
         if (!product) throw new ServiceError('food', 'productNotFound')
         if (product.active_version_id !== change.expectedActiveVersionId) throw new ServiceError('food', 'activeVersionChanged')
         this.validate(change.version)

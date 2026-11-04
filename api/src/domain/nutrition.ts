@@ -109,3 +109,12 @@ export function estimatedSnapshot(values: NutrientValues, estimateBasis: string,
     values,
   }
 }
+
+/** 按倍数缩放营养值（改份数时用），十进制计算。 */
+export function scaleNutrients(values: NutrientValues, factor: number): NutrientValues {
+  return Object.fromEntries(NUTRIENTS.map((key) => [key, toNumber(new Big(values[key]).times(factor))])) as NutrientValues
+}
+
+export function scaleQuantity(quantity: Quantity, factor: number): Quantity {
+  return { amount: toNumber(new Big(quantity.amount).times(factor)), unit: quantity.unit }
+}

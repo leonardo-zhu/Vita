@@ -6,7 +6,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
-import type { DayItem, NutritionSnapshot, Quantity, RecordChangePreview } from '@vita/contract'
+import type { DayItem, EventTime, NutritionSnapshot, Quantity, RecordChangePreview } from '@vita/contract'
 
 import { audit, recordHealthChange, transaction } from '../db.ts'
 import { recordAuditAction, type ItemDraft, type RecordChange } from '../domain/changes.ts'
@@ -16,7 +16,10 @@ import {
   estimatedSnapshot,
   isValidNutrients,
   NutritionCalculationError,
+  scaleNutrients,
+  scaleQuantity,
   sumNutrients,
+  UnitNormalizationError,
 } from '../domain/nutrition.ts'
 import { ServiceError, type ServiceContext, type WriteOrigin } from './context.ts'
 import { sourceLabel } from './labels.ts'
@@ -110,6 +113,134 @@ export class RecordService {
       audit(database, { actor: options.actor, action, targetId: target, result: 'failure', errorCode: code, requestId: options.requestId, at: now() })
       throw error
     }
+  }
+
+  // MARK: - 用户直接编辑（App 的 Data 页与 Admin，PRD v2.0 §4.1）。不走确认卡，但校验、revision、审计、健康同步都一样
+
+  /** 改一条记录的时间、餐次名或备注。时间只能在同一天里改，换日期要删了重记。 */
+  updateRecord(
+    date: string,
+    expectedRevision: number,
+    recordId: string,
+    changes: { eventTime?: EventTime; mealLabel?: string | null; note?: string | null },
+    origin: WriteOrigin,
+  ) {
+    this.edit('record.edit', recordId, origin, () => {
+      const record = this.locate(recordId, date, expectedRevision)
+      const eventTime = changes.eventTime ?? (JSON.parse(record.event_time) as EventTime)
+      if (eventTime.localDate !== date) throw new ServiceError('record', 'eventTimeOutsideSession')
+      const at = this.now()
+      this.context.database
+        .prepare('UPDATE consumption_records SET event_time = ?, sort_time = ?, meal_label = ?, note = ? WHERE id = ?')
+        .run(
+          JSON.stringify(eventTime),
+          representativeTimestamp(eventTime).toISOString(),
+          changes.mealLabel === undefined ? record.meal_label : changes.mealLabel?.trim() || null,
+          changes.note === undefined ? this.noteOf(recordId) : changes.note?.trim() || null,
+          recordId,
+        )
+      this.touch(recordId, at)
+      this.bump(date, at)
+    })
+  }
+
+  /**
+   * 改一项的用量。按这一项自己的营养快照重算，不重新查食品库或参考库：食品后来出了新版本，这一项也照旧按记录时的基准算。
+   * 给新用量时换算到基准单位（AI 估算按新旧用量的比例缩放）；给倍数时数值与用量一起乘（适合没有克数的“一份”）。
+   */
+  rescaleItem(
+    date: string,
+    expectedRevision: number,
+    recordId: string,
+    itemId: string,
+    input: { quantity?: Quantity | null; factor?: number | null; originalAmountText?: string | null },
+    origin: WriteOrigin,
+  ) {
+    this.edit('record.editAmount', recordId, origin, () => {
+      this.locate(recordId, date, expectedRevision)
+      const row = this.context.database
+        .prepare('SELECT quantity, original_amount_text, amount_source, snapshot FROM consumption_items WHERE id = ? AND record_id = ?')
+        .get(itemId, recordId) as { quantity: string | null; original_amount_text: string; amount_source: string; snapshot: string } | undefined
+      if (!row) throw new ServiceError('record', 'itemNotFound')
+      const snapshot = JSON.parse(row.snapshot) as NutritionSnapshot
+      const current = row.quantity ? (JSON.parse(row.quantity) as Quantity) : null
+      let next: { quantity: Quantity | null; snapshot: NutritionSnapshot; text: string; amountSource: string }
+      try {
+        if (input.quantity) {
+          const quantity = input.quantity
+          if (!(quantity.amount > 0)) throw new Rejection('nonPositiveQuantity')
+          const text = input.originalAmountText?.trim() || `${quantity.amount} ${quantity.unit}`
+          if (snapshot.nutritionSource !== 'aiEstimated' && snapshot.basisQuantity && snapshot.basisNutrients && snapshot.sourceRef) {
+            const density = snapshot.nutritionSource === 'referenceFood' ? (this.context.reference.food(snapshot.sourceRef)?.densityGPerMl ?? null) : null
+            const recomputed = computedSnapshot({
+              source: snapshot.nutritionSource,
+              sourceRef: snapshot.sourceRef,
+              basisQuantity: snapshot.basisQuantity,
+              basisNutrients: snapshot.basisNutrients,
+              quantity,
+              densityGPerMl: density,
+            })
+            next = { quantity, snapshot: recomputed, text, amountSource: 'userStated' }
+          } else {
+            // AI 估算没有基准，只能按原来的用量等比缩放；原来就没有克数时改用倍数。
+            if (!current || current.unit !== quantity.unit || !(current.amount > 0)) throw new ServiceError('record', 'cannotRescale')
+            const factor = quantity.amount / current.amount
+            next = {
+              quantity,
+              snapshot: { ...snapshot, quantityUsed: quantity, values: scaleNutrients(snapshot.values, factor) },
+              text,
+              amountSource: 'userStated',
+            }
+          }
+        } else if (input.factor) {
+          const factor = input.factor
+          if (!(factor > 0) || factor > 20) throw new ServiceError('record', 'invalidFactor')
+          next = {
+            quantity: current ? scaleQuantity(current, factor) : null,
+            snapshot: {
+              ...snapshot,
+              quantityUsed: snapshot.quantityUsed ? scaleQuantity(snapshot.quantityUsed, factor) : null,
+              values: scaleNutrients(snapshot.values, factor),
+            },
+            text: input.originalAmountText?.trim() || `${row.original_amount_text} ×${factor}`,
+            amountSource: row.amount_source,
+          }
+        } else {
+          throw new ServiceError('record', 'nothingToChange')
+        }
+      } catch (error) {
+        if (error instanceof Rejection) throw new ServiceError('record', 'invalidItem', { reason: error.reason }, error.reason)
+        if (error instanceof NutritionCalculationError) throw new ServiceError('record', 'invalidItem', { reason: error.code }, error.code)
+        if (error instanceof UnitNormalizationError) throw new ServiceError('record', 'invalidItem', { reason: 'unitMismatch' }, 'unitMismatch')
+        throw error
+      }
+      const at = this.now()
+      this.context.database
+        .prepare('UPDATE consumption_items SET quantity = ?, original_amount_text = ?, amount_source = ?, snapshot = ?, updated_at = ? WHERE id = ?')
+        .run(next.quantity ? JSON.stringify(next.quantity) : null, next.text, next.amountSource, JSON.stringify(next.snapshot), at, itemId)
+      this.touch(recordId, at)
+      this.bump(date, at)
+    })
+  }
+
+  /** 编辑共用的事务：成功登记健康变更与审计，失败记失败审计。 */
+  private edit(action: string, recordId: string, origin: WriteOrigin, body: () => void) {
+    const { database, now } = this.context
+    try {
+      transaction(database, () => {
+        body()
+        recordHealthChange(database, 'record', recordId, now())
+        audit(database, { actor: origin.actor, action, targetId: recordId, result: 'success', requestId: origin.requestId, at: now() })
+      })
+    } catch (error) {
+      const code = error instanceof ServiceError ? error.auditCode : 'record.persistence'
+      audit(database, { actor: origin.actor, action, targetId: recordId, result: 'failure', errorCode: code, requestId: origin.requestId, at: now() })
+      throw error
+    }
+  }
+
+  private noteOf(recordId: string): string | null {
+    return (this.context.database.prepare('SELECT note FROM consumption_records WHERE id = ?').get(recordId) as { note: string | null } | undefined)?.note ?? null
   }
 
   // MARK: - 校验
@@ -356,10 +487,13 @@ export class RecordService {
           const quantity = requireQuantity(draft.quantity)
           const version = this.context.database
             .prepare(
-              `SELECT v.product_id, v.basis, v.retired_at, p.package FROM food_versions v JOIN food_products p ON p.id = v.product_id WHERE v.id = ?`,
+              `SELECT v.product_id, v.basis, v.retired_at, p.package, p.deleted_at FROM food_versions v JOIN food_products p ON p.id = v.product_id WHERE v.id = ?`,
             )
-            .get(nutrition.foodVersionId) as { product_id: string; basis: string; retired_at: string | null; package: string | null } | undefined
-          if (!version) throw new Rejection('unknownFoodVersion')
+            .get(nutrition.foodVersionId) as
+            | { product_id: string; basis: string; retired_at: string | null; package: string | null; deleted_at: string | null }
+            | undefined
+          // 删除了的食品不能再用来记新的。
+          if (!version || version.deleted_at) throw new Rejection('unknownFoodVersion')
           if (version.retired_at) throw new Rejection('retiredFoodVersion')
           if (draft.amountSource === 'packageConversion') {
             const pack = version.package ? (JSON.parse(version.package) as Quantity) : null

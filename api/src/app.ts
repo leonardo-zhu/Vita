@@ -7,6 +7,11 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 
 import {
+  FoodProductUpdate,
+  FoodVersionRequest,
+  ItemAmountRequest,
+  RecordUpdateRequest,
+  type FoodProductResponse,
   type ActivePendingResponse,
   ActivityUpload,
   type ChatEvent,
@@ -85,7 +90,19 @@ const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
   invalidMetrics: [422, '读数超出合理范围，没有保存。'],
   expired: [409, '这张卡片已过期，没有写入任何数据。'],
   notActive: [409, '这张卡片已经结束了。'],
-  revisionConflict: [409, '当天数据在提案后有变化，这张卡片已作废，请重新提出。'],
+  revisionConflict: [409, '当天的数据刚有变化，请刷新后再试；确认卡会因此作废，需要重新提出。'],
+  recordNotFound: [404, '没有这条记录。'],
+  recordNotInSession: [404, '这条记录不在这一天。'],
+  itemNotFound: [404, '这条记录里没有这一项。'],
+  emptyRecord: [422, '这是这条记录的最后一项，要删就删除整条记录。'],
+  cannotRescale: [422, '这一项没有记克数，只能按份数改。'],
+  invalidFactor: [422, '份数应在 0 到 20 之间。'],
+  nothingToChange: [422, '没有要改的内容。'],
+  eventTimeOutsideSession: [422, '时间只能在同一天里改；换日期请删除后在那一天重记。'],
+  productNotFound: [404, '没有这个食品（可能已删除）。'],
+  activeVersionChanged: [409, '这个食品刚被改过，请刷新后再改。'],
+  emptyName: [422, '名称不能为空。'],
+  invalidPackage: [422, '包装规格要大于 0。'],
   payloadTampered: [409, '这张卡片的内容校验不通过，已作废。'],
 }
 
@@ -174,6 +191,64 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
     const query = c.req.query('q')
     return c.json({ products: query ? services.foods.search(query) : services.foods.products() } satisfies FoodsResponse)
   })
+  // MARK: - 直接编辑（M4）。设备与 Admin 都能用，审计记下是谁
+
+  const expectedRevision = (c: Context) => {
+    const raw = c.req.query('expectedRevision')
+    const value = raw === undefined ? NaN : Number(raw)
+    return Number.isInteger(value) ? value : null
+  }
+  app.patch('/v1/days/:date/records/:id', async (c) => {
+    const date = c.req.param('date')
+    if (!isLocalDate(date)) return invalidDate(c)
+    const body = await parseBody(c, RecordUpdateRequest)
+    if (!body) return invalidBody(c, '时间、餐次名或备注')
+    services.records.updateRecord(date, body.expectedRevision, c.req.param('id'), body, { actor: actorName(c.get('actor')) })
+    return c.json(services.days.day(date) satisfies DayResponse)
+  })
+  app.patch('/v1/days/:date/records/:id/items/:itemId', async (c) => {
+    const date = c.req.param('date')
+    if (!isLocalDate(date)) return invalidDate(c)
+    const body = await parseBody(c, ItemAmountRequest)
+    if (!body) return invalidBody(c, '用量或份数（给且只给一个）')
+    services.records.rescaleItem(date, body.expectedRevision, c.req.param('id'), c.req.param('itemId'), body, { actor: actorName(c.get('actor')) })
+    return c.json(services.days.day(date) satisfies DayResponse)
+  })
+  app.delete('/v1/days/:date/records/:id/items/:itemId', (c) => {
+    const date = c.req.param('date')
+    if (!isLocalDate(date)) return invalidDate(c)
+    const revision = expectedRevision(c)
+    if (revision === null) return invalidBody(c, 'expectedRevision')
+    services.records.apply({ kind: 'removeItem', recordId: c.req.param('id'), itemId: c.req.param('itemId') }, date, revision, { actor: actorName(c.get('actor')) })
+    return c.json(services.days.day(date) satisfies DayResponse)
+  })
+  app.delete('/v1/days/:date/records/:id', (c) => {
+    const date = c.req.param('date')
+    if (!isLocalDate(date)) return invalidDate(c)
+    const revision = expectedRevision(c)
+    if (revision === null) return invalidBody(c, 'expectedRevision')
+    services.records.apply({ kind: 'deleteRecord', recordId: c.req.param('id') }, date, revision, { actor: actorName(c.get('actor')) })
+    return c.json(services.days.day(date) satisfies DayResponse)
+  })
+  app.get('/v1/foods/:id', (c) => c.json({ product: services.foods.product(c.req.param('id')) } satisfies FoodProductResponse))
+  app.patch('/v1/foods/:id', async (c) => {
+    const body = await parseBody(c, FoodProductUpdate)
+    if (!body) return invalidBody(c, '名称、品牌、包装或备注')
+    return c.json({ product: services.foods.updateProduct(c.req.param('id'), body, { actor: actorName(c.get('actor')) }) } satisfies FoodProductResponse)
+  })
+  app.post('/v1/foods/:id/versions', async (c) => {
+    const body = await parseBody(c, FoodVersionRequest)
+    if (!body) return invalidBody(c, '营养基准')
+    const product = services.foods.addManualVersion(c.req.param('id'), body.expectedActiveVersionId, body.basis, body.sourceNote ?? null, {
+      actor: actorName(c.get('actor')),
+    })
+    return c.json({ product } satisfies FoodProductResponse, 201)
+  })
+  app.delete('/v1/foods/:id', (c) => {
+    services.foods.deleteProduct(c.req.param('id'), { actor: actorName(c.get('actor')) })
+    return c.body(null, 204)
+  })
+
   app.get('/v1/reference-foods', (c) => c.json(services.context.reference.browse(c.req.query('q') ?? '') satisfies ReferenceSearchResponse))
 
   // MARK: - 健康数据：手机读 Apple 健康后上传
