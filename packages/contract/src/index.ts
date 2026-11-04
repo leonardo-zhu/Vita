@@ -632,3 +632,130 @@ export const ChatEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), code: z.string(), message: z.string() }),
 ])
 export type ChatEvent = z.infer<typeof ChatEvent>
+
+// MARK: - Apple 健康同步（架构设计 §9）。手机按游标拉取变更，按最新状态覆盖健康里的那份
+
+/** 一项营养的 Sample：每项一条，值为计入汇总的 Item 之和，为 0 的不写。 */
+export const DietarySample = z.object({
+  nutrient: z.enum(['energyKcal', 'proteinG', 'fatG', 'carbohydrateG']),
+  value: z.number(),
+  /** 代表性时刻：餐段取代表性时间、仅日期取 12:00，metadata 里注明。 */
+  date: z.iso.datetime(),
+  metadata: z.record(z.string(), z.string()),
+})
+export type DietarySample = z.infer<typeof DietarySample>
+
+/** 一次称重写进健康的体重、体脂率与去脂体重；没有体脂率时只写体重。 */
+export const BodySample = z.object({
+  bodyMassKg: z.number(),
+  bodyFatFraction: z.number().nullable(),
+  leanBodyMassKg: z.number().nullable(),
+  date: z.iso.datetime(),
+})
+export type BodySample = z.infer<typeof BodySample>
+
+/**
+ * 一个对象的最新状态。deleted 为 true 时把健康里的那份删掉；否则先删旧的再写这些 Sample。
+ * syncVersion 单调递增，可作为 HKMetadataKeySyncVersion；同一对象的标识是 `vita:<entity>:<id>`。
+ */
+export const HealthChange = z.discriminatedUnion('entity', [
+  z.object({ seq: z.number().int(), entity: z.literal('record'), id: z.uuid(), deleted: z.boolean(), syncVersion: z.number().int(), samples: z.array(DietarySample) }),
+  z.object({ seq: z.number().int(), entity: z.literal('weighing'), id: z.uuid(), deleted: z.boolean(), syncVersion: z.number().int(), body: BodySample.nullable() }),
+])
+export type HealthChange = z.infer<typeof HealthChange>
+
+/** GET /v1/health-sync/changes?after=<cursor>：同一对象只给最新一条。处理完后把 cursor 存下，下次从它之后拉；hasMore 为 true 时接着拉。 */
+export const HealthChangesResponse = z.object({
+  changes: z.array(HealthChange),
+  cursor: z.number().int(),
+  hasMore: z.boolean(),
+})
+export type HealthChangesResponse = z.infer<typeof HealthChangesResponse>
+
+// MARK: - 从 1.0 迁移（架构设计 §13）。手机把本机数据整理成这个格式，服务端只在业务库为空时接受
+
+export const ImportBundle = z.object({
+  formatVersion: z.literal(1),
+  exportedAt: z.iso.datetime(),
+  sessions: z.array(z.object({ localDate: LocalDate, timeZone: z.string(), revision: z.number().int(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime() })),
+  records: z.array(
+    z.object({
+      id: z.uuid(),
+      sessionDate: LocalDate,
+      eventTime: EventTime,
+      mealLabel: z.string().nullable(),
+      note: z.string().nullable(),
+      revision: z.number().int(),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+      items: z.array(
+        z.object({
+          id: z.uuid(),
+          position: z.number().int(),
+          displayName: z.string(),
+          groupName: z.string().nullable(),
+          originalAmountText: z.string(),
+          quantity: Quantity.nullable(),
+          amountSource: AmountSource,
+          snapshot: NutritionSnapshot,
+          includeInSummary: z.boolean(),
+          foodProductId: z.uuid().nullable(),
+          foodVersionId: z.uuid().nullable(),
+          referenceFoodId: z.string().nullable(),
+          createdAt: z.iso.datetime(),
+          updatedAt: z.iso.datetime(),
+        }),
+      ),
+    }),
+  ),
+  products: z.array(
+    z.object({
+      id: z.uuid(),
+      name: z.string(),
+      brandOrSupplier: z.string().nullable(),
+      package: Quantity.nullable(),
+      note: z.string().nullable(),
+      activeVersionId: z.uuid().nullable(),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+      versions: z.array(FoodVersion),
+    }),
+  ),
+  goals: z.array(Goal.extend({ evidence: z.unknown().nullable(), createdAt: z.iso.datetime() })),
+  /** 1.0 的确认卡不迁移，指向它们的 cardRef 由手机清掉。 */
+  messages: z.array(ChatMessage.extend({ sessionDate: LocalDate })),
+  labelScans: z.array(z.object({ id: z.uuid(), createdAt: z.iso.datetime(), contentType: z.string(), dataBase64: z.string() })),
+  weighings: z.array(
+    z.object({
+      id: z.uuid(),
+      measuredAt: z.iso.datetime(),
+      weightKg: z.number(),
+      impedance: Impedance.nullable(),
+      source: WeighingSource,
+      timeReliable: z.boolean(),
+      profile: z.object({ heightCm: z.number().nullable(), ageYears: z.number().int().nullable(), sex: BiologicalSex.nullable() }),
+      scaleBodyFatFraction: z.number().nullable(),
+      createdAt: z.iso.datetime(),
+    }),
+  ),
+  manualMetrics: z.object({ metrics: ManualBodyMetrics, enteredAt: z.iso.datetime() }).nullable(),
+})
+export type ImportBundle = z.infer<typeof ImportBundle>
+
+/** POST /v1/import：导入后各表条数与每天的能量合计，手机拿来和本机对比，一致才切换。 */
+export const ImportResponse = z.object({
+  counts: z.object({
+    sessions: z.number().int(),
+    records: z.number().int(),
+    items: z.number().int(),
+    products: z.number().int(),
+    versions: z.number().int(),
+    goals: z.number().int(),
+    messages: z.number().int(),
+    labelScans: z.number().int(),
+    weighings: z.number().int(),
+  }),
+  /** 每天计入汇总的能量合计（千卡）。 */
+  dailyEnergyKcal: z.record(LocalDate, z.number()),
+})
+export type ImportResponse = z.infer<typeof ImportResponse>

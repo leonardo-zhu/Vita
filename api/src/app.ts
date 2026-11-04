@@ -20,9 +20,12 @@ import {
   GoalRecommendationRequest,
   type GoalRecommendationResponse,
   type GoalResponse,
+  type HealthChangesResponse,
   type HealthResponse,
   type HealthSnapshot,
   HealthUpload,
+  ImportBundle,
+  type ImportResponse,
   type LabelScanResponse,
   ManualBodyMetrics,
   type MessagesResponse,
@@ -74,6 +77,8 @@ const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
   notConfirmed: [409, '这张卡片还没有确认。'],
   noFollowUp: [409, '这张卡片没有要接着做的事。'],
   alreadyContinued: [409, '这张卡片已经接着做过了。'],
+  notEmpty: [409, '服务端已经有数据了，只能导入到空库。'],
+  brokenReference: [422, '导入数据里有对不上的引用，什么都没有写入。'],
   unsupportedImage: [415, '只支持 JPEG、PNG 或 HEIC 照片。'],
   imageTooLarge: [413, '照片太大了，请压缩后再传。'],
   invalidMetrics: [422, '读数超出合理范围，没有保存。'],
@@ -196,6 +201,20 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
   app.get('/v1/health/snapshot', (c) => {
     const date = queryDate(c)
     return date ? c.json(services.health.snapshot(date) satisfies HealthSnapshot) : invalidDate(c)
+  })
+
+  /** Apple 健康同步：手机拉取 after 之后的变更，处理完把 cursor 存下。 */
+  app.get('/v1/health-sync/changes', (c) => {
+    const after = Number(c.req.query('after') ?? 0)
+    if (!Number.isInteger(after) || after < 0) return invalidBody(c, 'after 应为非负整数')
+    return c.json(services.healthSync.changes(after) satisfies HealthChangesResponse)
+  })
+
+  /** 从 1.0 迁移：只在业务库为空时接受，整体一个事务。 */
+  app.post('/v1/import', async (c) => {
+    const body = await parseBody(c, ImportBundle)
+    if (!body) return invalidBody(c, '导入数据的格式')
+    return c.json(services.importer.run(body, { actor: actorName(c.get('actor')) }) satisfies ImportResponse, 201)
   })
 
   // MARK: - 目标

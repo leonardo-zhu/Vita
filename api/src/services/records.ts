@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { DayItem, NutritionSnapshot, Quantity, RecordChangePreview } from '@vita/contract'
 
-import { audit, transaction } from '../db.ts'
+import { audit, recordHealthChange, transaction } from '../db.ts'
 import { recordAuditAction, type ItemDraft, type RecordChange } from '../domain/changes.ts'
 import { representativeTimestamp } from '../domain/eventTime.ts'
 import {
@@ -100,6 +100,7 @@ export class RecordService {
     try {
       return transaction(database, () => {
         const recordId = this.prepare(change, date, expectedRevision).commit()
+        recordHealthChange(database, 'record', recordId, now())
         options.alongside?.(recordId)
         audit(database, { actor: options.actor, action, targetId: recordId, result: 'success', requestId: options.requestId, at: now() })
         return recordId

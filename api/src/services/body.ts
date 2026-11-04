@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util'
 
 import type { BodyFatCalibration, BodyFatModel, Weighing, WeighingUpload } from '@vita/contract'
 
-import { audit, transaction } from '../db.ts'
+import { audit, recordHealthChange, transaction } from '../db.ts'
 import { bmiOf, bodyMetrics, bodyType, estimateBodyFat, fitBodyFat, isUsableModel, predictBodyFat, type CalibrationSample } from '../domain/body.ts'
 import { ageOn } from '../domain/recommendation.ts'
 import { localDateOf } from '../domain/time.ts'
@@ -79,7 +79,8 @@ export class BodyService {
           at.toISOString(),
         )
       const weighing = this.toWeighing(this.row(upload.id)!, this.appliedModel())
-      if (!upload.appleHealthWritable) this.health.recordWeighingAsManual(weighing.weightKg, weighing.bodyFat?.value ?? null, measuredAt)
+      if (upload.appleHealthWritable) recordHealthChange(database, 'weighing', upload.id, at)
+      else this.health.recordWeighingAsManual(weighing.weightKg, weighing.bodyFat?.value ?? null, measuredAt)
       audit(database, { actor: origin.actor, action: 'body.weighing', targetId: upload.id, result: 'success', at })
       return weighing
     })
@@ -123,7 +124,12 @@ export class BodyService {
       audit(database, { actor: origin.actor, action: 'body.scaleReading', targetId: id, result: 'success', at: now() })
     })
     const after = this.appliedModel()
-    return { weighing: this.get(id), calibrationChanged: !isDeepStrictEqual(before, after) }
+    const calibrationChanged = !isDeepStrictEqual(before, after)
+    // 体脂率变了的称重都要重写健康里的那份：公式变了就是全部，否则只有这一次。
+    transaction(database, () => {
+      for (const target of calibrationChanged ? this.rows().map((row) => row.id) : [id]) recordHealthChange(database, 'weighing', target, now())
+    })
+    return { weighing: this.get(id), calibrationChanged }
   }
 
   /** 删除一次称重。Apple 健康里的那份由手机删除。 */
@@ -132,6 +138,7 @@ export class BodyService {
     if (!this.row(id)) throw new ServiceError('body', 'weighingNotFound')
     transaction(database, () => {
       database.prepare('DELETE FROM scale_weighings WHERE id = ?').run(id)
+      recordHealthChange(database, 'weighing', id, now())
       audit(database, { actor: origin.actor, action: 'body.weighing.delete', targetId: id, result: 'success', at: now() })
     })
   }

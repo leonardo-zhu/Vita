@@ -8,6 +8,8 @@ import { DayService } from './day.ts'
 import { FoodService } from './foods.ts'
 import { GoalService } from './goals.ts'
 import { HealthService } from './health.ts'
+import { HealthSyncService } from './healthSync.ts'
+import { ImportService } from './importer.ts'
 import { PendingService } from './pending.ts'
 import { RecordService } from './records.ts'
 
@@ -22,6 +24,8 @@ export interface Services {
   body: BodyService
   chat: ChatService
   labels: LabelService
+  healthSync: HealthSyncService
+  importer: ImportService
 }
 
 /** `filesDir`：标签照片等文件的目录，默认数据目录下的 files/。 */
@@ -30,15 +34,19 @@ export function createServices(context: ServiceContext, filesDir = path.join(dat
   const foods = new FoodService(context)
   const goals = new GoalService(context)
   const health = new HealthService(context)
+  const days = new DayService(context, goals, health)
+  const body = new BodyService(context, health)
   return {
     context,
     records,
     foods,
     pending: new PendingService(context, records, foods),
-    days: new DayService(context, goals, health),
+    days,
     goals,
     health,
-    body: new BodyService(context, health),
+    body,
+    healthSync: new HealthSyncService(context, days, body),
+    importer: new ImportService(context, filesDir, days),
     chat: new ChatService(context),
     labels: new LabelService(context, filesDir),
   }

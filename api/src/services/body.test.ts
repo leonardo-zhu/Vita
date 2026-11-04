@@ -7,7 +7,8 @@ import type { BodyMetricKind, BodyRange, HealthUpload, WeighingUpload } from '@v
 import { describe, expect, it } from 'vitest'
 
 import { bodyMetrics, bodyType, estimateBodyFat, fitBodyFat, isUsableModel, predictBodyFat, rate, type CalibrationSample } from '../domain/body.ts'
-import { NOW, ORIGIN, setup } from '../test/support.ts'
+import { DAY, estimate, lunch, NOW, ORIGIN, setup } from '../test/support.ts'
+
 
 describe('体脂率估算', () => {
   it('与 AFUScale 的公式一致', () => {
@@ -214,5 +215,65 @@ describe('称重的保存', () => {
     services.body.delete(weighing.id, ORIGIN)
     expect(services.body.weighings()).toEqual([])
     expect(() => services.body.delete(weighing.id, ORIGIN)).toThrow('body.weighingNotFound')
+  })
+})
+
+describe('Apple 健康同步的变更流', () => {
+  it('饮食记录：新建、修改只给最新状态；删除后给 deleted；游标之后才有新的', () => {
+    const { services } = setup()
+    const recordId = services.records.apply({ kind: 'create', draft: lunch([estimate(500, 30)]) }, DAY, 0, ORIGIN)
+    services.records.apply({ kind: 'appendItems', recordId, items: [estimate(200, 10), estimate(100, 0, false)] }, DAY, 1, ORIGIN)
+
+    const first = services.healthSync.changes(0)
+    expect(first.changes).toHaveLength(1)
+    const [change] = first.changes
+    expect(change).toMatchObject({ entity: 'record', id: recordId, deleted: false })
+    if (change.entity !== 'record') throw new Error('expected record')
+    // 不计入汇总的不算；为 0 的营养不写。
+    expect(change.samples.map((s) => [s.nutrient, s.value])).toEqual([['energyKcal', 700], ['proteinG', 40]])
+    expect(change.samples[0].metadata).toMatchObject({ 'vita.recordID': recordId, 'vita.timePrecision': 'mealPeriod', 'vita.timeWasRepresentative': 'true', 'vita.mealPeriod': 'lunch' })
+    expect(change.samples[0].date).toBe('2026-10-30T04:30:00.000Z')
+
+    expect(services.healthSync.changes(first.cursor).changes).toEqual([])
+    services.records.apply({ kind: 'deleteRecord', recordId }, DAY, 2, ORIGIN)
+    const second = services.healthSync.changes(first.cursor)
+    expect(second.changes).toEqual([{ seq: second.cursor, entity: 'record', id: recordId, deleted: true, syncVersion: second.cursor, samples: [] }])
+    expect(second.cursor).toBeGreaterThan(first.cursor)
+  })
+
+  it('称重：能写健康时进变更流，体脂率与去脂体重一起给；不能写时不进', () => {
+    const { services } = setup()
+    services.health.upload(
+      {
+        bodyMassKg: { status: 'noData' },
+        heightCm: { status: 'value', value: 170, source: 'healthKit', measuredAt: null },
+        bodyFatFraction: { status: 'noData' },
+        dateOfBirth: { status: 'value', value: '1990-01-01', source: 'healthKit', measuredAt: null },
+        sex: { status: 'value', value: 'male', source: 'healthKit', measuredAt: null },
+        sleepHours: { status: 'noData' },
+        authorizationRequested: true,
+        writeDenied: false,
+      },
+      ORIGIN,
+    )
+    const weigh = (appleHealthWritable: boolean) =>
+      services.body.record({ id: randomUUID(), weightKg: 69.6, impedance: { a: 482, b: 432 }, source: 'live', recordedAt: null, appleHealthWritable }, ORIGIN)
+    const kept = weigh(true)
+    weigh(false)
+    const { changes } = services.healthSync.changes(0)
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({ entity: 'weighing', id: kept.id, deleted: false, body: { bodyMassKg: 69.6, bodyFatFraction: kept.bodyFat!.value } })
+    if (changes[0].entity === 'weighing') expect(changes[0].body?.leanBodyMassKg).toBeCloseTo(69.6 * (1 - kept.bodyFat!.value))
+  })
+
+  it('分页：hasMore 为 true 时接着拉', () => {
+    const { services } = setup()
+    for (let i = 0; i < 3; i++) services.records.apply({ kind: 'create', draft: lunch([estimate(100)]) }, DAY, i, ORIGIN)
+    const page = services.healthSync.changes(0, 2)
+    expect(page.changes).toHaveLength(2)
+    expect(page.hasMore).toBe(true)
+    const rest = services.healthSync.changes(page.cursor, 2)
+    expect(rest.changes).toHaveLength(1)
+    expect(rest.hasMore).toBe(false)
   })
 })

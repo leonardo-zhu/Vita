@@ -200,7 +200,20 @@ const MIGRATIONS = [
   ALTER TABLE label_scans ADD COLUMN content_type TEXT;
   -- 确认后的接续只跑一次
   ALTER TABLE pending_actions ADD COLUMN continued_at TEXT;`,
+  `-- Apple 健康同步的变更流（架构设计 §9）：饮食记录或称重每变一次记一条，手机按游标拉取，按最新状态覆盖健康里的那份
+  CREATE TABLE health_changes (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity      TEXT NOT NULL,             -- record / weighing
+    entity_id   TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX health_changes_entity ON health_changes(entity, entity_id);`,
 ]
+
+/** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */
+export function recordHealthChange(database: DatabaseSync, entity: 'record' | 'weighing', id: string, at: Date) {
+  database.prepare('INSERT INTO health_changes (entity, entity_id, created_at) VALUES (?, ?, ?)').run(entity, id, at.toISOString())
+}
 
 /**
  * 在一个事务里执行 `body`，失败时回滚并把错误抛出。不能嵌套：内层需要同一事务时由外层传入回调（见 records.apply 的 alongside）。
