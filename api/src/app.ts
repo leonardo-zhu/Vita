@@ -8,13 +8,20 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 
 import {
   type ActivePendingResponse,
+  ActivityUpload,
   CreateDeviceRequest,
   type CreateDeviceResponse,
   type DayResponse,
   type Device,
   type ErrorResponse,
   type FoodsResponse,
+  GoalRecommendationRequest,
+  type GoalRecommendationResponse,
+  type GoalResponse,
   type HealthResponse,
+  type HealthSnapshot,
+  HealthUpload,
+  ManualBodyMetrics,
   type ListDevicesResponse,
   type MeResponse,
   type PendingResponse,
@@ -26,6 +33,7 @@ import type { z } from 'zod'
 
 import { audit } from './db.ts'
 import { authenticateDevice, createDevice, listDevices, revokeDevice } from './devices.ts'
+import { recommendGoals } from './domain/recommendation.ts'
 import { isLocalDate } from './domain/time.ts'
 import { ServiceError } from './services/context.ts'
 import type { Services } from './services/index.ts'
@@ -137,6 +145,59 @@ export function createApp({ services, serviceToken, version }: AppOptions) {
     return c.json({ products: query ? services.foods.search(query) : services.foods.products() } satisfies FoodsResponse)
   })
   app.get('/v1/reference-foods', (c) => c.json(services.context.reference.browse(c.req.query('q') ?? '') satisfies ReferenceSearchResponse))
+
+  // MARK: - 健康数据：手机读 Apple 健康后上传
+
+  const invalidBody = (c: Context, what: string) => failure(c, 400, 'invalidRequest', `请求内容不合格：${what}。`)
+  const queryDate = (c: Context) => {
+    const date = c.req.query('date') ?? ''
+    return isLocalDate(date) ? date : null
+  }
+
+  app.put('/v1/health/snapshot', async (c) => {
+    const body = await parseBody(c, HealthUpload)
+    if (!body) return invalidBody(c, '身体数据')
+    services.health.upload(body, { actor: actorName(c.get('actor')) })
+    return c.body(null, 204)
+  })
+  app.put('/v1/health/activity', async (c) => {
+    const body = await parseBody(c, ActivityUpload)
+    if (!body) return invalidBody(c, '活动能量（1 到 31 天，每天不为负）')
+    services.health.uploadActivity(body, { actor: actorName(c.get('actor')) })
+    return c.body(null, 204)
+  })
+  app.put('/v1/health/manual-metrics', async (c) => {
+    const body = await parseBody(c, ManualBodyMetrics)
+    if (!body) return invalidBody(c, '身体数据超出合理范围')
+    return c.json(services.health.submitManualMetrics(body, { actor: actorName(c.get('actor')) }) satisfies ManualBodyMetrics)
+  })
+  app.get('/v1/health/snapshot', (c) => {
+    const date = queryDate(c)
+    return date ? c.json(services.health.snapshot(date) satisfies HealthSnapshot) : invalidDate(c)
+  })
+
+  // MARK: - 目标
+
+  app.get('/v1/goals/active', (c) => {
+    const date = queryDate(c)
+    return date ? c.json({ goal: services.goals.active(date) } satisfies GoalResponse) : invalidDate(c)
+  })
+  /** 只算不存：按服务端存的健康数据给出建议，客户端只选类型和调整。 */
+  app.post('/v1/goals/recommendation', async (c) => {
+    const body = await parseBody(c, GoalRecommendationRequest)
+    if (!body) return invalidBody(c, '日期、目标类型或调整幅度')
+    const result = recommendGoals(services.health.snapshot(body.date), body.date, now(), body.kind, body.adjustment)
+    return c.json(result satisfies GoalRecommendationResponse)
+  })
+  /** 用户确认建议后生成目标。服务端重新计算，不采用客户端给的数值。 */
+  app.post('/v1/goals/initial', async (c) => {
+    const body = await parseBody(c, GoalRecommendationRequest)
+    if (!body) return invalidBody(c, '日期、目标类型或调整幅度')
+    const result = recommendGoals(services.health.snapshot(body.date), body.date, now(), body.kind, body.adjustment)
+    if (result.status === 'missing') return failure(c, 422, 'missingMetrics', `缺少身体数据：${result.missing.join('、')}。`)
+    const goal = services.goals.commitInitial(result.recommendation, body.date, { actor: actorName(c.get('actor')) })
+    return c.json({ goal } satisfies GoalResponse, 201)
+  })
 
   // MARK: - 设备管理（只给 Admin）
 

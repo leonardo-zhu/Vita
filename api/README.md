@@ -31,8 +31,8 @@ curl -X POST http://127.0.0.1:3014/v1/admin/devices \
 | `src/app.ts` | 路由与鉴权：设备令牌给手机，服务令牌给 Admin，`/v1/admin/*` 只认服务令牌 |
 | `src/db.ts` | SQLite 打开与迁移（`user_version`，只追加）、审计 |
 | `src/devices.ts` | 设备令牌的签发、校验、吊销；库里只存 sha256 |
-| `src/domain/` | 纯领域逻辑：本地日期与时区、摄入时间、单位换算与营养计算（十进制）、参考库、变更的类型 |
-| `src/services/` | 记录、食品库、确认卡、一天的数据；每个写操作一个事务，成功失败都记审计（移植自 1.0 的同名 Swift 服务） |
+| `src/domain/` | 纯领域逻辑：本地日期与时区、摄入时间、单位换算与营养计算（十进制）、参考库、变更的类型、能量目标与目标建议 |
+| `src/services/` | 记录、食品库、确认卡、一天的数据、目标、健康数据；每个写操作一个事务，成功失败都记审计（移植自 1.0 的同名 Swift 服务） |
 | `src/test/` | 测试夹具：与 1.0 相同的日期、时刻、时区与小型参考库 |
 | `scripts/build.mjs` | esbuild 打包 |
 | `deploy/` | R4S 上的 compose 与 Caddy 配置 |

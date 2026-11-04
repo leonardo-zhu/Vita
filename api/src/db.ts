@@ -116,6 +116,35 @@ const MIGRATIONS = [
   );
   CREATE INDEX pending_actions_active ON pending_actions(session_date, status);
   ALTER TABLE audit_events ADD COLUMN request_id TEXT;`,
+  `-- 每日目标：只追加。某日生效的是 effective_from 不晚于该日的行中日期最晚、revision 最高的一行（TDD §3.2）
+  CREATE TABLE daily_goals (
+    id              TEXT PRIMARY KEY,
+    effective_from  TEXT NOT NULL,         -- YYYY-MM-DD
+    targets         TEXT NOT NULL,         -- GoalTargets JSON
+    energy_plan     TEXT,                  -- EnergyPlan JSON；没有时是固定能量目标
+    origin          TEXT NOT NULL,
+    evidence        TEXT,                  -- 生成依据（如 GoalRecommendation）JSON
+    revision        INTEGER NOT NULL UNIQUE,
+    created_at      TEXT NOT NULL
+  );
+  -- 手机上传的每日活动能量（Apple 健康）。今天的是截至上传时的累计
+  CREATE TABLE day_activity (
+    local_date   TEXT PRIMARY KEY,
+    active_kcal  REAL,                     -- 没有数据为 NULL
+    updated_at   TEXT NOT NULL
+  );
+  -- 手机最近一次上传的身体数据（HealthUpload JSON），只留一份
+  CREATE TABLE health_upload (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    data         TEXT NOT NULL,
+    uploaded_at  TEXT NOT NULL
+  );
+  -- 用户补录的身体数据，只留一份；只用于目标生成，不写回 Apple 健康
+  CREATE TABLE manual_body_metrics (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    data        TEXT NOT NULL,             -- ManualBodyMetrics JSON
+    entered_at  TEXT NOT NULL
+  );`,
 ]
 
 /**

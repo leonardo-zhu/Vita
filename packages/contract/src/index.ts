@@ -151,11 +151,89 @@ export const DayRecord = z.object({
 })
 export type DayRecord = z.infer<typeof DayRecord>
 
+// MARK: - 目标与能量（TDD §6.2、ADR-018）
+
+/** 每日目标值；未设的项为 null。 */
+export const GoalTargets = z.object({
+  energyKcal: z.number().positive().nullable(),
+  proteinG: z.number().positive().nullable(),
+  fatG: z.number().positive().nullable(),
+  carbohydrateG: z.number().positive().nullable(),
+})
+export type GoalTargets = z.infer<typeof GoalTargets>
+
+export const GoalKind = z.enum(['maintain', 'lose', 'gain'])
+export type GoalKind = z.infer<typeof GoalKind>
+
+/** 相对每日消耗的调整：比例（0.85 = 少吃 15%，0.5–1.5）或千卡（−400 = 每天少吃 400，−1500…+1500）。 */
+export const EnergyAdjustment = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('fraction'), value: z.number().min(0.5).max(1.5) }),
+  z.object({ type: z.literal('kcal'), value: z.number().min(-1500).max(1500) }),
+])
+export type EnergyAdjustment = z.infer<typeof EnergyAdjustment>
+
+/** 能量目标的规则：存规则而不是一个数，每天按当天活动算出目标。没有它的目标是固定能量目标。 */
+export const EnergyPlan = z.object({
+  kind: GoalKind,
+  adjustment: EnergyAdjustment,
+  bmrKcal: z.number(),
+  /** 设定时的平时活动（7 日日均）；读不到当天活动时用它。 */
+  baselineActivityKcal: z.number(),
+  /** 平时活动是否按 BMR × 0.375 估算。 */
+  baselineEstimated: z.boolean(),
+})
+export type EnergyPlan = z.infer<typeof EnergyPlan>
+
+export const GoalOrigin = z.enum(['initialRecommendation', 'explicitUserCommand', 'manualOnboarding'])
+export type GoalOrigin = z.infer<typeof GoalOrigin>
+
+export const Goal = z.object({
+  id: z.uuid(),
+  effectiveFrom: LocalDate,
+  targets: GoalTargets,
+  energyPlan: EnergyPlan.nullable(),
+  origin: GoalOrigin,
+  revision: z.number().int(),
+})
+export type Goal = z.infer<typeof Goal>
+
+/** 某天的能量目标与它的来历，供 Data 页解释数字为什么变了。 */
+export const EnergyTarget = z.object({
+  targetKcal: z.number(),
+  bmrKcal: z.number(),
+  baselineActivityKcal: z.number(),
+  /** 当天活动预估：今天是"已消耗 + 平时 × 剩余比例"，过去是全天实际。 */
+  projectedActivityKcal: z.number(),
+  /** 计入消耗的活动：超出平时的部分打了折。 */
+  countedActivityKcal: z.number(),
+  tdeeKcal: z.number(),
+  /** 目标相对消耗的调整（负数为缺口）。 */
+  adjustmentKcal: z.number(),
+  raisedToBMR: z.boolean(),
+  /** 没有当天的活动数据，按平时活动估算。 */
+  activityEstimated: z.boolean(),
+})
+export type EnergyTarget = z.infer<typeof EnergyTarget>
+
+/** 截至现在的热量收支：balance 为负表示缺口。 */
+export const EnergyBalance = z.object({
+  burnedKcal: z.number(),
+  consumedKcal: z.number(),
+  balanceKcal: z.number(),
+})
+export type EnergyBalance = z.infer<typeof EnergyBalance>
+
 export const DaySummary = z.object({
   totals: NutrientValues,
   includedItemCount: z.number().int(),
   excludedItemCount: z.number().int(),
   estimatedItemCount: z.number().int(),
+  /** 生效目标。能量目标随活动计算时，targets.energyKcal 已换成这一天算出的值。 */
+  goal: Goal.nullable(),
+  /** 能量目标随活动计算时的来历；固定目标为 null。 */
+  energy: EnergyTarget.nullable(),
+  /** 没有活动数据或没有随活动计算的目标时为 null。 */
+  balance: EnergyBalance.nullable(),
 })
 export type DaySummary = z.infer<typeof DaySummary>
 
@@ -291,3 +369,108 @@ export type ActivePendingResponse = z.infer<typeof ActivePendingResponse>
 /** POST /v1/pending/:id/confirm 与 /cancel */
 export const PendingResponse = z.object({ pending: Pending })
 export type PendingResponse = z.infer<typeof PendingResponse>
+
+// MARK: - 健康数据（TDD §6.1）。手机读 Apple 健康后上传，服务端只存最新一份，用于目标与 Agent
+
+export const MetricSource = z.enum(['healthKit', 'manual'])
+export type MetricSource = z.infer<typeof MetricSource>
+
+export const BiologicalSex = z.enum(['female', 'male', 'other'])
+export type BiologicalSex = z.infer<typeof BiologicalSex>
+
+/** 读取结果区分有数据 / 无数据 / 查询失败，不能把授权当成数据存在。 */
+function reading<T extends z.ZodType>(value: T) {
+  return z.discriminatedUnion('status', [
+    z.object({ status: z.literal('value'), value, source: MetricSource, measuredAt: z.iso.datetime().nullable() }),
+    z.object({ status: z.literal('noData') }),
+    z.object({ status: z.literal('failed'), message: z.string() }),
+  ])
+}
+
+/** PUT /v1/health/snapshot：手机读到的身体数据。活动能量单独上传（见 ActivityUpload）。 */
+export const HealthUpload = z.object({
+  bodyMassKg: reading(z.number()),
+  heightCm: reading(z.number()),
+  /** 0–1。 */
+  bodyFatFraction: reading(z.number()),
+  dateOfBirth: reading(LocalDate),
+  sex: reading(BiologicalSex),
+  /** 前一晚睡眠时长（小时）。 */
+  sleepHours: reading(z.number()),
+  authorizationRequested: z.boolean(),
+  writeDenied: z.boolean(),
+})
+export type HealthUpload = z.infer<typeof HealthUpload>
+
+/** GET /v1/health/snapshot?date=：上传的身体数据、手动补录的兜底，加上服务端按活动记录算出的当日与 7 日日均。 */
+export const HealthSnapshot = HealthUpload.extend({
+  activeEnergyKcal: reading(z.number()),
+  /** 这一天之前 7 个完整日里有数据的那些天的日均；不足 3 天时没有。 */
+  averageActiveEnergyKcal: reading(z.number()),
+  /** 手机最后一次上传身体数据的时间；从没上传过为 null。 */
+  uploadedAt: z.iso.datetime().nullable(),
+})
+export type HealthSnapshot = z.infer<typeof HealthSnapshot>
+
+/** PUT /v1/health/activity：若干天的活动能量。今天的是截至现在的累计，过去的是全天；null 表示没有数据。 */
+export const ActivityUpload = z.object({
+  days: z.array(z.object({ date: LocalDate, activeKcal: z.number().min(0).nullable() })).min(1).max(31),
+})
+export type ActivityUpload = z.infer<typeof ActivityUpload>
+
+/** PUT /v1/health/manual-metrics：用户补录的身体数据。只覆盖给出的项，没给的沿用上一次；只用于目标生成，不写回 Apple 健康。 */
+export const ManualBodyMetrics = z.object({
+  bodyMassKg: z.number().min(20).max(400).nullish(),
+  heightCm: z.number().min(80).max(250).nullish(),
+  bodyFatFraction: z.number().min(0.02).max(0.7).nullish(),
+  dateOfBirth: LocalDate.nullish(),
+  sex: BiologicalSex.nullish(),
+})
+export type ManualBodyMetrics = z.infer<typeof ManualBodyMetrics>
+
+// MARK: - 目标建议与设定
+
+/** POST /v1/goals/recommendation 与 /v1/goals/initial：按服务端存的健康数据计算，客户端只选类型和调整。 */
+export const GoalRecommendationRequest = z.object({
+  date: LocalDate,
+  kind: GoalKind.optional(),
+  adjustment: EnergyAdjustment.optional(),
+})
+export type GoalRecommendationRequest = z.infer<typeof GoalRecommendationRequest>
+
+export const MissingMetric = z.enum(['bodyMass', 'height', 'dateOfBirth', 'sex'])
+export type MissingMetric = z.infer<typeof MissingMetric>
+
+export const GoalRecommendation = z.object({
+  input: z.object({
+    bodyMassKg: z.number(),
+    weightSource: MetricSource,
+    heightCm: z.number(),
+    heightSource: MetricSource,
+    ageYears: z.number().int(),
+    ageSource: MetricSource,
+    sex: BiologicalSex,
+    sexSource: MetricSource,
+    /** 平时活动（7 日日均）；没有时按轻度活动系数估算。 */
+    activeEnergyKcal: z.number().nullable(),
+  }),
+  bmrKcal: z.number(),
+  tdeeKcal: z.number(),
+  tdeeEstimated: z.boolean(),
+  targets: GoalTargets,
+  energyPlan: EnergyPlan,
+  generatedAt: z.iso.datetime(),
+  policyVersion: z.number().int(),
+})
+export type GoalRecommendation = z.infer<typeof GoalRecommendation>
+
+/** 体重、身高、出生日期、性别缺一项就不能建议，返回缺哪些。 */
+export const GoalRecommendationResponse = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('ready'), recommendation: GoalRecommendation }),
+  z.object({ status: z.literal('missing'), missing: z.array(MissingMetric) }),
+])
+export type GoalRecommendationResponse = z.infer<typeof GoalRecommendationResponse>
+
+/** GET /v1/goals/active?date= 与 POST /v1/goals/initial */
+export const GoalResponse = z.object({ goal: Goal.nullable() })
+export type GoalResponse = z.infer<typeof GoalResponse>
