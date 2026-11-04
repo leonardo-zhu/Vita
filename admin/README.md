@@ -5,7 +5,7 @@ Next.js 管理后台：远程配置的编辑、校验与发布（M1），Prompt 
 约定：
 
 - 包管理器使用 pnpm，仓库根目录是 workspace（ADR-022），lockfile 在根目录；在根目录 `pnpm install` 一次即可。
-- 配置校验使用 `../shared/config-schema/` 中的 JSON Schema，与 iOS 端共用；工具清单与内置 prompt 取自 `../ios/Vita/Resources/DefaultConfig.json`，工具参数 schema 取自 `../shared/agent-tools/tool-parameters.json`，诊断日志格式取自 `../shared/diagnostics/`。这些文件由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
+- 配置校验使用 `../shared/config-schema/` 中的 JSON Schema；发布的配置 2.0 起由 Vita API 读取（不再是 App）；工具清单与内置 prompt 取自 `../ios/Vita/Resources/DefaultConfig.json`，工具参数 schema 取自 `../shared/agent-tools/tool-parameters.json`，诊断日志格式取自 `../shared/diagnostics/`。这些文件由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
 - 模型网关不在此处，见独立项目 Conduit。
 
 ## 本地开发
@@ -44,6 +44,8 @@ SQLite 在 `.data/vita-admin.db`，发布出来的文件在 `.data/published/sta
 2. **部署目录**：`mkdir -p /opt/stacks/vita-admin`，属组与 Conduit 的部署目录一致，runner 要能写。
 3. **数据与发布目录**：`mkdir -p /opt/vita-admin/data /opt/vita-admin/published && chown 1000:1000 /opt/vita-admin/data /opt/vita-admin/published`（容器里以 node 用户运行）。
 4. **`.env`**：`/opt/stacks/vita-admin/.env`，按 `.env.example` 填 `ADMIN_USERNAME`、`ADMIN_PASSWORD_HASH`（`node scripts/hash-password.mjs`，密码至少 12 位）、`SESSION_SECRET`（`openssl rand -base64 32`）、`PASSKEY_ORIGIN=https://vita.r4s.leonardo-zhu.me`。要在发布前检查模型别名，再填 `CONDUIT_BASE_URL` 和 `CONDUIT_API_KEY`（Conduit 后台给 Vita 应用另建一个密钥）。值里不能有 `$`。
+   - 调 Vita API 要填 `VITA_API_SERVICE_TOKEN`，与 `/opt/stacks/vita-api/.env` 里的值相同（2026-11-04 补上）。
+   - 改了 `.env` 要重建容器才生效。镜像标签是部署时的提交，不是 `latest`，而且服务器上没有 GHCR 的登录：`cd /opt/stacks/vita-admin && ADMIN_TAG=$(docker inspect -f '{{.Config.Image}}' vita-admin | cut -d: -f2) docker compose up -d --force-recreate --pull never`。
 5. **Caddy**：
    - `/opt/stacks/caddy` 的 compose 给 caddy 加只读卷 `/opt/vita-admin/published:/srv/vita-config:ro`，然后重建 caddy 容器（所有反代会断一下）。
    - `/opt/stacks/caddy/Caddyfile` 追加 `deploy/Caddyfile.snippet` 的内容，先 `validate` 再 `reload`。

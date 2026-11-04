@@ -108,7 +108,7 @@ Admin API 与数据面分开部署或至少分开路由与鉴权：App 管理、
 
 | 阶段 | 做法 |
 | --- | --- |
-| **现阶段（仅自己使用）** | 在 Admin 手动创建令牌，填入 Vita 设置页（存 Keychain）。有效期、额度、吊销都在 Conduit 控制，丢了设备直接吊销即可。 |
+| **现阶段（仅自己使用）** | 在 Admin 手动创建令牌，~~填入 Vita 设置页（存 Keychain）~~ 2.0 起填进 Vita API 与 Vita Admin 的 `.env`，手机不再持有 Conduit 令牌（Vita ADR-019）。有效期、额度、吊销都在 Conduit 控制。 |
 | **分发前** | 增加**设备注册**：App 用 App Attest 向 Conduit 换取按设备签发的令牌，套用该 App 的令牌模板（默认有效期、额度、限流）。无需登录体系，每设备独立计量。可选再接 Sign in with Apple 做跨设备额度。 |
 | **接入方有后端时** | 后端持 App 级令牌，通过头部传终端用户 ID；Conduit 对每个用户单独计量。 |
 

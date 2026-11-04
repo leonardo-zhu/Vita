@@ -1,7 +1,9 @@
 # Vita 模型 Provider 集成规范
 
 **状态：已采纳并实现，部分被取代（见 ADR-013）**  
-**实现：** `ios/Vita/Platform/LLM/`（`LLMClient`、`ResponsesClient`），契约测试见 `ios/VitaTests/ResponsesClientTests.swift`。2026-10-31 经 Conduit 别名 `vita-chat` 完成真实对话验收。  
+**实现：** ~~`ios/Vita/Platform/LLM/`（`LLMClient`、`ResponsesClient`），契约测试见 `ios/VitaTests/ResponsesClientTests.swift`。~~ 2.0 起调用方是 Vita API：`api/src/agent/llm.ts`（同一套 Responses + SSE + function calling，TypeScript 实现），测试见 `api/src/agent/agent.test.ts`；iOS 的实现已删除，手机不再持有 Conduit 令牌（ADR-019）。2026-10-31 经 Conduit 别名 `vita-chat` 完成真实对话验收（1.0），2026-11-04 在服务端用真实模型再次跑通。
+
+> **2.0 阅读说明：** 下文的“客户端”指调 Conduit 的一方，2.0 起是 Vita API；Conduit 密钥存在 API 的 `.env`（不是 Keychain），超时、别名等仍来自生效配置（API 读 Admin 发布的 `stable.json`）。  
 **对应决策：** ADR-005（部分被 ADR-013 取代）  
 **当前上游：** 经 Conduit 网关访问（上游目前为火山方舟 Volcengine Ark）
 

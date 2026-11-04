@@ -1,6 +1,8 @@
 # Vita Agent 工具契约
 
-**状态：已实现（2026-10-31）。** 客户端实现见 `ios/Vita/Application/Agent/`：`AgentToolCatalog`（工具清单与参数 schema）、`AgentToolRunner`（执行）、`ProposalToolHandler`（Propose 类）、`ChatOrchestrator`（工具循环）。
+**状态：已实现（2026-10-31）；2.0 起整体移到服务端（2026-11-04）。** 1.0 的实现在 iOS（`AgentToolCatalog`、`AgentToolRunner`、`ProposalToolHandler`、`ChatOrchestrator`，已删除）。现在的实现在 Vita API 的 `api/src/agent/`：`tools.ts`（只读工具与 `updateGoal`）、`proposals.ts`（Propose 类）、`orchestrator.ts`（工具循环）、`config.ts`（工具清单与描述）。
+
+> **2.0 阅读说明：** 下文的“客户端”指执行工具、管 Pending 与写入的一方，2.0 起就是 Vita API；工具、参数、状态机与确认门都没变。手机只负责展示确认卡、调确认 / 取消接口，以及按变更流写 Apple 健康（《Vita 2.0 架构设计》§9）。“客户端状态”消息里的界面状态（当前日期等）由手机随请求带上，服务端组装。
 
 ## 目标
 

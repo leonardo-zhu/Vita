@@ -4,6 +4,8 @@
 
 只有元数据，不含 prompt、消息、饮食、健康数据或任何自由文本。
 
+2.0 起对话在服务端跑，iOS 不再记 `chat_turn` 与 `tool_call`（对话追踪改由 API 写进 `chat_traces`，见《Vita 2.0 架构设计》§10.3）；iOS 只剩 `config_fetch`。schema 保留这两种事件，Admin 仍能显示旧数据。
+
 | 事件 | 什么时候记 | 关键字段 |
 | --- | --- | --- |
 | `chat_turn` | 一轮对话结束（保存、失败或取消） | `outcome`、`errorCode`、`latencyMs`、`rounds`、`toolCalls`、`tokensIn/Out`、`createdPending`、`claimedCardWithoutTool`、`hitMaxRounds` |

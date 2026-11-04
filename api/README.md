@@ -40,7 +40,7 @@ curl -X POST http://127.0.0.1:3014/v1/admin/devices \
 
 ## 部署
 
-推到 `main` 且改到 `api/`、`packages/contract/`、内置配置 `DefaultConfig.json`、工具参数 `shared/agent-tools/` 或根目录的 workspace 文件时，`.github/workflows/vita-api-deploy.yml` 会：测试 → 在 GitHub 的 arm64 runner 上构建镜像推到 `ghcr.io/leonardo-zhu/vita-api` → 在 R4S 的 self-hosted runner 上把 `deploy/compose.yaml` 拷到 `/opt/stacks/vita-api/` 并 `docker compose pull && up -d`。
+推到 `main` 且改到 `api/`、`packages/contract/`、内置配置 `DefaultConfig.json`、工具参数 `shared/agent-tools/`、iOS 导出样例 `shared/fixtures/` 或根目录的 workspace 文件时，`.github/workflows/vita-api-deploy.yml` 会：测试 → 在 GitHub 的 arm64 runner 上构建镜像推到 `ghcr.io/leonardo-zhu/vita-api` → 在 R4S 的 self-hosted runner 上把 `deploy/compose.yaml` 拷到 `/opt/stacks/vita-api/` 并 `docker compose pull && up -d`。
 
 ### 首次准备（在 R4S 上，只做一次）
 
