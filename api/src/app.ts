@@ -26,6 +26,11 @@ import {
   type MeResponse,
   type PendingResponse,
   type ReferenceSearchResponse,
+  ScaleReadingRequest,
+  type ScaleReadingResponse,
+  type WeighingResponse,
+  type WeighingsResponse,
+  WeighingUpload,
 } from '@vita/contract'
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
@@ -55,6 +60,8 @@ function failure(c: Context, status: ContentfulStatusCode, code: string, message
 /** 业务规则的拒绝：不存在 404，状态不允许（过期、已结束、数据已变）409，其余 422。 */
 const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
   notFound: [404, '没有这张卡片。'],
+  weighingNotFound: [404, '没有这次称重。'],
+  invalidMetrics: [422, '读数超出合理范围，没有保存。'],
   expired: [409, '这张卡片已过期，没有写入任何数据。'],
   notActive: [409, '这张卡片已经结束了。'],
   revisionConflict: [409, '当天数据在提案后有变化，这张卡片已作废，请重新提出。'],
@@ -197,6 +204,28 @@ export function createApp({ services, serviceToken, version }: AppOptions) {
     if (result.status === 'missing') return failure(c, 422, 'missingMetrics', `缺少身体数据：${result.missing.join('、')}。`)
     const goal = services.goals.commitInitial(result.recommendation, body.date, { actor: actorName(c.get('actor')) })
     return c.json({ goal } satisfies GoalResponse, 201)
+  })
+
+  // MARK: - 身体成分：手机连秤后上传称重
+
+  app.post('/v1/weighings', async (c) => {
+    const body = await parseBody(c, WeighingUpload)
+    if (!body) return invalidBody(c, '称重数据')
+    const weighing = services.body.record(body, { actor: actorName(c.get('actor')) })
+    return c.json({ weighing } satisfies WeighingResponse, 201)
+  })
+  app.get('/v1/weighings', (c) =>
+    c.json({ weighings: services.body.weighings(), calibration: services.body.calibration() } satisfies WeighingsResponse),
+  )
+  app.put('/v1/weighings/:id/scale-reading', async (c) => {
+    const body = await parseBody(c, ScaleReadingRequest)
+    if (!body) return invalidBody(c, '体脂率应在 2% 到 70% 之间')
+    const result = services.body.setScaleReading(c.req.param('id'), body.bodyFatFraction, { actor: actorName(c.get('actor')) })
+    return c.json(result satisfies ScaleReadingResponse)
+  })
+  app.delete('/v1/weighings/:id', (c) => {
+    services.body.delete(c.req.param('id'), { actor: actorName(c.get('actor')) })
+    return c.body(null, 204)
   })
 
   // MARK: - 设备管理（只给 Admin）

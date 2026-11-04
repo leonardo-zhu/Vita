@@ -12,6 +12,9 @@ import {
   GoalRecommendationResponse,
   GoalResponse,
   HealthSnapshot,
+  ScaleReadingResponse,
+  WeighingResponse,
+  WeighingsResponse,
   PendingResponse,
   ReferenceSearchResponse,
 } from '@vita/contract'
@@ -181,5 +184,37 @@ describe('健康数据与目标', () => {
   it('调整幅度超出范围返回 400', async () => {
     const { call } = await withDevice()
     expect((await call('/v1/goals/recommendation', 'POST', { date: DAY, adjustment: { type: 'fraction', value: 0.3 } })).status).toBe(400)
+  })
+})
+
+describe('称重', () => {
+  const weighing = () => ({ id: randomUUID(), weightKg: 69.6, impedance: { a: 482, b: 432 }, source: 'live', recordedAt: null, appleHealthWritable: true })
+
+  it('上传、列出、记秤读数、删除', async () => {
+    const { call } = await withDevice()
+    const upload = weighing()
+    const created = await call('/v1/weighings', 'POST', upload)
+    expect(created.status).toBe(201)
+    expect(WeighingResponse.parse(await created.json()).weighing.id).toBe(upload.id)
+
+    const list = WeighingsResponse.parse(await (await call('/v1/weighings')).json())
+    expect(list.weighings).toHaveLength(1)
+    expect(list.calibration).toEqual({ readingCount: 0, model: null, applied: false })
+
+    const reading = ScaleReadingResponse.parse(await (await call(`/v1/weighings/${upload.id}/scale-reading`, 'PUT', { bodyFatFraction: 0.214 })).json())
+    expect(reading.weighing.bodyFat).toEqual({ value: 0.214, source: 'scaleReading' })
+
+    expect((await call(`/v1/weighings/${upload.id}`, 'DELETE')).status).toBe(204)
+    expect((await call(`/v1/weighings/${upload.id}`, 'DELETE')).status).toBe(404)
+  })
+
+  it('不合格的称重与读数被拒绝', async () => {
+    const { call } = await withDevice()
+    const tooLight = await call('/v1/weighings', 'POST', { ...weighing(), weightKg: 7.45 })
+    expect(tooLight.status).toBe(422)
+    expect(ErrorResponse.parse(await tooLight.json()).error.code).toBe('invalidMetrics')
+    expect((await call('/v1/weighings', 'POST', { ...weighing(), id: 'not-a-uuid' })).status).toBe(400)
+    expect((await call(`/v1/weighings/${randomUUID()}/scale-reading`, 'PUT', { bodyFatFraction: 0.9 })).status).toBe(400)
+    expect((await call(`/v1/weighings/${randomUUID()}/scale-reading`, 'PUT', { bodyFatFraction: 0.2 })).status).toBe(404)
   })
 })

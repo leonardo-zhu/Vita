@@ -474,3 +474,106 @@ export type GoalRecommendationResponse = z.infer<typeof GoalRecommendationRespon
 /** GET /v1/goals/active?date= 与 POST /v1/goals/initial */
 export const GoalResponse = z.object({ goal: Goal.nullable() })
 export type GoalResponse = z.infer<typeof GoalResponse>
+
+// MARK: - 身体成分（身体成分模块）。蓝牙连秤与写 Apple 健康在手机上；称重存在服务端，指标读取时现算
+
+export const Impedance = z.object({ a: z.number().int().positive(), b: z.number().int().positive() })
+export type Impedance = z.infer<typeof Impedance>
+
+/** live：打开称重页时站上去的；offline：秤里存着、同步过来的离线记录。 */
+export const WeighingSource = z.enum(['live', 'offline'])
+export type WeighingSource = z.infer<typeof WeighingSource>
+
+/** POST /v1/weighings：秤锁定的一次称重。id 由手机生成，重传同一个 id 不会重复记录。 */
+export const WeighingUpload = z.object({
+  id: z.uuid(),
+  weightKg: z.number().positive(),
+  /** 光脚站上去才测得到；没有时不估算体脂率。 */
+  impedance: Impedance.nullable(),
+  source: WeighingSource,
+  /** 离线记录的称重时间；没有或晚于现在（秤的时钟不对）时按现在记，并标为时间不可靠。 */
+  recordedAt: z.iso.datetime().nullable(),
+  /** 手机能否把这次称重写进 Apple 健康。不能时服务端把体重与体脂率记为手动补录，目标生成照样用得上。 */
+  appleHealthWritable: z.boolean(),
+})
+export type WeighingUpload = z.infer<typeof WeighingUpload>
+
+export const BodyRating = z.enum(['low', 'standard', 'high', 'veryHigh', 'excellent'])
+export type BodyRating = z.infer<typeof BodyRating>
+
+export const BodyMetricKind = z.enum([
+  'weight', 'bmi', 'bodyFat', 'leanMass', 'basalMetabolism',
+  'fatMass', 'subcutaneousFatRate', 'subcutaneousFatMass',
+  'muscleMass', 'muscleRate', 'skeletalMuscleMass', 'skeletalMuscleRate', 'waterRate', 'waterMass', 'proteinMass', 'proteinRate', 'boneMass',
+])
+export type BodyMetricKind = z.infer<typeof BodyMetricKind>
+
+/** 判定区间：bounds 从小到大，ratings 比它多一项；值等于边界时归入较高的一段。 */
+export const BodyRange = z.object({ bounds: z.array(z.number()), ratings: z.array(BodyRating) })
+export type BodyRange = z.infer<typeof BodyRange>
+
+/** 一项指标。比例类（体脂率等）的值是 0–1。没有对应人群区间（目前只内置成年男性）时 range 与 rating 为 null。 */
+export const BodyMetric = z.object({
+  kind: BodyMetricKind,
+  value: z.number(),
+  range: BodyRange.nullable(),
+  rating: BodyRating.nullable(),
+})
+export type BodyMetric = z.infer<typeof BodyMetric>
+
+export const Weighing = z.object({
+  id: z.uuid(),
+  measuredAt: z.iso.datetime(),
+  weightKg: z.number(),
+  impedance: Impedance.nullable(),
+  source: WeighingSource,
+  /** false：离线记录没有可靠时间，measuredAt 是同步时间。 */
+  timeReliable: z.boolean(),
+  /** 称重当时的身高、年龄、性别，指标按它算。 */
+  profile: z.object({ heightCm: z.number().nullable(), ageYears: z.number().int().nullable(), sex: BiologicalSex.nullable() }),
+  /** 用户照着秤屏幕记下的体脂率（0–1），用来校准。 */
+  scaleBodyFatFraction: z.number().nullable(),
+  /** scaleReading：秤屏幕读数；calibrated：校准公式算出，应与秤显示一致；estimated：按 BMI、年龄、性别估算。 */
+  bodyFat: z.object({ value: z.number(), source: z.enum(['scaleReading', 'calibrated', 'estimated']) }).nullable(),
+  bmi: z.number().nullable(),
+  /** 没有体脂率时只有体重和 BMI。 */
+  metrics: z.array(BodyMetric),
+  /** BMI 与体脂率的九宫格，只有已知区间的人群（成年男性）给出。 */
+  bodyType: z.object({ name: z.string(), explanation: z.string() }).nullable(),
+})
+export type Weighing = z.infer<typeof Weighing>
+
+/** 由用户记下的秤读数拟合出的体脂率公式：体脂率 = a · 身高² / 阻抗 + b · 体重 + c。 */
+export const BodyFatModel = z.object({
+  channel: z.enum(['a', 'b']),
+  heightSquaredOverImpedance: z.number(),
+  weight: z.number(),
+  constant: z.number(),
+  sampleCount: z.number().int(),
+  /** 留一法交叉验证的平均绝对误差（0–1）。 */
+  meanAbsoluteError: z.number(),
+})
+export type BodyFatModel = z.infer<typeof BodyFatModel>
+
+export const BodyFatCalibration = z.object({
+  readingCount: z.number().int(),
+  model: BodyFatModel.nullable(),
+  /** 误差足够小、已用来替代 BMI 估算。 */
+  applied: z.boolean(),
+})
+export type BodyFatCalibration = z.infer<typeof BodyFatCalibration>
+
+/** GET /v1/weighings：新的在前。 */
+export const WeighingsResponse = z.object({ weighings: z.array(Weighing), calibration: BodyFatCalibration })
+export type WeighingsResponse = z.infer<typeof WeighingsResponse>
+
+export const WeighingResponse = z.object({ weighing: Weighing })
+export type WeighingResponse = z.infer<typeof WeighingResponse>
+
+/** PUT /v1/weighings/:id/scale-reading：记下或清掉（null）秤屏幕上的体脂率。 */
+export const ScaleReadingRequest = z.object({ bodyFatFraction: z.number().min(0.02).max(0.7).nullable() })
+export type ScaleReadingRequest = z.infer<typeof ScaleReadingRequest>
+
+/** calibrationChanged 为 true 时，采用的公式变了，全部称重的体脂率都可能变化，手机要重写 Apple 健康里的历史。 */
+export const ScaleReadingResponse = z.object({ weighing: Weighing, calibrationChanged: z.boolean() })
+export type ScaleReadingResponse = z.infer<typeof ScaleReadingResponse>

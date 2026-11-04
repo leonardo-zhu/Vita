@@ -78,17 +78,31 @@ export class HealthService {
   submitManualMetrics(metrics: ManualBodyMetrics, origin: WriteOrigin): ManualBodyMetrics {
     const { database, now } = this.context
     const at = now()
-    const previous = this.manualRow()?.metrics ?? {}
-    const merged: ManualBodyMetrics = { ...previous }
+    return transaction(database, () => {
+      const merged = this.writeManual(metrics, at)
+      audit(database, { actor: origin.actor, action: 'health.manualMetrics', result: 'success', at })
+      return merged
+    })
+  }
+
+  /**
+   * 称重没能写进 Apple 健康时，把体重与体脂率记为手动补录。离线记录可能比已有的补录还旧，不能拿旧体重覆盖新的。
+   * 由称重服务在自己的事务里调用。
+   */
+  recordWeighingAsManual(weightKg: number, bodyFatFraction: number | null, measuredAt: Date) {
+    const enteredAt = this.manualRow()?.enteredAt
+    if (enteredAt && enteredAt > measuredAt.toISOString()) return
+    this.writeManual({ bodyMassKg: weightKg, bodyFatFraction }, measuredAt)
+  }
+
+  private writeManual(metrics: ManualBodyMetrics, enteredAt: Date): ManualBodyMetrics {
+    const merged: ManualBodyMetrics = { ...(this.manualRow()?.metrics ?? {}) }
     for (const [key, value] of Object.entries(metrics) as [keyof ManualBodyMetrics, unknown][]) {
       if (value !== null && value !== undefined) Object.assign(merged, { [key]: value })
     }
-    transaction(database, () => {
-      database
-        .prepare('INSERT INTO manual_body_metrics (id, data, entered_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, entered_at = excluded.entered_at')
-        .run(JSON.stringify(merged), at.toISOString())
-      audit(database, { actor: origin.actor, action: 'health.manualMetrics', result: 'success', at })
-    })
+    this.context.database
+      .prepare('INSERT INTO manual_body_metrics (id, data, entered_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, entered_at = excluded.entered_at')
+      .run(JSON.stringify(merged), enteredAt.toISOString())
     return merged
   }
 

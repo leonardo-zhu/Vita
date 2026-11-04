@@ -145,6 +145,21 @@ const MIGRATIONS = [
     data        TEXT NOT NULL,             -- ManualBodyMetrics JSON
     entered_at  TEXT NOT NULL
   );`,
+  `-- 体脂秤的原始称重（身体成分模块 §5）：只存秤测到的体重与阻抗，体脂率等指标读取时再算，算法或校准更新后历史一起重算。
+  -- 秤确认离线记录后就删掉了，这里是唯一一份；写进 Apple 健康的 Sample 由手机记录
+  CREATE TABLE scale_weighings (
+    id                       TEXT PRIMARY KEY,   -- 手机生成，重传不重复
+    measured_at              TEXT NOT NULL,
+    weight_grams             INTEGER NOT NULL,
+    impedance_a              INTEGER,
+    impedance_b              INTEGER,
+    source                   TEXT NOT NULL,      -- live / offline
+    time_reliable            INTEGER NOT NULL,   -- 0：离线记录没有可靠时间，measured_at 是同步时间
+    profile                  TEXT NOT NULL,      -- 称重时的身高、年龄、性别 JSON
+    scale_body_fat_permille  INTEGER,            -- 用户照着秤屏幕记下的体脂率（千分比），用来校准
+    created_at               TEXT NOT NULL
+  );
+  CREATE INDEX scale_weighings_time ON scale_weighings(measured_at);`,
 ]
 
 /**

@@ -1,3 +1,4 @@
+import { BodyService } from './body.ts'
 import type { ServiceContext } from './context.ts'
 import { DayService } from './day.ts'
 import { FoodService } from './foods.ts'
@@ -14,6 +15,7 @@ export interface Services {
   days: DayService
   goals: GoalService
   health: HealthService
+  body: BodyService
 }
 
 export function createServices(context: ServiceContext): Services {
@@ -29,5 +31,6 @@ export function createServices(context: ServiceContext): Services {
     days: new DayService(context, goals, health),
     goals,
     health,
+    body: new BodyService(context, health),
   }
 }
