@@ -307,7 +307,11 @@ describe('目标与食品库工具', () => {
       [
         call('c1', 'proposeFoodChange', {
           sessionDate: DAY,
-          payload: { intent: 'createProduct', product: { name: '薯片' }, version: { source: 'nutritionLabel', labelScanId: randomUUID(), basis: { amount: 100, unit: 'g' }, values: { energyKcal: 540, proteinG: 6, fatG: 34, carbohydrateG: 52 } } },
+          payload: {
+            intent: 'createProduct',
+            product: { name: '薯片', package: { amount: 70, unit: 'g' } },
+            version: { source: 'nutritionLabel', labelScanId: randomUUID(), basis: { amount: 100, unit: 'g' }, values: { energyKcal: 540, proteinG: 6, fatG: 34, carbohydrateG: 52 } },
+          },
         }),
         done,
       ],
@@ -315,6 +319,26 @@ describe('目标与食品库工具', () => {
     ])
     await send('存一下')
     expect(JSON.parse(outputs(client.requests[1])[0]).error.code).toBe('unknownLabel')
+  })
+})
+
+describe('按标签存库必须带净含量', () => {
+  it('缺包装规格时当轮就拒绝，模型改为先问用户，不生成卡片', async () => {
+    const { services, client, send } = make([
+      [
+        call('c1', 'proposeFoodChange', {
+          sessionDate: DAY,
+          payload: { intent: 'createProduct', product: { name: '小笼汤包' }, version: { source: 'nutritionLabel', labelScanId: randomUUID(), basis: { amount: 100, unit: 'g' }, values: { energyKcal: 173, proteinG: 7.2, fatG: 7.7, carbohydrateG: 18.7 } } },
+        }),
+        done,
+      ],
+      [text('照片里没看到净含量，这一袋是多少克？'), done],
+    ])
+    const result = await send('先记录这个小笼汤包，我今天早上吃了一袋')
+    expect(JSON.parse(outputs(client.requests[1])[0]).error.code).toBe('packageRequired')
+    expect(result.pendingId).toBeNull()
+    expect(result.reply.text).toBe('照片里没看到净含量，这一袋是多少克？')
+    expect(services.foods.products()).toEqual([])
   })
 })
 

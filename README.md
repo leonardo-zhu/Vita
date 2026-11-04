@@ -17,6 +17,7 @@ Vita 是一个个人 AI 健康助理：用自然语言记录饮食，追踪营�
 | [Vita Admin 设计](docs/architecture/vita-admin.md) | 远程配置发布、Prompt 调试、诊断日志、设备令牌、对话与数据管理 | M1–M5 已部署 |
 | [Conduit 项目设计](docs/architecture/llm-gateway-project.md) | 独立的 LLM 网关项目 | 已上线 |
 | [公共营养参考库规范](docs/reference-food-library.md) | 数据来源、收录规则、构建与校验 | 已采纳 |
+| [Agent 调优记录](docs/agent-tuning-log.md) | Agent 的可靠性与速度调优、实验数据、prompt 版本 | 持续更新 |
 | [MVP 实施计划](docs/implementation-plan.md) | 1.0 的开发阶段记录与剩余工作 | 1.0 完成，剩余工作按 2.0 更新 |
 
 ## 当前技术基线

@@ -302,6 +302,14 @@ function foodChange(payload: z.infer<typeof FoodChangePayload>, services: Servic
     if (!payload.product) throw missing('payload.product')
     const { product } = payload
     if (!product.name?.trim()) throw missing('payload.product.name')
+    // 预包装食品的标签按国标必须印净含量；没有它，“一袋 / 一盒”就换算不了。所以在提案时就拦下，
+    // 让模型这一轮去读清楚或先问用户，而不是先存一个缺包装的食品、确认后再补一张卡。
+    if (version.sourceKind === 'nutritionLabel' && !product.package) {
+      throw reject(
+        'packageRequired',
+        '按营养标签存库必须带 product.package（净含量，如 288 g、950 ml）。从照片里找净含量；读不到就先问用户一袋 / 一盒多重，拿到后再提案，不要先存。',
+      )
+    }
     return {
       kind: 'createProduct',
       product: {
