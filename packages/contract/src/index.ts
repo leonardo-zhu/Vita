@@ -366,7 +366,7 @@ export type Pending = z.infer<typeof Pending>
 export const ActivePendingResponse = z.object({ pending: Pending.nullable() })
 export type ActivePendingResponse = z.infer<typeof ActivePendingResponse>
 
-/** POST /v1/pending/:id/confirm 与 /cancel */
+/** GET /v1/pending/:id、POST /v1/pending/:id/confirm 与 /cancel */
 export const PendingResponse = z.object({ pending: Pending })
 export type PendingResponse = z.infer<typeof PendingResponse>
 

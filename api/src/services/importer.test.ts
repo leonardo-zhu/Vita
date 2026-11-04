@@ -3,7 +3,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
-import type { ImportBundle } from '@vita/contract'
+import { ImportBundle as ImportBundleSchema, type ImportBundle } from '@vita/contract'
 import { describe, expect, it } from 'vitest'
 
 import { DAY, estimate, lunch, ORIGIN, reference, setup } from '../test/support.ts'
@@ -129,5 +129,21 @@ describe('从 1.0 导入', () => {
     const { services: to } = setup()
     expect(() => to.importer.run(bundle, ORIGIN)).toThrow('import.brokenReference')
     expect(to.days.day(DAY).records).toEqual([])
+  })
+})
+
+describe('iOS 的导出', () => {
+  /** shared/fixtures/ios-1.0-export.json 由 iOS 的 LegacyMigrationTests 生成，两端格式不一致时这里先失败。 */
+  it('按契约解析并整包导入', async () => {
+    const { readFileSync } = await import('node:fs')
+    const raw = JSON.parse(readFileSync(new URL('../../../shared/fixtures/ios-1.0-export.json', import.meta.url), 'utf8'))
+    const bundle = ImportBundleSchema.parse(raw)
+    const { services } = setup()
+    const result = services.importer.run(bundle, ORIGIN)
+    expect(result.counts).toMatchObject({ sessions: 1, records: 1, items: 3, products: 1, versions: 1, goals: 1, messages: 3, labelScans: 1, weighings: 1 })
+    expect(result.dailyEnergyKcal).toEqual({ '2026-10-30': 662.5 })
+    const day = services.days.day('2026-10-30')
+    expect(day.records[0].items.find((item) => item.id === '77777771-7777-4777-8777-777777777777')?.sourceLabel).toBe('纯牛奶')
+    expect(services.chat.messages('2026-10-30').map((m) => m.cardRef?.type ?? null)).toEqual(['label', null, null])
   })
 })

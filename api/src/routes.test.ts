@@ -93,6 +93,15 @@ describe('确认卡', () => {
     expect((await call(`/v1/pending/${randomUUID()}/confirm`, 'POST')).status).toBe(404)
   })
 
+  it('按 ID 读卡片的结局，供历史消息显示', async () => {
+    const { call, services } = await withDevice()
+    const proposed = services.pending.proposeRecord({ kind: 'create', draft: lunch([estimate(500)]) }, DAY, 0, ORIGIN)
+    await call(`/v1/pending/${proposed.id}/cancel`, 'POST')
+    const read = PendingResponse.parse(await (await call(`/v1/pending/${proposed.id}`)).json())
+    expect(read.pending.status).toBe('cancelled')
+    expect((await call(`/v1/pending/${randomUUID()}`)).status).toBe(404)
+  })
+
   it('过期的卡片返回 409 expired', async () => {
     const { call, services, clock } = await withDevice()
     const proposed = services.pending.proposeRecord({ kind: 'create', draft: lunch([estimate(500)]) }, DAY, 0, ORIGIN)

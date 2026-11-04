@@ -10,6 +10,7 @@ on:
       - "packages/contract/**"
       - "ios/Vita/Resources/DefaultConfig.json"
       - "shared/agent-tools/**"
+      - "shared/fixtures/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

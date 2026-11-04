@@ -159,6 +159,8 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
     return isLocalDate(date) ? c.json({ pending: services.pending.active(date) } satisfies ActivePendingResponse) : invalidDate(c)
   })
 
+  /** 历史消息里卡片的结局（已确认、已取消、已过期）。 */
+  app.get('/v1/pending/:id', (c) => c.json({ pending: services.pending.get(c.req.param('id')) } satisfies PendingResponse))
   // 确认卡只能由用户在卡片上确认或取消；提案由 Agent 在服务端生成（M2），不对外开放。
   app.post('/v1/pending/:id/confirm', (c) =>
     c.json({ pending: services.pending.confirm(c.req.param('id'), { actor: actorName(c.get('actor')) }) } satisfies PendingResponse),
