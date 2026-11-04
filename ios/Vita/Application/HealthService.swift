@@ -73,6 +73,11 @@ final class HealthService {
         try await api.perform("PUT", "/v1/health/activity", body: ActivityUploadDTO(days: days))
     }
 
+    /// 只读本机的 Apple 健康，不上传、不等网络（连体脂秤时写进秤里的身高、年龄、性别用它）。
+    func localSnapshot(on date: LocalDate) async -> HealthSnapshot {
+        await readLocal(on: date)
+    }
+
     /// 只读 Apple 健康，不含手动补录与日均。每一项单独读取，一项失败不影响其他项。
     private func readLocal(on date: LocalDate) async -> HealthSnapshot {
         let zone = timeZone()

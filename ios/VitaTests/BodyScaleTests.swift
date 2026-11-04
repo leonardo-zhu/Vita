@@ -167,6 +167,21 @@ struct BodyCompositionServiceTests {
         #expect(try stub.requests.first?.json()["id"] as? String == queued.id.apiString)
     }
 
+    /// 部署重启时 Caddy 返回 502：和断网一样先存在手机上，不报保存失败。
+    @Test func queuesWhenTheServerIsRestarting() async throws {
+        stub.on("POST", "/v1/weighings", status: 502, json: #"{"error":{"code":"badGateway","message":"重启中"}}"#)
+        let (weighing, destination) = try await service().record(final, source: .live)
+        #expect(weighing == nil)
+        #expect(destination == .queued)
+        #expect(service().queued.count == 1)
+        // 读数被拒（4xx）不进队列，照常报错。
+        let rejecting = APIStub()
+        rejecting.on("POST", "/v1/weighings", status: 400, json: #"{"error":{"code":"invalidBody","message":"读数不合理"}}"#)
+        let api = rejecting.client()
+        let other = BodyCompositionService(api: api, store: store, local: InMemoryLocalStateStore(), healthSync: HealthSyncService(api: api, store: store, local: local))
+        await #expect(throws: APIError.self) { try await other.record(final, source: .live) }
+    }
+
     @Test func dropsQueuedWeighingsTheServerRejects() async throws {
         try local.save([WeighingUploadDTO(id: UUID(), weightKg: 70, impedance: nil, source: .offline, recordedAt: Fixtures.now, appleHealthWritable: false)], as: BodyCompositionService.queueName)
         stub.on("POST", "/v1/weighings", status: 400, json: #"{"error":{"code":"invalidBody","message":"读数不合理"}}"#)

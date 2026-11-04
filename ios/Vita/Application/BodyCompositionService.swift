@@ -52,13 +52,14 @@ final class BodyCompositionService {
             recordedAt: source == .live ? nil : recordedAt, appleHealthWritable: writable
         )
         do {
-            let response: WeighingResponseDTO = try await api.send("POST", "/v1/weighings", body: upload)
+            let response: WeighingResponseDTO = try await uploader.send("POST", "/v1/weighings", body: upload)
             await healthSync.run()
             // 体脂率要按当前采用的校准算，和历史列表一致。
             let saved = (try? await load())?.weighings.first { $0.id == upload.id }
                 ?? response.weighing.domain(calibration: nil, inAppleHealth: healthSync.isInAppleHealth(weighing: upload.id))
             return (saved, writable ? .appleHealth : .manual)
-        } catch APIError.offline {
+        } catch let error as APIError where Self.isTransient(error) {
+            // 连不上、超时或服务端暂时出错（如部署重启时的 502）：先存在手机上。
             // 实时称重没有自带时间，排队时记下现在，补传时按离线记录交给服务端。
             var pending = upload
             if pending.source == .live { pending.source = .offline; pending.recordedAt = now() }
@@ -75,11 +76,11 @@ final class BodyCompositionService {
         var sent = 0
         while let next = remaining.first {
             do {
-                let _: WeighingResponseDTO = try await api.send("POST", "/v1/weighings", body: next)
+                let _: WeighingResponseDTO = try await uploader.send("POST", "/v1/weighings", body: next)
                 sent += 1
                 remaining.removeFirst()
                 try? local.save(remaining, as: Self.queueName)
-            } catch APIError.server(let status, _, _) where (400..<500).contains(status) {
+            } catch APIError.server(let status, _, _) where (400..<500).contains(status) && status != 429 {
                 // 服务端拒绝（如读数不合理）：重传也不会成功，丢掉这一条。
                 Self.log.error("queued weighing rejected with \(status)")
                 remaining.removeFirst()
@@ -90,6 +91,22 @@ final class BodyCompositionService {
         }
         if sent > 0 { await healthSync.run() }
         return sent
+    }
+
+    /// 上传称重用短一点的超时：秤在等保存结果，等太久不如先进队列。
+    private var uploader: VitaAPIClient {
+        var client = api
+        client.timeout = 10
+        return client
+    }
+
+    /// 这些错误过一会儿重传多半就好了，进队列；其余（如读数被拒）照常报错。
+    static func isTransient(_ error: APIError) -> Bool {
+        switch error {
+        case .offline: true
+        case .server(let status, _, _): status >= 500 || status == 429
+        case .missingToken, .unauthorized, .invalidResponse: false
+        }
     }
 
     private func enqueue(_ upload: WeighingUploadDTO) throws {

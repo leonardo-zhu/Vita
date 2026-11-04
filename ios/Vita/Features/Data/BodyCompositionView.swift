@@ -72,14 +72,15 @@ struct BodyCompositionView: View {
             Text(message ?? "")
         }
         .task {
-            await services.bodyComposition.flushQueue()
-            await reloadHistory()
+            // 先连秤，网络的事放后面：网络慢或服务端在重启时，不能让刚站上去的那一次变成离线记录。
             // 先问完健康授权再连秤：同步时才弹窗的话，保存一直等着，秤收不到确认就不发实时体重。
             await services.bodyComposition.prepareHealthWrite()
             connection.onFinal = { measurement in Task { await save(measurement) } }
             connection.onOfflineRecord = { await saveOffline($0) }
             connection.user = scaleUser(await loadProfile())
             connect()
+            await services.bodyComposition.flushQueue()
+            await reloadHistory()
         }
         .onDisappear { connection.stop() }
         // 从详情页回来时，填过的秤读数可能改了校准。
@@ -422,7 +423,8 @@ struct BodyCompositionView: View {
     /// 健康数据还没读完时先补读，体脂率要用身高、年龄、性别。
     private func loadProfile() async -> HealthSnapshot {
         if let profile { return profile }
-        let loaded = await services.health.snapshot(on: LocalDate(date: Date(), timeZone: .current))
+        // 只读 Apple 健康，不走网络：连秤要等它。
+        let loaded = await services.health.localSnapshot(on: LocalDate(date: Date(), timeZone: .current))
         profile = loaded
         return loaded
     }
