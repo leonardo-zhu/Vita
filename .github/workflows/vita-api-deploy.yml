@@ -1,0 +1,121 @@
+name: Deploy Vita API
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "api/**"
+      - "!api/**.md"
+      - "packages/contract/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/vita-api-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vita-api
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/vita-api
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --filter vita-api...
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+
+  build:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: api/Dockerfile
+          push: true
+          platforms: linux/arm64
+          build-args: |
+            VITA_API_VERSION=${{ github.sha }}
+          cache-from: type=gha,scope=vita-api
+          cache-to: type=gha,scope=vita-api,mode=max
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  deploy:
+    needs: build
+    runs-on: [self-hosted, r4s]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy on the R4S runner
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          DEPLOY_DIR="/opt/stacks/vita-api"
+
+          if [ ! -f "$DEPLOY_DIR/.env" ]; then
+            echo "ERROR: $DEPLOY_DIR/.env 不存在，请先按 api/README.md 完成首次准备"
+            exit 1
+          fi
+
+          # compose.yaml 以仓库为准，每次部署覆盖服务器上的副本；.env 只在服务器上维护
+          cp api/deploy/compose.yaml "$DEPLOY_DIR/compose.yaml"
+          cd "$DEPLOY_DIR"
+
+          # R4S 经 OpenClash 访问 ghcr.io，偶尔会断（EOF），登录和拉取都重试几次
+          retry() {
+            for i in 1 2 3 4 5; do
+              "$@" && return 0
+              echo "第 $i 次失败，10 秒后重试：$*"
+              sleep 10
+            done
+            return 1
+          }
+
+          retry sh -c 'echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin'
+
+          # 固定到本次构建的镜像
+          export API_TAG="${{ github.sha }}"
+          retry docker compose pull
+          docker compose up -d --remove-orphans
+          docker image prune -f

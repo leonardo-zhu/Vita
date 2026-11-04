@@ -1,6 +1,6 @@
 # Vita 2.0 架构设计
 
-**状态：草案（2026-11-04），待评审。** 标了"已定"的是讨论中已经达成一致的结论（ADR-019 至 022，状态仍为提议，评审通过后改为已采纳）；标了"建议"的是给出的推荐方案，等评审确认；§14 是还没定的问题。2026-11-04 第一轮评审的结论已写进各节。  
+**状态：已评审（2026-11-04），M1 进行中。** 标了"已定"的是已经达成一致的结论（ADR-019 至 022 已采纳）；标了"建议"的是给出的推荐方案，等评审确认；§14 是还没定的问题。2026-11-04 第一轮评审的结论已写进各节。  
 **关联：** [Vita PRD v2.0 草案](../product/Vita-PRD-v2.0.md)、[ADR](ADR.md)（ADR-019 至 022）、[TDD v0.1](TDD-v0.1.md)（1.0 基线）、[Vita Admin 设计](vita-admin.md)、[Agent 工具契约](../contracts/agent-tools.md)
 
 ## 1. 背景
@@ -209,6 +209,8 @@ Apple 健康本身经 iCloud 在同一 Apple ID 的设备间同步，这不是�
 ## 16. 分期
 
 与 PRD v2.0 §7 对应：
+
+M1 进度（2026-11-04）：根目录 pnpm workspace（沿用 Admin 原来的 lockfile，依赖版本不变）、`packages/contract`、`api/` 骨架（健康检查、设备令牌的签发 / 校验 / 吊销、SQLite 迁移、审计）、Dockerfile、compose、Caddy 配置与 CI 已完成；Admin 的构建改为从根目录安装（standalone 产物里 `server.js` 移到 `admin/` 下）。业务数据的表与接口尚未开始。部署地址的环境变量用 `VITA_API_HOST`，不用 `HOSTNAME`（很多 shell 会把它设成机器名）。
 
 | 阶段 | 技术内容 |
 | --- | --- |

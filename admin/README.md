@@ -4,7 +4,7 @@ Next.js 管理后台：远程配置的编辑、校验与发布（M1），Prompt 
 
 约定：
 
-- 包管理器使用 pnpm。
+- 包管理器使用 pnpm，仓库根目录是 workspace（ADR-022），lockfile 在根目录；在根目录 `pnpm install` 一次即可。
 - 配置校验使用 `../shared/config-schema/` 中的 JSON Schema，与 iOS 端共用；工具清单与内置 prompt 取自 `../ios/Vita/Resources/DefaultConfig.json`，工具参数 schema 取自 `../shared/agent-tools/tool-parameters.json`，诊断日志格式取自 `../shared/diagnostics/`。这些文件由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
 - 模型网关不在此处，见独立项目 Conduit。
 
@@ -36,7 +36,7 @@ SQLite 在 `.data/vita-admin.db`，发布出来的文件在 `.data/published/sta
 
 ## 部署
 
-推到 `main` 且改到 `admin/`、`shared/config-schema/` 或 `DefaultConfig.json` 时，`.github/workflows/vita-admin-deploy.yml` 会：测试 → 在 GitHub 的 arm64 runner 上构建镜像推到 `ghcr.io/leonardo-zhu/vita-admin` → 在 R4S 的 self-hosted runner 上把 `deploy/compose.yaml` 拷到 `/opt/stacks/vita-admin/` 并 `docker compose pull && up -d`。
+推到 `main` 且改到 `admin/`、`shared/config-schema/`、`DefaultConfig.json`、`packages/contract/` 或根目录的 workspace 文件时，`.github/workflows/vita-admin-deploy.yml` 会：测试 → 在 GitHub 的 arm64 runner 上构建镜像推到 `ghcr.io/leonardo-zhu/vita-admin` → 在 R4S 的 self-hosted runner 上把 `deploy/compose.yaml` 拷到 `/opt/stacks/vita-admin/` 并 `docker compose pull && up -d`。
 
 ### 首次准备（在 R4S 上，只做一次）
 

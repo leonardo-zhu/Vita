@@ -1,0 +1,6 @@
+/node_modules/
+/dist/
+# 本地 SQLite 库
+/.data/
+.env*
+!.env.example

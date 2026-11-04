@@ -1,0 +1,19 @@
+{
+  "name": "@vita/contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vita API 的请求与响应定义，API 用来校验，Admin 用来调用（ADR-022）",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

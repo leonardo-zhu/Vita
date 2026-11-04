@@ -1,0 +1,10 @@
+# 全仓库一份 lockfile（ADR-022）：Admin、API 与共享包。iOS 不在这里。
+packages:
+  - admin
+  - api
+  - packages/*
+
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+  - esbuild

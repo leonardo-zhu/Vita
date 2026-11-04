@@ -1,0 +1,14 @@
+# 构建上下文是仓库根目录，只放 API 需要的文件（见 Dockerfile 开头）
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!admin/package.json
+!api
+!packages/contract
+api/node_modules
+api/dist
+api/.data
+api/.env*
+!api/.env.example
+packages/contract/node_modules

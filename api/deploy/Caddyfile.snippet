@@ -1,0 +1,11 @@
+# 追加到 /opt/stacks/caddy/Caddyfile。
+#
+# vita-api.r4s.leonardo-zhu.me 已被 *.r4s 的通配解析覆盖（家里分流 DNS 到局域网，外面走 Cloudflare 的 IPv6 DDNS），
+# 不用另加 DNS 记录。整个域名都转给只监听 127.0.0.1:3014 的 API（《Vita 2.0 架构设计》§5）。
+
+vita-api.r4s.leonardo-zhu.me {
+	reverse_proxy 127.0.0.1:3014 {
+		# Agent 的回复用 SSE 流式推送，不能缓冲
+		flush_interval -1
+	}
+}

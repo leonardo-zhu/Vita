@@ -1,0 +1,29 @@
+# Vita API — R4S 上的 /opt/stacks/vita-api/compose.yaml
+# 由 GitHub Actions 部署时从仓库拷过去，不要在服务器上直接改（改了会被下次部署覆盖）。
+#
+# 一个服务：api/ 目录打包出的 Node 服务。CI 构建后推到 GHCR。
+# 和 R4S 其他 stack 一致：network_mode: host + restart: unless-stopped。
+# 端口：3000（gh-mcp）、3012（Conduit）、3013（Admin）、4000（个人站）已被占用，这里用 3014。
+
+services:
+  api:
+    image: ghcr.io/leonardo-zhu/vita-api:${API_TAG:-latest}
+    container_name: vita-api
+    restart: unless-stopped
+    network_mode: host
+    # 服务令牌（与 Admin 的 .env 填同一个值），模板见 api/.env.example。只在服务器上维护
+    env_file:
+      - .env
+    environment:
+      - PORT=3014
+      # 只给同机的 Caddy 和 Admin 访问
+      - VITA_API_HOST=127.0.0.1
+      - TZ=Asia/Shanghai
+      - VITA_API_DATA_DIR=/data
+      - NODE_OPTIONS=--max-old-space-size=192
+    volumes:
+      # 容器里以 node 用户（uid 1000）运行，首次部署前 chown 1000:1000
+      - /opt/vita-api/data:/data
+    mem_limit: 256m
+    labels:
+      - "app=vita-api"
