@@ -1,5 +1,6 @@
 'use client'
 
+import { Pencil, Trash2 } from 'lucide-react'
 import { useTransition } from 'react'
 import { toast } from 'sonner'
 
@@ -71,7 +72,8 @@ export function RecordList({ date, revision, records }: { date: string; revision
             <CardTitle className="text-base">
               {record.title || '—'} <span className="text-sm font-normal text-muted-foreground">{record.energy} kcal</span>
             </CardTitle>
-            <Button size="sm" variant="ghost" className="text-destructive" disabled={pending} onClick={() => deleteRecord(record)}>
+            <Button size="sm" variant="outline" className="text-destructive" disabled={pending} onClick={() => deleteRecord(record)}>
+              <Trash2 />
               {t.data.deleteRecord}
             </Button>
           </CardHeader>
@@ -87,12 +89,22 @@ export function RecordList({ date, revision, records }: { date: string; revision
                 <span className="text-xs tabular-nums">
                   {item.energy} kcal · P {item.protein} g
                 </span>
-                <Button size="sm" variant="ghost" disabled={pending} onClick={() => rescale(record, item)}>
-                  {t.data.rescale}
-                </Button>
-                <Button size="sm" variant="ghost" className="text-destructive" disabled={pending} onClick={() => deleteItem(record, item)}>
-                  {t.common.delete}
-                </Button>
+                <div className="flex">
+                  <Button size="icon-sm" variant="ghost" title={t.data.rescale} aria-label={t.data.rescale} disabled={pending} onClick={() => rescale(record, item)}>
+                    <Pencil />
+                  </Button>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="text-destructive"
+                    title={t.common.delete}
+                    aria-label={t.common.delete}
+                    disabled={pending}
+                    onClick={() => deleteItem(record, item)}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>

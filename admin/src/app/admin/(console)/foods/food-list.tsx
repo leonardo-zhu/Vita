@@ -1,5 +1,6 @@
 'use client'
 
+import { Pencil, Trash2 } from 'lucide-react'
 import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 
@@ -94,17 +95,26 @@ export function FoodList({ products }: { products: FoodRow[] }) {
           )}
           {editing?.id !== product.id && (
             <div className="flex gap-1">
-              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditing({ id: product.id, name: product.name, brand: product.brand ?? '', aliases: product.aliases.join('、') })}>
-                {t.data.edit}
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title={t.data.edit}
+                aria-label={t.data.edit}
+                disabled={pending}
+                onClick={() => setEditing({ id: product.id, name: product.name, brand: product.brand ?? '', aliases: product.aliases.join('、') })}
+              >
+                <Pencil />
               </Button>
               <Button
-                size="sm"
+                size="icon-sm"
                 variant="ghost"
                 className="text-destructive"
+                title={t.common.delete}
+                aria-label={t.common.delete}
                 disabled={pending}
                 onClick={() => window.confirm(t.data.deleteFoodConfirm(product.name)) && run(() => deleteFoodAction(product.id, product.name))}
               >
-                {t.common.delete}
+                <Trash2 />
               </Button>
             </div>
           )}
