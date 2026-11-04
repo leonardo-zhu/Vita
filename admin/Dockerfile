@@ -20,6 +20,7 @@ COPY shared/config-schema /repo/shared/config-schema
 COPY shared/agent-tools /repo/shared/agent-tools
 COPY shared/diagnostics /repo/shared/diagnostics
 COPY ios/Vita/Resources/DefaultConfig.json /repo/ios/Vita/Resources/DefaultConfig.json
+COPY packages/contract /repo/packages/contract
 COPY admin ./
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build

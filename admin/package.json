@@ -17,6 +17,7 @@
     "@base-ui/react": "^1.9.0",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "14.0.3",
+    "@vita/contract": "workspace:*",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "class-variance-authority": "^0.7.1",

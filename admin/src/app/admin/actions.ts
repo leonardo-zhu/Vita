@@ -33,6 +33,7 @@ import type { ValidationIssue } from '@/server/config/validate'
 import { deletePasskey, getPasskey } from '@/server/db'
 import { deleteInstall, setInstallRevoked } from '@/server/diagnostics/query'
 import { conduitConfigured, runTrials, type TrialRun, type TrialSource } from '@/server/trial'
+import { createDevice, revokeDevice, VitaApiError } from '@/server/vita-api'
 
 export type ActionResult =
   | { ok: true; message?: string; warning?: string }
@@ -203,4 +204,49 @@ export async function setInstallRevokedAction(installId: string, revoked: boolea
   recordAudit({ actor: actor.name, action: 'install_revoke', targetType: 'install', targetId: installId, diff: { revoked }, ip: actor.ip })
   revalidatePath('/admin/diagnostics')
   return { ok: true, message: revoked ? t.actions.installRevoked : t.actions.installRestored }
+}
+
+// ---------------------------------------------------------------------------
+// 设备令牌（经 Vita API 签发与吊销）
+// ---------------------------------------------------------------------------
+
+/** 签发后令牌只在这次返回里出现，页面展示一次，之后看不到。 */
+export async function createDeviceAction(
+  name: string
+): Promise<{ ok: true; token: string; deviceName: string } | { ok: false; message: string }> {
+  const actor = await requireActor()
+  const t = await getT()
+  const trimmed = name.trim()
+  if (!trimmed || trimmed.length > 64) return { ok: false, message: t.devices.errors.badName }
+  try {
+    const { device, token } = await createDevice(trimmed)
+    recordAudit({ actor: actor.name, action: 'device_create', targetType: 'device', targetId: device.id, diff: { name: device.name }, ip: actor.ip })
+    revalidatePath('/admin/devices')
+    return { ok: true, token, deviceName: device.name }
+  } catch (error) {
+    return { ok: false, message: deviceErrorText(t, error) }
+  }
+}
+
+export async function revokeDeviceAction(id: string, name: string): Promise<ActionResult> {
+  const actor = await requireActor()
+  const t = await getT()
+  try {
+    await revokeDevice(id)
+  } catch (error) {
+    return { ok: false, message: deviceErrorText(t, error) }
+  }
+  recordAudit({ actor: actor.name, action: 'device_revoke', targetType: 'device', targetId: id, diff: { name }, ip: actor.ip })
+  revalidatePath('/admin/devices')
+  return { ok: true, message: t.devices.revoked(name) }
+}
+
+function deviceErrorText(t: Messages, error: unknown): string {
+  if (error instanceof VitaApiError) {
+    if (error.code === 'notConfigured') return t.devices.errors.notConfigured
+    if (error.code === 'unreachable') return t.devices.errors.unreachable
+    if (error.code === 'deviceNotFound') return t.devices.errors.notFound
+    return t.devices.errors.api(error.message)
+  }
+  return t.devices.errors.api((error as Error).message)
 }

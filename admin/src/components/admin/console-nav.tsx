@@ -15,6 +15,7 @@ export function ConsoleNav() {
     { href: '/admin/releases', label: t.nav.releases },
     { href: '/admin/diagnostics', label: t.nav.diagnostics },
     { href: '/admin/audit', label: t.nav.audit },
+    { href: '/admin/devices', label: t.nav.devices },
     { href: '/admin/settings', label: t.nav.settings },
   ]
   return (

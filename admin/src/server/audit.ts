@@ -16,6 +16,8 @@ export type AuditAction =
   | 'trial'
   | 'install_delete'
   | 'install_revoke'
+  | 'device_create'
+  | 'device_revoke'
 
 export interface AuditEntry {
   actor: string
