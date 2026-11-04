@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Data 面板的 Nutrition 部分（PRD §3.5）：个人 Nutrition DB 与公共参考库的收录情况。只读，修改走对话。
+/// Data 面板的 Nutrition 部分（PRD §3.5）：个人 Nutrition DB 与公共参考库的收录情况。个人食品可以在详情页直接改或删除（M4）。
 struct NutritionLibraryView: View {
     let services: AppServices
     @State private var products: [FoodProductSummary] = []
@@ -27,7 +27,7 @@ struct NutritionLibraryView: View {
                     ForEach(recent) { product in
                         Divider()
                         NavigationLink {
-                            FoodProductDetailView(product: product, labels: services.labels)
+                            FoodProductDetailView(product: product, services: services) { Task { await reload() } }
                         } label: {
                             ProductRow(product: product).padding(.vertical, 12).contentShape(.rect)
                         }
@@ -36,7 +36,7 @@ struct NutritionLibraryView: View {
                     if products.count > recent.count {
                         Divider()
                         NavigationLink {
-                            PersonalFoodListView(products: products, labels: services.labels)
+                            PersonalFoodListView(products: products, services: services) { Task { await reload() } }
                         } label: {
                             HStack {
                                 Text("查看全部 \(products.count) 个").foregroundStyle(VitaTheme.intake)
@@ -124,7 +124,8 @@ private struct ProductRow: View {
 /// 个人食品库完整列表，按名称拼音排序，可搜索名称或品牌。
 private struct PersonalFoodListView: View {
     let products: [FoodProductSummary]
-    let labels: LabelScanService
+    let services: AppServices
+    let onChange: () -> Void
     @State private var query = ""
 
     private var filtered: [FoodProductSummary] {
@@ -142,7 +143,7 @@ private struct PersonalFoodListView: View {
                 }
                 ForEach(filtered) { product in
                     NavigationLink {
-                        FoodProductDetailView(product: product, labels: labels)
+                        FoodProductDetailView(product: product, services: services, onChange: onChange)
                     } label: {
                         ProductRow(product: product).padding(.vertical, 12).contentShape(.rect)
                     }
@@ -161,8 +162,23 @@ private struct PersonalFoodListView: View {
 }
 
 private struct FoodProductDetailView: View {
-    let product: FoodProductSummary
-    let labels: LabelScanService
+    let services: AppServices
+    let onChange: () -> Void
+    @State private var product: FoodProductSummary
+    @State private var isEditingInfo = false
+    @State private var isEditingNutrition = false
+    @State private var isConfirmingDelete = false
+    @State private var isSaving = false
+    @State private var failure: String?
+    @Environment(\.dismiss) private var dismiss
+
+    init(product: FoodProductSummary, services: AppServices, onChange: @escaping () -> Void) {
+        self.services = services
+        self.onChange = onChange
+        _product = State(initialValue: product)
+    }
+
+    private var labels: LabelScanService { services.labels }
 
     var body: some View {
         ScrollView {
@@ -198,6 +214,213 @@ private struct FoodProductDetailView: View {
         .background { VitaTheme.background }
         .navigationTitle(product.name)
         .navigationBarTitleDisplayMode(.inline)
+        .disabled(isSaving)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu("编辑", systemImage: "ellipsis") {
+                    Button("修改名称与包装", systemImage: "pencil") { isEditingInfo = true }
+                    Button("修改营养值", systemImage: "chart.bar.doc.horizontal") { isEditingNutrition = true }
+                    Button("删除这个食品", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
+                }
+            }
+        }
+        .sheet(isPresented: $isEditingInfo) {
+            FoodInfoEditor(product: product) { name, brand, package in
+                save { try await services.foods.update(product.id, name: name, brandOrSupplier: brand, package: package) }
+            }
+        }
+        .sheet(isPresented: $isEditingNutrition) {
+            FoodNutritionEditor(basis: product.activeVersion?.basis) { basis, note in
+                save { try await services.foods.addVersion(product.id, expectedActiveVersionID: product.activeVersion?.id, basis: basis, sourceNote: note) }
+            }
+        }
+        .confirmationDialog("删除“\(product.name)”？", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
+            Button("删除", role: .destructive) { delete() }
+        } message: {
+            Text("删除后不再出现在食品库里，Vita 也不会再用它；已经记下的饮食不受影响。")
+        }
+        .alert("没有保存", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(failure ?? "")
+        }
+    }
+
+    private func save(_ operation: @escaping () async throws -> FoodProductSummary) {
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            do {
+                product = try await operation()
+                onChange()
+            } catch let error as APIError {
+                failure = error.userMessage
+                if let latest = try? await services.foods.product(product.id) { product = latest }
+            } catch {
+                failure = String(describing: error)
+            }
+        }
+    }
+
+    private func delete() {
+        isSaving = true
+        Task {
+            defer { isSaving = false }
+            do {
+                try await services.foods.delete(product.id)
+                onChange()
+                dismiss()
+            } catch let error as APIError {
+                failure = error.userMessage
+            } catch {
+                failure = String(describing: error)
+            }
+        }
+    }
+}
+
+/// 改名称、品牌、包装规格。
+private struct FoodInfoEditor: View {
+    let onSave: (String, String?, Quantity?) -> Void
+    @State private var name: String
+    @State private var brand: String
+    @State private var packageAmount: String
+    @State private var packageUnit: QuantityUnit
+    @Environment(\.dismiss) private var dismiss
+
+    init(product: FoodProductSummary, onSave: @escaping (String, String?, Quantity?) -> Void) {
+        self.onSave = onSave
+        _name = State(initialValue: product.name)
+        _brand = State(initialValue: product.brandOrSupplier ?? "")
+        _packageAmount = State(initialValue: product.package.map { "\($0.amount)" } ?? "")
+        _packageUnit = State(initialValue: product.package?.unit ?? .gram)
+    }
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var package: Quantity? {
+        Decimal(string: packageAmount.trimmingCharacters(in: .whitespaces)).flatMap { $0 > 0 ? Quantity(amount: $0, unit: packageUnit) : nil }
+    }
+    /// 包装填了但不是正数时不让保存。
+    private var isValid: Bool { !trimmedName.isEmpty && (packageAmount.trimmingCharacters(in: .whitespaces).isEmpty || package != nil) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("名称", text: $name)
+                TextField("品牌（可不填）", text: $brand)
+                Section("包装规格（可不填）") {
+                    HStack {
+                        TextField("如 950", text: $packageAmount).keyboardType(.decimalPad)
+                        UnitPicker(unit: $packageUnit)
+                    }
+                }
+            }
+            .navigationTitle("修改名称与包装")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        let trimmedBrand = brand.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onSave(trimmedName, trimmedBrand.isEmpty ? nil : trimmedBrand, package)
+                        dismiss()
+                    }
+                    .disabled(!isValid)
+                }
+            }
+        }
+    }
+}
+
+/// 手动改营养值：存为新版本，旧版本保留在历史里，已有记录不变。
+private struct FoodNutritionEditor: View {
+    let onSave: (FoodVersionBasis, String?) -> Void
+    @State private var basisAmount: String
+    @State private var basisUnit: QuantityUnit
+    @State private var values: [Nutrient: String]
+    @State private var note = ""
+    @Environment(\.dismiss) private var dismiss
+
+    init(basis: FoodVersionBasis?, onSave: @escaping (FoodVersionBasis, String?) -> Void) {
+        self.onSave = onSave
+        _basisAmount = State(initialValue: basis.map { "\($0.quantity.amount)" } ?? "100")
+        _basisUnit = State(initialValue: basis?.quantity.unit ?? .gram)
+        var initial: [Nutrient: String] = [:]
+        for nutrient in Nutrient.allCases {
+            initial[nutrient] = basis.map { "\(nutrient.value(in: $0.nutrients))" } ?? ""
+        }
+        _values = State(initialValue: initial)
+    }
+
+    private func number(_ text: String?) -> Decimal? {
+        guard let text, let value = Decimal(string: text.trimmingCharacters(in: .whitespaces)), value >= 0 else { return nil }
+        return value
+    }
+
+    private var basis: FoodVersionBasis? {
+        guard let amount = number(basisAmount), amount > 0,
+              let energy = number(values[.energyKcal]), let protein = number(values[.proteinG]),
+              let fat = number(values[.fatG]), let carbohydrate = number(values[.carbohydrateG])
+        else { return nil }
+        return FoodVersionBasis(
+            quantity: Quantity(amount: amount, unit: basisUnit),
+            nutrients: NutrientValues(energyKcal: energy, proteinG: protein, fatG: fat, carbohydrateG: carbohydrate)
+        )
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("每") {
+                    HStack {
+                        TextField("100", text: $basisAmount).keyboardType(.decimalPad)
+                        UnitPicker(unit: $basisUnit)
+                    }
+                }
+                Section("含") {
+                    ForEach(Nutrient.allCases, id: \.self) { nutrient in
+                        HStack {
+                            Text(nutrient.label)
+                            TextField("0", text: Binding(get: { values[nutrient] ?? "" }, set: { values[nutrient] = $0 }))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Text(nutrient == .energyKcal ? "千卡" : "g").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Section {
+                    TextField("改动说明（可不填）", text: $note)
+                } footer: {
+                    Text("保存为新版本并立即生效；旧版本留在历史里，已经记下的饮食不变。")
+                }
+            }
+            .navigationTitle("修改营养值")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        guard let basis else { return }
+                        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onSave(basis, trimmed.isEmpty ? nil : trimmed)
+                        dismiss()
+                    }
+                    .disabled(basis == nil)
+                }
+            }
+        }
+    }
+}
+
+private struct UnitPicker: View {
+    @Binding var unit: QuantityUnit
+
+    var body: some View {
+        Picker("单位", selection: $unit) {
+            ForEach(QuantityUnit.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 110)
     }
 }
 

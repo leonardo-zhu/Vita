@@ -6,15 +6,15 @@ Vita 是一个个人 AI 健康助理：用自然语言记录饮食，追踪营�
 
 | 文档 | 用途 | 状态 |
 | --- | --- | --- |
-| [PRD v2.0](docs/product/Vita-PRD-v2.0.md) | 2.0 相对 1.0 的产品变化 | 已评审，M1–M3 已实现 |
-| [Vita 2.0 架构设计](docs/architecture/vita-2.0-architecture.md) | 服务端、iOS 改造、Apple 健康同步、迁移，以及 2.0 的进度 | 已评审，M1–M3 已实现 |
+| [PRD v2.0](docs/product/Vita-PRD-v2.0.md) | 2.0 相对 1.0 的产品变化 | 已评审，M1–M4 已实现 |
+| [Vita 2.0 架构设计](docs/architecture/vita-2.0-architecture.md) | 服务端、iOS 改造、Apple 健康同步、迁移，以及 2.0 的进度 | 已评审，M1–M4 已实现 |
 | [PRD v0.6](docs/product/Vita-PRD-v0.6.md) | 1.0 的产品需求，2.0 没改的规则沿用 | 基线 |
 | [身体成分模块](docs/product/Vita-Body-Composition.md) | 体脂秤、指标、校准 | 已实现 |
 | [技术设计文档](docs/architecture/TDD-v0.1.md) | 1.0 的架构、数据、同步与安全设计；领域规则仍有效 | 1.0 基线 |
 | [架构决策记录](docs/architecture/ADR.md) | 已作出的技术决策（ADR-019 起为 2.0） | 已采纳 |
 | [Agent 工具契约](docs/contracts/agent-tools.md) | Agent 工具与写入确认边界；2.0 起在服务端执行 | 已实现 |
 | [模型 Provider 集成规范](docs/contracts/llm-provider.md) | Responses API、工具循环与密钥边界；2.0 起调用方是 Vita API | 已实现，部分被取代 |
-| [Vita Admin 设计](docs/architecture/vita-admin.md) | 远程配置发布、Prompt 调试、诊断日志、设备令牌 | M1–M3 已部署 |
+| [Vita Admin 设计](docs/architecture/vita-admin.md) | 远程配置发布、Prompt 调试、诊断日志、设备令牌、对话与数据管理 | M1–M4 已部署 |
 | [Conduit 项目设计](docs/architecture/llm-gateway-project.md) | 独立的 LLM 网关项目 | 已上线 |
 | [公共营养参考库规范](docs/reference-food-library.md) | 数据来源、收录规则、构建与校验 | 已采纳 |
 | [MVP 实施计划](docs/implementation-plan.md) | 1.0 的开发阶段记录与剩余工作 | 1.0 完成，剩余工作按 2.0 更新 |
@@ -23,7 +23,7 @@ Vita 是一个个人 AI 健康助理：用自然语言记录饮食，追踪营�
 
 - iOS 原生应用：Swift、SwiftUI、HealthKit；最低部署版本为 iOS 17。业务数据不存手机，只存设备令牌（Keychain）、Apple 健康的同步进度与没传上去的称重。
 - Vita API（`api/`）：Node 24 + TypeScript + Hono + `node:sqlite`，部署在 R4S（`https://vita-api.r4s.leonardo-zhu.me`）。记录、食品库、目标、对话、确认卡、称重、标签照片都以它为准；Agent 的工具循环与确认门也在这里跑，经 Conduit 调模型，模型密钥只在服务端。
-- Vita Admin（`admin/`）：远程配置发布、Prompt 调试、诊断日志、设备令牌管理；数据管理经 API。
+- Vita Admin（`admin/`）：远程配置发布、Prompt 调试、诊断日志、设备令牌管理；对话追踪与 rewind、饮食记录与食品库的管理经 API。
 - 确认门不变：模型只能查询和提出变更，用户在 App 里确认后才写入（ADR-004）。
 - 请求 / 响应定义在 `packages/contract`（zod），API 与 Admin 共用；iOS 按它手写 Swift 模型。
 
@@ -42,7 +42,7 @@ xcodegen generate
 xcodebuild test -project Vita.xcodeproj -scheme Vita -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
 ```
 
-代码位于 `ios/Vita/`（App / Application / Domain / Data / Features / Platform），测试位于 `ios/VitaTests/`。当前进度：1.0 的 Phase 0–5 完成；2.0 的 M1–M3 已实现，见[架构设计 §16](docs/architecture/vita-2.0-architecture.md#16-分期)；剩余工作见[实施计划](docs/implementation-plan.md#剩余工作)。
+代码位于 `ios/Vita/`（App / Application / Domain / Data / Features / Platform），测试位于 `ios/VitaTests/`。当前进度：1.0 的 Phase 0–5 完成；2.0 的 M1–M4 已实现，见[架构设计 §16](docs/architecture/vita-2.0-architecture.md#16-分期)；剩余工作见[实施计划](docs/implementation-plan.md#剩余工作)。
 
 ### 版本号
 

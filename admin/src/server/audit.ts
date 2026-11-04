@@ -18,6 +18,13 @@ export type AuditAction =
   | 'install_revoke'
   | 'device_create'
   | 'device_revoke'
+  | 'message_exclude'
+  | 'message_include'
+  | 'record_delete'
+  | 'item_delete'
+  | 'item_rescale'
+  | 'food_update'
+  | 'food_delete'
 
 export interface AuditEntry {
   actor: string

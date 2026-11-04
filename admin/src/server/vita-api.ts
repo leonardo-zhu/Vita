@@ -4,7 +4,21 @@
  */
 import 'server-only'
 
-import { CreateDeviceResponse, ErrorResponse, ListDevicesResponse, type Device } from '@vita/contract'
+import {
+  ChatMessage,
+  ConversationDaysResponse,
+  CreateDeviceResponse,
+  DayResponse,
+  ErrorResponse,
+  FoodProductResponse,
+  FoodsResponse,
+  ListDevicesResponse,
+  MessagesResponse,
+  TracesResponse,
+  type Device,
+  type FoodProduct,
+  type ItemAmountRequest,
+} from '@vita/contract'
 import type { z } from 'zod'
 
 export class VitaApiError extends Error {
@@ -58,4 +72,70 @@ export async function createDevice(name: string): Promise<{ device: Device; toke
 
 export async function revokeDevice(id: string): Promise<void> {
   await call(`/v1/admin/devices/${encodeURIComponent(id)}`, null, { method: 'DELETE' })
+}
+
+// MARK: - 对话（rewind）
+
+export async function conversationDays() {
+  return (await call('/v1/admin/conversation-days', ConversationDaysResponse)).days
+}
+
+export async function dayMessages(date: string) {
+  return (await call(`/v1/days/${encodeURIComponent(date)}/messages`, MessagesResponse)).messages
+}
+
+export async function dayTraces(date: string) {
+  return (await call(`/v1/admin/traces?date=${encodeURIComponent(date)}`, TracesResponse)).traces
+}
+
+/** 消息不再发给模型（或恢复）；消息本身保留。 */
+export async function setMessageExcluded(id: string, excludedFromContext: boolean) {
+  return call(`/v1/admin/messages/${encodeURIComponent(id)}`, ChatMessage, { method: 'PATCH', body: JSON.stringify({ excludedFromContext }) })
+}
+
+// MARK: - 记录
+
+export async function day(date: string) {
+  return call(`/v1/days/${encodeURIComponent(date)}`, DayResponse)
+}
+
+const recordPath = (date: string, recordId: string) => `/v1/days/${encodeURIComponent(date)}/records/${encodeURIComponent(recordId)}`
+
+export async function deleteRecord(date: string, revision: number, recordId: string) {
+  return call(`${recordPath(date, recordId)}?expectedRevision=${revision}`, DayResponse, { method: 'DELETE' })
+}
+
+export async function deleteItem(date: string, revision: number, recordId: string, itemId: string) {
+  return call(`${recordPath(date, recordId)}/items/${encodeURIComponent(itemId)}?expectedRevision=${revision}`, DayResponse, { method: 'DELETE' })
+}
+
+export async function rescaleItem(date: string, recordId: string, itemId: string, body: ItemAmountRequest) {
+  return call(`${recordPath(date, recordId)}/items/${encodeURIComponent(itemId)}`, DayResponse, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+// MARK: - 食品库
+
+export async function foods(): Promise<FoodProduct[]> {
+  return (await call('/v1/foods', FoodsResponse)).products
+}
+
+export async function updateFood(id: string, body: { name: string; brandOrSupplier: string | null }) {
+  return (await call(`/v1/foods/${encodeURIComponent(id)}`, FoodProductResponse, { method: 'PATCH', body: JSON.stringify(body) })).product
+}
+
+export async function deleteFood(id: string) {
+  await call(`/v1/foods/${encodeURIComponent(id)}`, null, { method: 'DELETE' })
+}
+
+/** 标签照片的原始字节，经 Admin 转给浏览器（浏览器拿不到服务令牌）。 */
+export async function labelImage(id: string): Promise<{ bytes: ArrayBuffer; contentType: string } | null> {
+  const token = process.env.VITA_API_SERVICE_TOKEN
+  if (!token) return null
+  const res = await fetch(new URL(`/v1/label-scans/${encodeURIComponent(id)}`, baseURL()), {
+    headers: { authorization: `Bearer ${token}` },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null)
+  if (!res?.ok) return null
+  return { bytes: await res.arrayBuffer(), contentType: res.headers.get('content-type') ?? 'image/jpeg' }
 }

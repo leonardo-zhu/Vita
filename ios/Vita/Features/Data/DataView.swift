@@ -129,6 +129,11 @@ struct DataView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
             }
+            // 下拉刷新：重读健康数据传上去，再取服务端最新的记录与目标（Admin 改过的也会刷出来）。
+            .refreshable {
+                await model.loadHealth()
+                await syncHealth()
+            }
             .background { VitaTheme.background }
             .navigationTitle("数据")
             .navigationBarTitleDisplayMode(.inline)
@@ -181,6 +186,7 @@ struct DataView: View {
             ContentUnavailableView("无法读取数据", systemImage: "exclamationmark.triangle", description: Text(message))
         case .day(let day):
             DayDashboard(
+                services: services,
                 day: day,
                 isToday: day.date == model.today,
                 snapshot: model.snapshot,
@@ -188,7 +194,9 @@ struct DataView: View {
                 onSetGoal: { isSettingGoal = true },
                 onConnectHealth: { Task { await model.connectHealth(); await syncHealth() } },
                 onWeigh: { isWeighing = true },
-                onRetrySync: { Task { await syncHealth() } }
+                onRetrySync: { Task { await syncHealth() } },
+                // 详情页里改了记录：刷新汇总，并把变化同步到 Apple 健康。
+                onRecordChange: { Task { await model.reload(); await syncHealth() } }
             )
             // 每天一个视图身份：切换日期时直接换成那天的内容，不从前一天的进度圆环动画过去（否则卡片高度变化时圆环会跟着位移动画、看起来漂移）。
             .id(day.date)
@@ -246,6 +254,7 @@ struct DataView: View {
 // MARK: - 日视图
 
 private struct DayDashboard: View {
+    let services: AppServices
     let day: DayData
     let isToday: Bool
     let snapshot: HealthSnapshot?
@@ -254,6 +263,7 @@ private struct DayDashboard: View {
     let onConnectHealth: () -> Void
     let onWeigh: () -> Void
     let onRetrySync: () -> Void
+    let onRecordChange: () -> Void
 
     private var needsSyncAttention: Bool {
         day.records.contains { $0.healthSync == .requiresUserResolution || $0.healthSync == .failedRetryable }
@@ -264,7 +274,7 @@ private struct DayDashboard: View {
             EnergyCard(summary: day.summary, isToday: isToday, activeEnergy: snapshot?.activeEnergyKcal.value, onSetGoal: onSetGoal)
             MacroCard(summary: day.summary)
             if needsSyncAttention { syncAttention }
-            MealsSection(day: day)
+            MealsSection(services: services, day: day, onChange: onRecordChange)
             HealthSection(snapshot: snapshot, isAvailable: healthAvailable, onConnect: onConnectHealth, onWeigh: onWeigh)
         }
     }
@@ -504,7 +514,9 @@ private struct MacroCard: View {
 
 /// 按餐次排列的记录卡片。
 private struct MealsSection: View {
+    let services: AppServices
     let day: DayData
+    let onChange: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -519,7 +531,7 @@ private struct MealsSection: View {
             }
             ForEach(day.records) { record in
                 NavigationLink {
-                    RecordDetailView(record: record)
+                    RecordDetailView(services: services, day: day, record: record, onChange: onChange)
                 } label: {
                     MealCard(record: record)
                 }

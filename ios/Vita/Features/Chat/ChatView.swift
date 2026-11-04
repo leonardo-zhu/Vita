@@ -361,6 +361,8 @@ struct ChatView: View {
                 .padding(.top, 8)
             }
             .scrollDismissesKeyboard(.interactively)
+            // 下拉刷新：重新取这天的消息与待确认卡片。正在回复时不刷，免得打断这一轮。
+            .refreshable { if !model.isSending { await model.reload() } }
             // 对话不长、滚不动时也能收起键盘：点一下消息区域。
             .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             .onChange(of: model.entries.count) { scrollToBottom(proxy) }

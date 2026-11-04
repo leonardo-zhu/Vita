@@ -35,7 +35,7 @@ struct FoodChangePreview: Equatable, Codable, Sendable {
     var previousBasis: FoodVersionBasis?
 }
 
-/// 个人 Nutrition DB（PRD §3.2.1），存在服务端。变更只经确认卡执行（服务端的 Agent 提案、用户确认），App 里只读。
+/// 个人 Nutrition DB（PRD §3.2.1），存在服务端。对话里的变更经确认卡执行；用户也可以在 App 里直接改名称、包装、营养值或删除（M4）。
 @MainActor
 final class FoodService {
     private let api: VitaAPIClient
@@ -47,5 +47,64 @@ final class FoodService {
     func products() async throws -> [FoodProductSummary] {
         let response: FoodsResponseDTO = try await api.get("/v1/foods")
         return response.products.map(\.domain)
+    }
+
+    func product(_ id: UUID) async throws -> FoodProductSummary {
+        let response: FoodProductResponseDTO = try await api.get("/v1/foods/\(id.apiString)")
+        return response.product.domain
+    }
+
+    /// 改名称、品牌、包装。品牌、包装为空时清空。
+    func update(_ id: UUID, name: String, brandOrSupplier: String?, package: Quantity?) async throws -> FoodProductSummary {
+        let body = FoodProductUpdateDTO(name: name, brandOrSupplier: brandOrSupplier, package: package)
+        let response: FoodProductResponseDTO = try await api.send("PATCH", "/v1/foods/\(id.apiString)", body: body)
+        return response.product.domain
+    }
+
+    /// 手动改营养值：存为新版本并生效，旧版本保留，已有记录不变。
+    func addVersion(_ id: UUID, expectedActiveVersionID: UUID?, basis: FoodVersionBasis, sourceNote: String?) async throws -> FoodProductSummary {
+        let body = FoodVersionRequestDTO(expectedActiveVersionId: expectedActiveVersionID, basis: basis, sourceNote: sourceNote)
+        let response: FoodProductResponseDTO = try await api.send("POST", "/v1/foods/\(id.apiString)/versions", body: body)
+        return response.product.domain
+    }
+
+    /// 删除后不再出现在食品库和模型的上下文里；已有记录不受影响。
+    func delete(_ id: UUID) async throws {
+        try await api.perform("DELETE", "/v1/foods/\(id.apiString)")
+    }
+}
+
+struct FoodProductResponseDTO: Decodable, Sendable {
+    var product: FoodProductDTO
+}
+
+/// 品牌、包装为空时要显式传 null 才会清空。
+struct FoodProductUpdateDTO: Encodable, Sendable {
+    var name: String
+    var brandOrSupplier: String?
+    var package: Quantity?
+
+    enum CodingKeys: String, CodingKey { case name, brandOrSupplier, package }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(brandOrSupplier, forKey: .brandOrSupplier)
+        try container.encode(package, forKey: .package)
+    }
+}
+
+struct FoodVersionRequestDTO: Encodable, Sendable {
+    var expectedActiveVersionId: UUID?
+    var basis: FoodVersionBasis
+    var sourceNote: String?
+
+    enum CodingKeys: String, CodingKey { case expectedActiveVersionId, basis, sourceNote }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(expectedActiveVersionId?.apiString, forKey: .expectedActiveVersionId)
+        try container.encode(basis, forKey: .basis)
+        try container.encodeIfPresent(sourceNote, forKey: .sourceNote)
     }
 }

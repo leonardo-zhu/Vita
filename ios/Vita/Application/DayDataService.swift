@@ -92,3 +92,50 @@ extension DayDataService {
         return WeekData(days: try responses.map { try $0.domain(healthSync: syncState) })
     }
 }
+
+// MARK: - 直接编辑（M4）
+
+/// 直接改记录：不经确认卡（用户在 App 里亲手改，本身就是确认）。每次都带上这一天的 revision，期间被别处改过时服务端返回 409。
+/// 返回编辑后的这一天。
+extension DayDataService {
+    func updateRecord(on date: LocalDate, revision: Int, recordID: UUID, eventTime: EventTime) async throws -> DayData {
+        let body = RecordUpdateDTO(expectedRevision: revision, eventTime: EventTimeDTO(eventTime))
+        let response: DayResponseDTO = try await api.send("PATCH", "/v1/days/\(date.isoString)/records/\(recordID.apiString)", body: body)
+        return try response.domain(healthSync: syncState)
+    }
+
+    /// 改一项的用量：有克数等标准用量时给 quantity，只有“一份”这类时给 factor（营养值按倍数缩放）。
+    func rescaleItem(on date: LocalDate, revision: Int, recordID: UUID, itemID: UUID, quantity: Quantity?, factor: Decimal?, originalAmountText: String?) async throws -> DayData {
+        let body = ItemAmountDTO(expectedRevision: revision, quantity: quantity, factor: factor, originalAmountText: originalAmountText)
+        let response: DayResponseDTO = try await api.send("PATCH", "/v1/days/\(date.isoString)/records/\(recordID.apiString)/items/\(itemID.apiString)", body: body)
+        return try response.domain(healthSync: syncState)
+    }
+
+    func deleteItem(on date: LocalDate, revision: Int, recordID: UUID, itemID: UUID) async throws -> DayData {
+        let response: DayResponseDTO = try await api.send(
+            "DELETE", "/v1/days/\(date.isoString)/records/\(recordID.apiString)/items/\(itemID.apiString)",
+            query: [URLQueryItem(name: "expectedRevision", value: String(revision))]
+        )
+        return try response.domain(healthSync: syncState)
+    }
+
+    func deleteRecord(on date: LocalDate, revision: Int, recordID: UUID) async throws -> DayData {
+        let response: DayResponseDTO = try await api.send(
+            "DELETE", "/v1/days/\(date.isoString)/records/\(recordID.apiString)",
+            query: [URLQueryItem(name: "expectedRevision", value: String(revision))]
+        )
+        return try response.domain(healthSync: syncState)
+    }
+}
+
+struct RecordUpdateDTO: Encodable, Sendable {
+    var expectedRevision: Int
+    var eventTime: EventTimeDTO
+}
+
+struct ItemAmountDTO: Encodable, Sendable {
+    var expectedRevision: Int
+    var quantity: Quantity?
+    var factor: Decimal?
+    var originalAmountText: String?
+}

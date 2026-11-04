@@ -82,8 +82,8 @@ struct VitaAPIClient: Sendable {
         try decode(await perform(request("GET", path, query: query)))
     }
 
-    func send<Response: Decodable>(_ method: String, _ path: String, as type: Response.Type = Response.self) async throws -> Response {
-        try decode(await perform(request(method, path)))
+    func send<Response: Decodable>(_ method: String, _ path: String, query: [URLQueryItem] = [], as type: Response.Type = Response.self) async throws -> Response {
+        try decode(await perform(request(method, path, query: query)))
     }
 
     func send<Body: Encodable, Response: Decodable>(_ method: String, _ path: String, body: Body, as type: Response.Type = Response.self) async throws -> Response {
