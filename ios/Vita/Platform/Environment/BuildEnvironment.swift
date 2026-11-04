@@ -3,25 +3,15 @@ import Foundation
 enum BuildEnvironmentError: Error, Equatable {
     case missingAPIBaseURL
     case invalidAPIBaseURL(String)
-    case missingRemoteConfigURL
-    case invalidRemoteConfigURL(String)
-    case missingDiagnosticsURL
-    case invalidDiagnosticsURL(String)
 }
 
-/// 由构建配置决定、不可远程修改的值（vita-admin.md §3.2 / §7）。来源是 `project.yml` 中按
-/// Debug / Release 设置的 `VITA_API_BASE_URL`、`REMOTE_CONFIG_URL` 与 `DIAGNOSTICS_URL`，经 Info.plist 读出。
+/// 由构建配置决定的值。来源是 `project.yml` 中按 Debug / Release 设置的 `VITA_API_BASE_URL`，经 Info.plist 读出。
+/// 2.0 起模型参数与 prompt 都在服务端，App 不再拉远程配置，也不再上报诊断日志。
 struct BuildEnvironment: Equatable, Sendable {
     static let apiBaseURLKey = "VitaAPIBaseURL"
-    static let remoteConfigURLKey = "VitaRemoteConfigURL"
-    static let diagnosticsURLKey = "VitaDiagnosticsURL"
 
     /// Vita API（架构设计 §5）；业务数据与对话都经它。
     let apiBaseURL: URL
-    /// 远程配置只从这一个地址拉取。
-    var remoteConfigURL: URL = URL(string: "https://config.invalid/stable.json")!
-    /// 诊断日志只上报到这一个地址（ADR-014）。
-    var diagnosticsURL: URL = URL(string: "https://diagnostics.invalid/events")!
 
     static func load(from info: [String: Any]) throws -> BuildEnvironment {
         guard let raw = info[apiBaseURLKey] as? String, !raw.isEmpty else {
@@ -31,19 +21,7 @@ struct BuildEnvironment: Equatable, Sendable {
         guard let url = URL(string: raw), url.host() != nil, url.scheme == "https" || isLocalDevelopment(url) else {
             throw BuildEnvironmentError.invalidAPIBaseURL(raw)
         }
-        guard let rawConfig = info[remoteConfigURLKey] as? String, !rawConfig.isEmpty else {
-            throw BuildEnvironmentError.missingRemoteConfigURL
-        }
-        guard let configURL = URL(string: rawConfig), configURL.scheme == "https", configURL.host() != nil else {
-            throw BuildEnvironmentError.invalidRemoteConfigURL(rawConfig)
-        }
-        guard let rawDiagnostics = info[diagnosticsURLKey] as? String, !rawDiagnostics.isEmpty else {
-            throw BuildEnvironmentError.missingDiagnosticsURL
-        }
-        guard let diagnosticsURL = URL(string: rawDiagnostics), diagnosticsURL.scheme == "https", diagnosticsURL.host() != nil else {
-            throw BuildEnvironmentError.invalidDiagnosticsURL(rawDiagnostics)
-        }
-        return BuildEnvironment(apiBaseURL: url, remoteConfigURL: configURL, diagnosticsURL: diagnosticsURL)
+        return BuildEnvironment(apiBaseURL: url)
     }
 
     private static func isLocalDevelopment(_ url: URL) -> Bool {
@@ -59,7 +37,7 @@ struct BuildEnvironment: Equatable, Sendable {
     }
 }
 
-/// 客户端版本（`CFBundleShortVersionString`），与远程配置的 `minClientVersion` 比较。
+/// 客户端版本（`CFBundleShortVersionString`）。
 enum AppVersion {
     static var current: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
@@ -78,11 +56,5 @@ enum AppVersion {
     /// 设置页显示：`0.2.0 (58 · 450cdd8)`。
     static var display: String {
         "\(current) (\(build)\(commit.map { " · \($0)" } ?? ""))"
-    }
-
-    /// 系统版本，如 `27.0` 或 `27.0.1`，诊断日志用。
-    static var os: String {
-        let v = ProcessInfo.processInfo.operatingSystemVersion
-        return v.patchVersion > 0 ? "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)" : "\(v.majorVersion).\(v.minorVersion)"
     }
 }

@@ -1,11 +1,11 @@
 /**
  * Agent 的生效配置（vita-admin.md §2、§4，移植自 1.0 的 ConfigResolver）。两层按字段合并：
- * Admin 发布的 stable.json（远程）优先，缺的字段用内置默认值（与 App 同一份 DefaultConfig.json）。
+ * Admin 发布的 stable.json（远程）优先，缺的字段用内置默认值（`shared/config/DefaultConfig.json`）。
  * 每轮对话开始时读一次，一轮中途不切换；Admin 发布后下一轮就生效，不用发版。
  */
 import { readFileSync, statSync } from 'node:fs'
 
-import builtinJson from '../../../ios/Vita/Resources/DefaultConfig.json' with { type: 'json' }
+import builtinJson from '../../../shared/config/DefaultConfig.json' with { type: 'json' }
 import toolFile from '../../../shared/agent-tools/tool-parameters.json' with { type: 'json' }
 
 export interface PromptText {

@@ -1,5 +1,5 @@
 {
-  "$comment": "暴露给模型的工具清单与参数 schema（docs/contracts/agent-tools.md）。iOS 打包进 App（AgentToolCatalog），Admin 试跑时用同一份。只随客户端发布，远程配置不能改；描述文字在 ios/Vita/Resources/DefaultConfig.json。",
+  "$comment": "暴露给模型的工具清单与参数 schema（docs/contracts/agent-tools.md）。Vita API 发给模型，Admin 试跑时用同一份。只随代码发布，远程配置不能改；描述文字在 shared/config/DefaultConfig.json。",
   "tools": [
     {
       "name": "getDaySummary",

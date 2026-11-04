@@ -5,5 +5,5 @@
 字段与校验规则见 [Vita Admin 设计](../../docs/architecture/vita-admin.md) §4 / §6。
 
 - [`config.schema.json`](config.schema.json)：结构与取值范围。`configVersion` 单调递增、`minClientVersion` 的比较依赖运行时状态，由客户端与 Admin 各自在代码里检查。
-- 内置默认值 `ios/Vita/Resources/DefaultConfig.json` 也符合此 schema（L1 层，字段齐全，包括全部工具的描述）。Admin 从它读工具清单与默认文字，Vita API 把它当作内置默认值（打包进镜像）；文件还放在 iOS 目录下是历史原因。
+- 内置默认值 `shared/config/DefaultConfig.json` 也符合此 schema（L1 层，字段齐全，包括全部工具的描述）。Admin 从它读工具清单与默认文字，Vita API 把它当作内置默认值（打包进镜像）。2.0 起 App 不再读配置。
 - `configVersion` 的序号按数字比较（`.10` 大于 `.9`），Admin（`version.ts`）与 iOS（`ConfigVersion`）实现相同。

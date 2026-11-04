@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # 版本号规则见 ADR-023：主版本 = 产品代际，次版本 = 一个里程碑或一批新功能，修订 = 只修 bug；
     # 和那批改动放在同一个提交里，装手机前改好。构建号与提交由下面的构建脚本在每次构建时写入（见 Vita 目标的 postBuildScripts）。
-    MARKETING_VERSION: "2.3.0"
+    MARKETING_VERSION: "2.3.1"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   Vita:
@@ -52,17 +52,13 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         # 构建脚本要读 git，不能在脚本沙盒里跑。
         ENABLE_USER_SCRIPT_SANDBOXING: NO
-      # Vita API 与远程配置的地址只由构建配置决定，不可远程修改（vita-admin.md §3.2 / §7、架构设计 §5）。
+      # Vita API 的地址只由构建配置决定（架构设计 §5）。
       # 目前只有一个实例；有了开发实例后把 Debug 指过去。
       configs:
         Debug:
           VITA_API_BASE_URL: https://vita-api.r4s.leonardo-zhu.me
-          REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
-          DIAGNOSTICS_URL: https://vita.r4s.leonardo-zhu.me/api/ingest/events
         Release:
           VITA_API_BASE_URL: https://vita-api.r4s.leonardo-zhu.me
-          REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
-          DIAGNOSTICS_URL: https://vita.r4s.leonardo-zhu.me/api/ingest/events
     # 每次构建把构建号（提交数）和提交写进 Info.plist，设置页显示，装到手机上能看出是不是最新的。
     # 有未提交的改动时提交后面加 +。
     postBuildScripts:
@@ -84,9 +80,6 @@ targets:
     platform: iOS
     sources:
       - VitaTests
-      # 诊断上报的示例批次，与 Admin 的校验测试共用
-      - path: ../shared/diagnostics/example-batch.json
-        buildPhase: resources
     dependencies:
       - target: Vita
     settings:

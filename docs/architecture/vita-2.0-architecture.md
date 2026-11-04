@@ -164,7 +164,7 @@ Apple 健康本身经 iCloud 在同一 Apple ID 的设备间同步，这不是�
 ### 10.2 远程配置
 
 - 系统 prompt、工具描述、模型参数、标签图片参数现在由 **API** 使用。API 读取 Admin 发布到 `/opt/vita-admin/published` 的 `stable.json`（只读挂载），沿用三层合并与校验规则。
-- 手机端不再需要这些配置。`/config/*` 暂时保留，等真有客户端专用的开关再说。iOS 里拉取与缓存远程配置的代码（`Platform/Config`）还在、每次回到前台照常拉，但结果没有地方用；内置默认配置 `ios/Vita/Resources/DefaultConfig.json` 被 API 的镜像当作内置默认值使用，删 iOS 这部分之前要先把它挪到 `shared/`。
+- 手机端不再需要这些配置。`/config/*` 暂时保留，等真有客户端专用的开关再说。2026-11-05 起 iOS 不再拉远程配置，`Platform/Config` 已删除；诊断日志此前只剩配置拉取这一类事件，iOS 的上报（`Platform/Diagnostics`、设置页的开关）一并删除，Admin 的诊断页保留历史数据。内置默认配置挪到 `shared/config/DefaultConfig.json`，API 与 Admin 都从这里读。
 - 手机上的"本地调试覆盖"（模型别名、超时、系统 prompt）已随设置页的调试卡片删掉，没有改成请求参数；要试 prompt 用 Admin 的试跑。
 
 ### 10.3 对话追踪

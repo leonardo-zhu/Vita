@@ -9,7 +9,7 @@
 !shared/config-schema
 !shared/agent-tools
 !shared/diagnostics
-!ios/Vita/Resources/DefaultConfig.json
+!shared/config/DefaultConfig.json
 admin/node_modules
 packages/contract/node_modules
 admin/.next

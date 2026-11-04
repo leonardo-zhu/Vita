@@ -14,7 +14,7 @@ on:
       - "shared/config-schema/**"
       - "shared/agent-tools/**"
       - "shared/diagnostics/**"
-      - "ios/Vita/Resources/DefaultConfig.json"
+      - "shared/config/**"
       - ".github/workflows/vita-admin-deploy.yml"
   workflow_dispatch:
 

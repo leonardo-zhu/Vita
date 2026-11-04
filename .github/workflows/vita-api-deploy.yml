@@ -8,7 +8,7 @@ on:
       - "api/**"
       - "!api/**.md"
       - "packages/contract/**"
-      - "ios/Vita/Resources/DefaultConfig.json"
+      - "shared/config/**"
       - "shared/agent-tools/**"
       - "shared/fixtures/**"
       - "package.json"

@@ -15,10 +15,8 @@ struct SettingsView: View {
     @State private var isEditingToken = false
     @State private var isConfirmingDisconnect = false
     @State private var message: String?
-    @State private var diagnosticsEnabled = true
     @State private var isResyncing = false
 
-    private var diagnostics: DiagnosticsService? { services.container.diagnostics as? DiagnosticsService }
 
     var body: some View {
         NavigationStack {
@@ -53,7 +51,6 @@ struct SettingsView: View {
         .tint(VitaTheme.intake)
         .onAppear {
             loadToken()
-            diagnosticsEnabled = diagnostics?.isEnabled ?? false
         }
     }
 
@@ -160,15 +157,6 @@ struct SettingsView: View {
     private var aboutCard: some View {
         VStack(spacing: 0) {
             row("版本", AppVersion.display)
-            if let diagnostics {
-                Divider().padding(.vertical, 12)
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("诊断日志", isOn: $diagnosticsEnabled)
-                        .onChange(of: diagnosticsEnabled) { _, enabled in diagnostics.setEnabled(enabled) }
-                    Text("只上报错误码、耗时与版本号，用来排查问题；不包含对话、饮食和健康数据。关掉后不再记录，还没发出的也会删掉。")
-                        .font(VitaType.meta).foregroundStyle(.secondary)
-                }
-            }
             if let onReplayOnboarding {
                 Divider().padding(.vertical, 12)
                 Button {

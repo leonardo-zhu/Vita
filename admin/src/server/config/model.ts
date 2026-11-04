@@ -3,7 +3,7 @@
  *
  * - 草稿（DraftContent）是编辑器里的样子：prompt 只有文字，版本号由发布时计算。
  * - 发布文件（PublishedConfig）就是客户端拉到的 stable.json。
- * - 与内置默认值（ios/Vita/Resources/DefaultConfig.json）文字相同的 prompt 不写进发布文件，
+ * - 与内置默认值（shared/config/DefaultConfig.json）文字相同的 prompt 不写进发布文件，
  *   客户端回落到 App 自带的那份；这样 App 更新了内置 prompt，远程没改过的项会跟着更新。
  */
 import { z } from 'zod'
