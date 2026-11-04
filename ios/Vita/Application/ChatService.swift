@@ -9,6 +9,38 @@ struct ChatEntry: Equatable, Sendable, Identifiable {
     var createdAt: Date
     /// 用户消息附带的营养标签照片，按顺序。
     var labelIDs: [UUID] = []
+    /// Admin 把它排除出了模型的上下文（rewind）：模型看不到，App 也不显示，只留一行“已隐藏”。
+    var isExcluded = false
+}
+
+/// 对话列表里的一行：一条消息，或一段连续被隐藏的消息。
+enum ChatRow: Identifiable, Equatable {
+    case message(ChatEntry)
+    case hidden(firstID: UUID, count: Int)
+
+    var id: UUID {
+        switch self {
+        case .message(let entry): entry.id
+        case .hidden(let firstID, _): firstID
+        }
+    }
+
+    /// 连续被排除的消息合成一行。
+    static func rows(_ entries: [ChatEntry]) -> [ChatRow] {
+        var rows: [ChatRow] = []
+        for entry in entries {
+            guard entry.isExcluded else {
+                rows.append(.message(entry))
+                continue
+            }
+            if case .hidden(let firstID, let count) = rows.last {
+                rows[rows.count - 1] = .hidden(firstID: firstID, count: count + 1)
+            } else {
+                rows.append(.hidden(firstID: entry.id, count: 1))
+            }
+        }
+        return rows
+    }
 }
 
 /// 一轮对话的结果。

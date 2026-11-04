@@ -570,12 +570,14 @@ struct ChatMessageDTO: Decodable, Sendable {
     var cardRef: CardRefDTO?
     /// 2.1 起有；更早的服务端没有这个字段时从 cardRef 推出。
     var labelScanIds: [UUID]?
+    /// 2.0 M4 起有：Admin 排除出模型上下文的消息。
+    var excludedFromContext: Bool?
     var createdAt: Date
 
     var domain: ChatEntry {
         let ref = cardRef?.domain
         let labels: [UUID] = labelScanIds ?? (ref.flatMap { if case .label(let id) = $0 { [id] } else { nil } } ?? [])
-        return ChatEntry(id: id, role: role, text: text, cardRef: ref, createdAt: createdAt, labelIDs: labels)
+        return ChatEntry(id: id, role: role, text: text, cardRef: ref, createdAt: createdAt, labelIDs: labels, isExcluded: excludedFromContext ?? false)
     }
 }
 

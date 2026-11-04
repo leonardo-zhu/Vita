@@ -14,6 +14,9 @@ final class ChatModel {
     private(set) var sessionDate: LocalDate
     private var followsToday = true
     private(set) var entries: [ChatEntry] = []
+    /// 显示用：被 Admin 排除的消息合成“已隐藏 N 条”。
+    var rows: [ChatRow] { ChatRow.rows(entries) }
+    var hasVisibleMessages: Bool { entries.contains { !$0.isExcluded } }
     /// 正在生成的回复；nil 表示没有进行中的请求。
     private(set) var streamingText: String?
     /// 此刻在做什么（思考、查库、生成卡片）；nil 表示正在输出正文。
@@ -113,7 +116,7 @@ final class ChatModel {
 
     /// 历史里的卡片结局与标签照片，逐个读取，读到就显示。
     private func loadAttachments() async {
-        for entry in entries {
+        for entry in entries where !entry.isExcluded {
             if case .pending(let id) = entry.cardRef, cardStatuses[id] == nil || cardStatuses[id] == .readyForConfirmation {
                 if let snapshot = try? await services.pending.pending(id) { cardStatuses[id] = snapshot.status }
             }
@@ -337,10 +340,15 @@ struct ChatView: View {
             ScrollView {
                 // 一天的对话不长，用普通 VStack：LazyVStack 估算行高，滚到底部时会在顶部留出空白。
                 VStack(alignment: .leading, spacing: 12) {
-                    if model.entries.isEmpty && !model.isSending { emptyState }
-                    ForEach(model.entries) { entry in
-                        MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus), images: model.labelThumbnails(entry))
-                            .id(entry.id)
+                    if !model.hasVisibleMessages && !model.isSending { emptyState }
+                    ForEach(model.rows) { row in
+                        switch row {
+                        case .message(let entry):
+                            MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus), images: model.labelThumbnails(entry))
+                                .id(entry.id)
+                        case .hidden(let firstID, let count):
+                            HiddenMessagesRow(count: count).id(firstID)
+                        }
                     }
                     if let text = model.outgoing {
                         MessageRow(entry: ChatEntry(id: UUID(), role: .user, text: text, createdAt: Date()), images: model.outgoingImages)
@@ -773,5 +781,23 @@ private struct ThinkingTail: View {
                 )
             }
             .animation(.smooth(duration: 0.2), value: text)
+    }
+}
+
+/// 被 Admin 排除出模型上下文的几条消息：不显示内容，只留一行淡淡的提示，免得以为消息丢了。
+private struct HiddenMessagesRow: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(.quaternary).frame(height: 0.5)
+            Label("已隐藏 \(count) 条消息", systemImage: "eye.slash")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize()
+            Rectangle().fill(.quaternary).frame(height: 0.5)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
     }
 }
