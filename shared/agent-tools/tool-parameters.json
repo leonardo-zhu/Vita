@@ -107,7 +107,11 @@
           },
           "goalType": {
             "type": "string",
-            "enum": ["maintain", "lose", "gain"],
+            "enum": [
+              "maintain",
+              "lose",
+              "gain"
+            ],
             "description": "目标类型；能量目标恢复随活动计算，调整幅度用该类型的默认值"
           },
           "energyPercent": {
@@ -407,7 +411,8 @@
                 "type": "string",
                 "enum": [
                   "createProduct",
-                  "addVersion"
+                  "addVersion",
+                  "updateProduct"
                 ]
               },
               "productId": {
@@ -442,11 +447,14 @@
                   },
                   "note": {
                     "type": "string"
+                  },
+                  "aliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
-                },
-                "required": [
-                  "name"
-                ]
+                }
               },
               "version": {
                 "type": "object",
@@ -494,6 +502,15 @@
                       },
                       "carbohydrateG": {
                         "type": "number"
+                      },
+                      "sodiumMg": {
+                        "type": "number"
+                      },
+                      "saturatedFatG": {
+                        "type": "number"
+                      },
+                      "sugarG": {
+                        "type": "number"
                       }
                     }
                   },
@@ -510,8 +527,7 @@
               }
             },
             "required": [
-              "intent",
-              "version"
+              "intent"
             ]
           },
           "afterConfirm": {

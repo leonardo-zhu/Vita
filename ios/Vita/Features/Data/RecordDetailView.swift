@@ -280,6 +280,9 @@ private struct ItemCard: View {
                 if let basis = item.snapshot.basisQuantity, let used = item.snapshot.quantityUsed {
                     DetailRow(label: "计算依据", value: "每 \(DisplayFormat.quantity(basis)) × \(DisplayFormat.quantity(used))")
                 }
+                ForEach(ExtraNutrient.allCases.filter { item.snapshot.values.value(of: $0) != nil }, id: \.self) { extra in
+                    DetailRow(label: extra.label, value: DisplayFormat.extra(item.snapshot.values.value(of: extra)!, extra))
+                }
                 if let estimateBasis = item.snapshot.estimateBasis {
                     DetailRow(label: "估算依据", value: estimateBasis)
                 }

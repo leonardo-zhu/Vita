@@ -42,12 +42,28 @@ export class NutritionCalculationError extends Error {
 }
 
 const NUTRIENTS = ['energyKcal', 'proteinG', 'fatG', 'carbohydrateG'] as const
+/** 可选的扩展营养素：有就一起算，没有就不给（PRD v2.0 §4.3）。 */
+export const EXTRA_NUTRIENTS = ['sodiumMg', 'saturatedFatG', 'sugarG'] as const
+export type ExtraNutrient = (typeof EXTRA_NUTRIENTS)[number]
 
 export const ZERO_NUTRIENTS: NutrientValues = { energyKcal: 0, proteinG: 0, fatG: 0, carbohydrateG: 0 }
 
-/** 每项都是有限的非负数。 */
+/** 每项都是有限的非负数（扩展项给了才检查）。 */
 export function isValidNutrients(values: NutrientValues): boolean {
-  return NUTRIENTS.every((key) => Number.isFinite(values[key]) && values[key] >= 0)
+  const valid = (value: number) => Number.isFinite(value) && value >= 0
+  return NUTRIENTS.every((key) => valid(values[key])) && EXTRA_NUTRIENTS.every((key) => values[key] === undefined || valid(values[key]))
+}
+
+/** 对每一项（四项必有，扩展项有才算）做同一种运算。 */
+function mapNutrients(values: NutrientValues, transform: (value: number) => number): NutrientValues {
+  const result = Object.fromEntries(NUTRIENTS.map((key) => [key, transform(values[key])])) as NutrientValues
+  for (const key of EXTRA_NUTRIENTS) if (values[key] !== undefined) result[key] = transform(values[key])
+  return result
+}
+
+/** 去掉扩展项：AI 估算不补齐这些（PRD v2.0 §4.3）。 */
+export function withoutExtras(values: NutrientValues): NutrientValues {
+  return Object.fromEntries(NUTRIENTS.map((key) => [key, values[key]])) as NutrientValues
 }
 
 /** 十进制结果转回数字。营养值精度到小数点后几位，转回时不会丢失。 */
@@ -55,10 +71,21 @@ function toNumber(value: Big): number {
   return Number(value.toString())
 }
 
+/** 四项直接相加；扩展项只加有数据的，一条都没有时不给。 */
 export function sumNutrients(values: NutrientValues[]): NutrientValues {
   const totals = Object.fromEntries(NUTRIENTS.map((key) => [key, new Big(0)])) as Record<(typeof NUTRIENTS)[number], Big>
   for (const value of values) for (const key of NUTRIENTS) totals[key] = totals[key].plus(value[key])
-  return Object.fromEntries(NUTRIENTS.map((key) => [key, toNumber(totals[key])])) as NutrientValues
+  const result = Object.fromEntries(NUTRIENTS.map((key) => [key, toNumber(totals[key])])) as NutrientValues
+  for (const key of EXTRA_NUTRIENTS) {
+    const present = values.flatMap((value) => (value[key] === undefined ? [] : [value[key]]))
+    if (present.length) result[key] = toNumber(present.reduce((sum, value) => sum.plus(value), new Big(0)))
+  }
+  return result
+}
+
+/** 各扩展营养素缺数据的条数。 */
+export function missingExtras(values: NutrientValues[]): Record<ExtraNutrient, number> {
+  return Object.fromEntries(EXTRA_NUTRIENTS.map((key) => [key, values.filter((value) => value[key] === undefined).length])) as Record<ExtraNutrient, number>
 }
 
 /** 把用量换算到基准单位。只有给出密度时才在 g / ml 之间换算，不按 1ml = 1g 猜。 */
@@ -92,7 +119,7 @@ export function computedSnapshot(input: {
     quantityUsed: used,
     computedBy: 'client',
     estimateBasis: null,
-    values: Object.fromEntries(NUTRIENTS.map((key) => [key, scale(basisNutrients[key])])) as NutrientValues,
+    values: mapNutrients(basisNutrients, scale),
   }
 }
 
@@ -106,13 +133,13 @@ export function estimatedSnapshot(values: NutrientValues, estimateBasis: string,
     quantityUsed: quantity,
     computedBy: 'model',
     estimateBasis,
-    values,
+    values: withoutExtras(values),
   }
 }
 
 /** 按倍数缩放营养值（改份数时用），十进制计算。 */
 export function scaleNutrients(values: NutrientValues, factor: number): NutrientValues {
-  return Object.fromEntries(NUTRIENTS.map((key) => [key, toNumber(new Big(values[key]).times(factor))])) as NutrientValues
+  return mapNutrients(values, (value) => toNumber(new Big(value).times(factor)))
 }
 
 export function scaleQuantity(quantity: Quantity, factor: number): Quantity {

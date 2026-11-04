@@ -164,8 +164,15 @@ struct EnergyBalanceDTO: Decodable, Sendable {
 }
 
 struct DaySummaryDTO: Decodable, Sendable {
+    struct MissingExtras: Decodable, Sendable {
+        var sodiumMg: Int
+        var saturatedFatG: Int
+        var sugarG: Int
+    }
+
     var totals: NutrientValues
     var includedItemCount: Int
+    var missingExtras: MissingExtras?
     var excludedItemCount: Int
     var estimatedItemCount: Int
     var goal: GoalDTO?
@@ -176,7 +183,8 @@ struct DaySummaryDTO: Decodable, Sendable {
         DaySummary(
             totals: totals, includedItemCount: includedItemCount, excludedItemCount: excludedItemCount,
             estimatedItemCount: estimatedItemCount, goal: goal?.domain, energy: energy?.domain,
-            balance: balance.map { EnergyBalance(burnedKcal: $0.burnedKcal, consumedKcal: $0.consumedKcal) }
+            balance: balance.map { EnergyBalance(burnedKcal: $0.burnedKcal, consumedKcal: $0.consumedKcal) },
+            missingExtras: missingExtras.map { [.sodiumMg: $0.sodiumMg, .saturatedFatG: $0.saturatedFatG, .sugarG: $0.sugarG] } ?? [:]
         )
     }
 }
@@ -219,12 +227,13 @@ struct FoodProductDTO: Decodable, Sendable {
     var brandOrSupplier: String?
     var package: Quantity?
     var note: String?
+    var aliases: [String]?
     var activeVersion: FoodVersionDTO?
     var versions: [FoodVersionDTO]
 
     var domain: FoodProductSummary {
         FoodProductSummary(
-            id: id, name: name, brandOrSupplier: brandOrSupplier, package: package, note: note,
+            id: id, name: name, brandOrSupplier: brandOrSupplier, package: package, note: note, aliases: aliases ?? [],
             activeVersion: activeVersion?.domain, versions: versions.map(\.domain)
         )
     }
@@ -253,6 +262,8 @@ struct FoodChangePreviewDTO: Decodable, Sendable {
     var productName: String
     var brandOrSupplier: String?
     var package: Quantity?
+    var aliases: [String]?
+    var previous: FoodChangePreview.Previous?
     var basis: FoodVersionBasis
     var sourceKind: FoodVersionSource
     var previousBasis: FoodVersionBasis?
@@ -260,6 +271,7 @@ struct FoodChangePreviewDTO: Decodable, Sendable {
     var domain: FoodChangePreview {
         FoodChangePreview(
             kind: kind, productName: productName, brandOrSupplier: brandOrSupplier, package: package,
+            aliases: aliases ?? [], previous: previous,
             version: FoodVersionDraft(basis: basis, sourceKind: sourceKind), previousBasis: previousBasis
         )
     }
@@ -625,7 +637,7 @@ enum ChatEventDTO: Decodable, Sendable {
 // MARK: - Apple 健康同步
 
 struct DietarySampleDTO: Decodable, Sendable {
-    var nutrient: Nutrient
+    var nutrient: DietaryKind
     var value: Decimal
     var date: Date
     var metadata: [String: String]

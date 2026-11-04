@@ -46,6 +46,8 @@ export interface FoodProductDraft {
   /** 包装规格，如 250 ml，用于把"一盒、半瓶"换算为用量。 */
   package: Quantity | null
   note: string | null
+  /** 用户的常用叫法。 */
+  aliases?: string[]
 }
 
 /** 不可变食品版本的草稿。没有 AI 估算这一来源：估算值不能沉淀为个人食品（PRD §3.2.1）。 */
@@ -63,5 +65,7 @@ export type FoodChange =
   | { kind: 'createProduct'; product: FoodProductDraft; version: FoodVersionDraft }
   /** 标签、配方或包装变化：同一产品下新建版本并切换生效版本。expectedActiveVersionId 用于发现提案后产品已被更新。 */
   | { kind: 'addVersion'; productId: string; expectedActiveVersionId: string | null; version: FoodVersionDraft }
+  /** 对话里改名称、品牌、常用叫法（“这个以后叫 X”）。没给的项不变；aliases 是改后的完整列表。营养值不变。 */
+  | { kind: 'updateProduct'; productId: string; name: string | null; brandOrSupplier: string | null | undefined; aliases: string[] | null }
 
 export type PendingChange = { type: 'record'; change: RecordChange } | { type: 'food'; change: FoodChange }

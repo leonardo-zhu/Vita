@@ -5,7 +5,7 @@
 import type { DayItem, DayRecord, DayResponse, DaySummary, Goal } from '@vita/contract'
 
 import { energyBalance, energyTarget, type EnergyDay } from '../domain/energy.ts'
-import { sumNutrients } from '../domain/nutrition.ts'
+import { missingExtras, sumNutrients } from '../domain/nutrition.ts'
 import { localDateOf, zonedInstant } from '../domain/time.ts'
 import type { ServiceContext } from './context.ts'
 import type { GoalService } from './goals.ts'
@@ -118,6 +118,7 @@ export function summarize(items: DayItem[], goal: Goal | null = null): DaySummar
   return {
     totals: sumNutrients(included.map((item) => item.snapshot.values)),
     includedItemCount: included.length,
+    missingExtras: missingExtras(included.map((item) => item.snapshot.values)),
     excludedItemCount: items.length - included.length,
     estimatedItemCount: included.filter((item) => item.snapshot.nutritionSource === 'aiEstimated').length,
     goal,

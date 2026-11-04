@@ -69,13 +69,18 @@ export async function rescaleItemAction(
   )
 }
 
-export async function updateFoodAction(id: string, name: string, brandOrSupplier: string): Promise<ActionResult> {
+export async function updateFoodAction(id: string, name: string, brandOrSupplier: string, aliasesText: string): Promise<ActionResult> {
   const t = await getT()
   const trimmed = name.trim()
   if (!trimmed || trimmed.length > 80) return { ok: false, message: t.data.badName }
   const brand = brandOrSupplier.trim() || null
-  return run({ action: 'food_update', targetType: 'food', targetId: id, diff: { name: trimmed, brand } }, '/admin/foods', () =>
-    updateFood(id, { name: trimmed, brandOrSupplier: brand })
+  const aliases = aliasesText
+    .split(/[、,，;；]/)
+    .map((alias) => alias.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+  return run({ action: 'food_update', targetType: 'food', targetId: id, diff: { name: trimmed, brand, aliases } }, '/admin/foods', () =>
+    updateFood(id, { name: trimmed, brandOrSupplier: brand, aliases })
   )
 }
 

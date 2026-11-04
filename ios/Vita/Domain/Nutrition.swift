@@ -6,21 +6,53 @@ struct NutrientValues: Equatable, Codable, Sendable {
     var proteinG: Decimal
     var fatG: Decimal
     var carbohydrateG: Decimal
+    /// 可选的扩展营养素（PRD v2.0 §4.3）：来源上有才有，不由 AI 估算补齐。
+    var sodiumMg: Decimal? = nil
+    var saturatedFatG: Decimal? = nil
+    var sugarG: Decimal? = nil
 
     static let zero = NutrientValues(energyKcal: 0, proteinG: 0, fatG: 0, carbohydrateG: 0)
 
     var isValid: Bool {
-        [energyKcal, proteinG, fatG, carbohydrateG].allSatisfy { $0 >= 0 && !$0.isNaN }
+        ([energyKcal, proteinG, fatG, carbohydrateG] + [sodiumMg, saturatedFatG, sugarG].compactMap { $0 }).allSatisfy { $0 >= 0 && !$0.isNaN }
     }
 
+    func value(of extra: ExtraNutrient) -> Decimal? {
+        switch extra {
+        case .sodiumMg: sodiumMg
+        case .saturatedFatG: saturatedFatG
+        case .sugarG: sugarG
+        }
+    }
+
+    /// 扩展项只加有数据的，两边都没有时仍是 nil。
     static func + (lhs: NutrientValues, rhs: NutrientValues) -> NutrientValues {
-        NutrientValues(
+        func add(_ a: Decimal?, _ b: Decimal?) -> Decimal? { a == nil && b == nil ? nil : (a ?? 0) + (b ?? 0) }
+        return NutrientValues(
             energyKcal: lhs.energyKcal + rhs.energyKcal,
             proteinG: lhs.proteinG + rhs.proteinG,
             fatG: lhs.fatG + rhs.fatG,
-            carbohydrateG: lhs.carbohydrateG + rhs.carbohydrateG
+            carbohydrateG: lhs.carbohydrateG + rhs.carbohydrateG,
+            sodiumMg: add(lhs.sodiumMg, rhs.sodiumMg),
+            saturatedFatG: add(lhs.saturatedFatG, rhs.saturatedFatG),
+            sugarG: add(lhs.sugarG, rhs.sugarG)
         )
     }
+}
+
+/// 钠、饱和脂肪、糖。
+enum ExtraNutrient: String, CaseIterable, Sendable {
+    case sodiumMg, saturatedFatG, sugarG
+
+    var label: String {
+        switch self {
+        case .sodiumMg: "钠"
+        case .saturatedFatG: "饱和脂肪"
+        case .sugarG: "糖"
+        }
+    }
+
+    var unit: String { self == .sodiumMg ? "mg" : "g" }
 }
 
 struct Quantity: Equatable, Codable, Sendable {

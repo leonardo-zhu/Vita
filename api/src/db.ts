@@ -215,6 +215,8 @@ const MIGRATIONS = [
   ALTER TABLE food_products ADD COLUMN deleted_at TEXT;`,
   `-- Admin 把消息排除出模型的上下文（rewind）：消息照常显示与保留，只是不再发给模型
   ALTER TABLE chat_messages ADD COLUMN excluded_at TEXT;`,
+  `-- 食品的常用叫法（PRD v2.0 §4.2）：JSON 字符串数组，给模型匹配用
+  ALTER TABLE food_products ADD COLUMN aliases TEXT;`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

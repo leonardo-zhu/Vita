@@ -361,6 +361,11 @@ const zh = {
     brand: '品牌',
     deleteFoodConfirm: (name: string) => `删除“${name}”？`,
     labelPhoto: '标签照片',
+    aliases: '常用叫法',
+    aliasesPlaceholder: '常用叫法，用顿号隔开',
+    alsoCalled: (aliases: string) => `也叫：${aliases}`,
+    sugar: '糖',
+    missingExtras: (count: number) => `${count} 项没有钠等数据，只合计了有数据的`,
   },
   settings: {
     title: '设置',
@@ -843,6 +848,11 @@ const en: Messages = {
     brand: 'Brand',
     deleteFoodConfirm: (name) => `Delete “${name}”?`,
     labelPhoto: 'Label photo',
+    aliases: 'Aliases',
+    aliasesPlaceholder: 'Aliases, separated by commas',
+    alsoCalled: (aliases) => `Also called: ${aliases}`,
+    sugar: 'Sugar',
+    missingExtras: (count) => `${count} items lack sodium etc.; totals only include items that have it`,
   },
   settings: {
     title: 'Settings',

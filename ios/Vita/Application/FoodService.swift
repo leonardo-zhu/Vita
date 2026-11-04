@@ -17,6 +17,8 @@ struct FoodProductSummary: Equatable, Sendable, Identifiable {
     var brandOrSupplier: String?
     var package: Quantity?
     var note: String?
+    /// 用户的常用叫法（PRD v2.0 §4.2）。
+    var aliases: [String] = []
     var activeVersion: FoodVersionSummary?
     /// 新的在前。
     var versions: [FoodVersionSummary]
@@ -24,12 +26,21 @@ struct FoodProductSummary: Equatable, Sendable, Identifiable {
 
 /// 确认卡上的食品变更预览。
 struct FoodChangePreview: Equatable, Codable, Sendable {
-    enum Kind: String, Codable, Sendable { case createProduct, addVersion }
+    enum Kind: String, Codable, Sendable { case createProduct, addVersion, updateProduct }
+
+    /// updateProduct 改之前的名称、品牌、叫法。
+    struct Previous: Equatable, Codable, Sendable {
+        var name: String
+        var brandOrSupplier: String?
+        var aliases: [String]
+    }
 
     var kind: Kind
     var productName: String
     var brandOrSupplier: String?
     var package: Quantity?
+    var aliases: [String] = []
+    var previous: Previous?
     var version: FoodVersionDraft
     /// 新版本取代的旧版本基准，便于对比。
     var previousBasis: FoodVersionBasis?
@@ -54,9 +65,9 @@ final class FoodService {
         return response.product.domain
     }
 
-    /// 改名称、品牌、包装。品牌、包装为空时清空。
-    func update(_ id: UUID, name: String, brandOrSupplier: String?, package: Quantity?) async throws -> FoodProductSummary {
-        let body = FoodProductUpdateDTO(name: name, brandOrSupplier: brandOrSupplier, package: package)
+    /// 改名称、品牌、常用叫法、包装。品牌、包装为空时清空。
+    func update(_ id: UUID, name: String, brandOrSupplier: String?, aliases: [String], package: Quantity?) async throws -> FoodProductSummary {
+        let body = FoodProductUpdateDTO(name: name, brandOrSupplier: brandOrSupplier, aliases: aliases, package: package)
         let response: FoodProductResponseDTO = try await api.send("PATCH", "/v1/foods/\(id.apiString)", body: body)
         return response.product.domain
     }
@@ -82,13 +93,15 @@ struct FoodProductResponseDTO: Decodable, Sendable {
 struct FoodProductUpdateDTO: Encodable, Sendable {
     var name: String
     var brandOrSupplier: String?
+    var aliases: [String]
     var package: Quantity?
 
-    enum CodingKeys: String, CodingKey { case name, brandOrSupplier, package }
+    enum CodingKeys: String, CodingKey { case name, brandOrSupplier, aliases, package }
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(name, forKey: .name)
+        try container.encode(aliases, forKey: .aliases)
         try container.encode(brandOrSupplier, forKey: .brandOrSupplier)
         try container.encode(package, forKey: .package)
     }

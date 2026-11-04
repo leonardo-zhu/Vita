@@ -1,8 +1,16 @@
 import Foundation
 
+/// 写进 Apple 健康的膳食项：四项主营养素，加上 2.3.0 起的钠、饱和脂肪、糖（PRD v2.0 §4.3）。
+enum DietaryKind: String, Codable, Sendable, CaseIterable {
+    case energyKcal, proteinG, fatG, carbohydrateG, sodiumMg, saturatedFatG, sugarG
+
+    /// 扩展项：单独申请权限，没授权时只是不写这几项，不影响四项主营养素。
+    var isExtended: Bool { self == .sodiumMg || self == .saturatedFatG || self == .sugarG }
+}
+
 /// 写入 Apple 健康的一条膳食 Sample（TDD §6.3）。
 struct DietarySample: Equatable, Codable, Sendable {
-    var nutrient: Nutrient
+    var nutrient: DietaryKind
     var value: Decimal
     var date: Date
     var metadata: [String: String]
@@ -22,7 +30,7 @@ struct BodyMeasurementSample: Equatable, Codable, Sendable {
 enum HealthSyncIdentifier {
     enum BodyKind: String, Sendable { case bodyMass, bodyFat, leanMass }
 
-    static func record(_ id: UUID, _ nutrient: Nutrient) -> String {
+    static func record(_ id: UUID, _ nutrient: DietaryKind) -> String {
         "vita:record:\(id.uuidString.lowercased()):\(nutrient.rawValue)"
     }
 
@@ -50,6 +58,8 @@ protocol HealthDataStore: Sendable {
     func hasRequestedAuthorization() async -> Bool
     /// 四项膳食写入权限的合并状态：任一被拒即为 denied。
     func writeAuthorization() -> HealthWriteAuthorization
+    /// 钠、饱和脂肪、糖还没问过（从旧版本升上来时），需要再申请一次。
+    func hasUndeterminedExtendedWrite() -> Bool
 
     func latestBodyMassKg() async throws -> (Decimal, Date)?
     func latestHeightCm() async throws -> (Decimal, Date)?
@@ -131,6 +141,7 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     }
     func hasRequestedAuthorization() async -> Bool { lock.withLock { _requested } }
     func writeAuthorization() -> HealthWriteAuthorization { lock.withLock { _write } }
+    func hasUndeterminedExtendedWrite() -> Bool { false }
 
     func latestBodyMassKg() async throws -> (Decimal, Date)? { body.bodyMassKg.map { ($0, body.enteredAt) } }
     func latestHeightCm() async throws -> (Decimal, Date)? { body.heightCm.map { ($0, body.enteredAt) } }

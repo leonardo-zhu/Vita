@@ -119,7 +119,7 @@ export async function foods(): Promise<FoodProduct[]> {
   return (await call('/v1/foods', FoodsResponse)).products
 }
 
-export async function updateFood(id: string, body: { name: string; brandOrSupplier: string | null }) {
+export async function updateFood(id: string, body: { name: string; brandOrSupplier: string | null; aliases: string[] }) {
   return (await call(`/v1/foods/${encodeURIComponent(id)}`, FoodProductResponse, { method: 'PATCH', body: JSON.stringify(body) })).product
 }
 

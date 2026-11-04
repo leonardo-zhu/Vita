@@ -17,6 +17,12 @@ enum DisplayFormat {
         nutrient == .energyKcal ? energy(value) : grams(value)
     }
 
+    /// 钠按整数毫克，饱和脂肪、糖保留一位小数。
+    static func extra(_ value: Decimal, _ extra: ExtraNutrient) -> String {
+        let digits = extra == .sodiumMg ? 0 : 1
+        return value.formatted(.number.precision(.fractionLength(0...digits)).rounded(rule: .toNearestOrAwayFromZero)) + " " + extra.unit
+    }
+
     static func quantity(_ quantity: Quantity) -> String {
         quantity.amount.formatted(.number.precision(.fractionLength(0...1)).rounded(rule: .toNearestOrAwayFromZero))
             + " " + quantity.unit.rawValue

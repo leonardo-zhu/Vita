@@ -39,10 +39,18 @@ export default async function FoodsPage() {
               id: product.id,
               name: product.name,
               brand: product.brandOrSupplier,
+              aliases: product.aliases,
               packageText: product.package ? `${product.package.amount} ${product.package.unit}` : null,
               basisText: basis ? `${basis.quantity.amount} ${basis.quantity.unit}` : null,
               nutrients: basis
-                ? `${Math.round(basis.nutrients.energyKcal)} kcal · P ${basis.nutrients.proteinG} g · F ${basis.nutrients.fatG} g · C ${basis.nutrients.carbohydrateG} g`
+                ? [
+                    `${Math.round(basis.nutrients.energyKcal)} kcal · P ${basis.nutrients.proteinG} g · F ${basis.nutrients.fatG} g · C ${basis.nutrients.carbohydrateG} g`,
+                    basis.nutrients.sodiumMg === undefined ? null : `Na ${basis.nutrients.sodiumMg} mg`,
+                    basis.nutrients.saturatedFatG === undefined ? null : `SFA ${basis.nutrients.saturatedFatG} g`,
+                    basis.nutrients.sugarG === undefined ? null : `${t.data.sugar} ${basis.nutrients.sugarG} g`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 : null,
               versions: product.versions.length,
               labelScanId: product.activeVersion?.labelScanId ?? null,

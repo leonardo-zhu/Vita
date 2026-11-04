@@ -209,6 +209,7 @@ struct DataView: View {
     }
 
     private func syncHealth() async {
+        await services.health.requestNewTypesIfNeeded()
         await services.healthSync.run()
         await model.reload()
     }
@@ -273,6 +274,7 @@ private struct DayDashboard: View {
         VStack(spacing: 16) {
             EnergyCard(summary: day.summary, isToday: isToday, activeEnergy: snapshot?.activeEnergyKcal.value, onSetGoal: onSetGoal)
             MacroCard(summary: day.summary)
+            if ExtrasCard.hasData(day.summary) { ExtrasCard(summary: day.summary) }
             if needsSyncAttention { syncAttention }
             MealsSection(services: services, day: day, onChange: onRecordChange)
             HealthSection(snapshot: snapshot, isAvailable: healthAvailable, onConnect: onConnectHealth, onWeigh: onWeigh)
@@ -474,6 +476,38 @@ private struct EquationTerm: View {
             Text(label).font(VitaType.meta).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// 钠、饱和脂肪、糖的当日合计。只加有数据的条目，缺数据的条数单独写出来（PRD v2.0 §4.3）。
+private struct ExtrasCard: View {
+    let summary: DaySummary
+
+    static func hasData(_ summary: DaySummary) -> Bool {
+        ExtraNutrient.allCases.contains { summary.totals.value(of: $0) != nil }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                ForEach(ExtraNutrient.allCases, id: \.self) { extra in
+                    VStack(spacing: 4) {
+                        Text(summary.totals.value(of: extra).map { DisplayFormat.extra($0, extra) } ?? "—")
+                            .font(.headline)
+                            .monospacedDigit()
+                        Text(extra.label).font(VitaType.meta).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            let missing = summary.missingExtras[.sodiumMg] ?? 0
+            if missing > 0 {
+                Text("\(missing) 项没有这些数据（如 AI 估算的），合计只算了有数据的。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .vitaCard(padding: 20)
     }
 }
 

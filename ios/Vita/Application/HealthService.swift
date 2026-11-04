@@ -28,6 +28,12 @@ final class HealthService {
         try await store.requestAuthorization()
     }
 
+    /// 授权过 Apple 健康、但新版本加的类型（钠、饱和脂肪、糖）还没问过：再申请一次，系统只问新的。
+    func requestNewTypesIfNeeded() async {
+        guard store.isAvailable, await store.hasRequestedAuthorization(), store.hasUndeterminedExtendedWrite() else { return }
+        try? await store.requestAuthorization()
+    }
+
     /// 读一遍 Apple 健康传给服务端，再取回合并了手动补录、算好日均的那份。传不上去时用本机读到的兜底显示。
     func snapshot(on date: LocalDate) async -> HealthSnapshot {
         let local = await readLocal(on: date)

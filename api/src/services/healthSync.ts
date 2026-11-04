@@ -6,6 +6,7 @@
 import type { DietarySample, HealthChange, HealthChangesResponse } from '@vita/contract'
 
 import { representativeTimestamp } from '../domain/eventTime.ts'
+import { EXTRA_NUTRIENTS } from '../domain/nutrition.ts'
 import type { BodyService } from './body.ts'
 import type { ServiceContext } from './context.ts'
 import type { DayService } from './day.ts'
@@ -24,8 +25,8 @@ export class HealthSyncService {
     this.body = body
   }
 
-  /** `after` 之后的变更，每个对象只取最新一条，按 seq 排序。 */
-  changes(after: number, limit = 100): HealthChangesResponse {
+  /** `after` 之后的变更，每个对象只取最新一条，按 seq 排序。`extended` 时饮食样本带上钠、饱和脂肪、糖（2.3.0 起的 App）。 */
+  changes(after: number, limit = 100, extended = false): HealthChangesResponse {
     const rows = this.context.database
       .prepare(
         `SELECT max(seq) AS seq, entity, entity_id FROM health_changes WHERE seq > ?
@@ -34,13 +35,13 @@ export class HealthSyncService {
       .all(after, limit + 1) as { seq: number; entity: 'record' | 'weighing'; entity_id: string }[]
     const page = rows.slice(0, limit)
     return {
-      changes: page.map((row) => this.state(row.seq, row.entity, row.entity_id)),
+      changes: page.map((row) => this.state(row.seq, row.entity, row.entity_id, extended)),
       cursor: page.length ? page[page.length - 1].seq : after,
       hasMore: rows.length > limit,
     }
   }
 
-  private state(seq: number, entity: 'record' | 'weighing', id: string): HealthChange {
+  private state(seq: number, entity: 'record' | 'weighing', id: string, extended: boolean): HealthChange {
     if (entity === 'weighing') {
       const weighing = this.body.weighings().find((candidate) => candidate.id === id)
       if (!weighing) return { seq, entity, id, deleted: true, syncVersion: seq, body: null }
@@ -73,9 +74,11 @@ export class HealthSyncService {
       metadata['vita.timeDefaultedAtEntry'] = 'true'
     }
     const date = representativeTimestamp(eventTime).toISOString()
-    const samples: DietarySample[] = (['energyKcal', 'proteinG', 'fatG', 'carbohydrateG'] as const)
-      .filter((nutrient) => record.totals[nutrient] > 0)
-      .map((nutrient) => ({ nutrient, value: record.totals[nutrient], date, metadata }))
+    const nutrients: DietarySample['nutrient'][] = ['energyKcal', 'proteinG', 'fatG', 'carbohydrateG', ...(extended ? EXTRA_NUTRIENTS : [])]
+    const samples: DietarySample[] = nutrients.flatMap((nutrient) => {
+      const value = record.totals[nutrient]
+      return value !== undefined && value > 0 ? [{ nutrient, value, date, metadata }] : []
+    })
     return { seq, entity, id, deleted: false, syncVersion: seq, samples }
   }
 }

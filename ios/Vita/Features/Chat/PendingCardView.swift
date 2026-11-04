@@ -126,6 +126,14 @@ private struct FoodPreviewContent: View {
 
     private var tint: Color { preview.kind == .createProduct ? VitaTheme.fat : VitaTheme.protein }
 
+    private var badge: String {
+        switch preview.kind {
+        case .createProduct: "存入食品库"
+        case .addVersion: "更新营养数据"
+        case .updateProduct: "改名称与叫法"
+        }
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "takeoutbag.and.cup.and.straw.fill")
@@ -141,12 +149,39 @@ private struct FoodPreviewContent: View {
                 }
             }
             Spacer(minLength: 8)
-            Text(preview.kind == .createProduct ? "存入食品库" : "更新营养数据")
+            Text(badge)
                 .font(VitaType.meta.weight(.semibold))
                 .foregroundStyle(tint)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(tint.opacity(0.12), in: .capsule)
+        }
+        if preview.kind == .updateProduct {
+            renameRows
+        } else {
+            nutrition
+        }
+    }
+
+    /// 改名称、品牌、叫法：只列改了什么，营养值不变就不显示。
+    @ViewBuilder private var renameRows: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let previous = preview.previous, previous.name != preview.productName {
+                Text("原名 \(previous.name)").font(VitaType.meta).strikethrough().foregroundStyle(.tertiary)
+            }
+            if let previous = preview.previous, previous.brandOrSupplier != preview.brandOrSupplier {
+                Text("品牌：\(previous.brandOrSupplier ?? "无") → \(preview.brandOrSupplier ?? "无")").font(VitaType.meta).foregroundStyle(.secondary)
+            }
+            Text(preview.aliases.isEmpty ? "没有常用叫法" : "也叫：" + preview.aliases.joined(separator: "、"))
+                .font(VitaType.body)
+            Text("营养数据不变。").font(VitaType.meta).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var nutrition: some View {
+        if !preview.aliases.isEmpty {
+            Text("也叫：" + preview.aliases.joined(separator: "、")).font(VitaType.meta).foregroundStyle(.secondary)
         }
         HStack(spacing: 8) {
             Label(preview.version.sourceKind.label, systemImage: preview.version.sourceKind.symbol)
@@ -183,6 +218,12 @@ private struct FoodPreviewContent: View {
         }
         .padding(.vertical, 10)
         .background(Color.primary.opacity(0.04), in: .rect(cornerRadius: 14))
+        let extras = ExtraNutrient.allCases.compactMap { extra in
+            preview.version.basis.nutrients.value(of: extra).map { "\(extra.label) \(DisplayFormat.extra($0, extra))" }
+        }
+        if !extras.isEmpty {
+            Text(extras.joined(separator: " · ")).font(VitaType.meta).foregroundStyle(.secondary).monospacedDigit()
+        }
         if let note = preview.version.sourceNote {
             Text(note).font(VitaType.meta).foregroundStyle(.secondary)
         }

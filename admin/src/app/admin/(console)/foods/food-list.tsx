@@ -14,6 +14,7 @@ interface FoodRow {
   id: string
   name: string
   brand: string | null
+  aliases: string[]
   packageText: string | null
   basisText: string | null
   nutrients: string | null
@@ -24,7 +25,7 @@ interface FoodRow {
 export function FoodList({ products }: { products: FoodRow[] }) {
   const t = useT()
   const [pending, startTransition] = useTransition()
-  const [editing, setEditing] = useState<{ id: string; name: string; brand: string } | null>(null)
+  const [editing, setEditing] = useState<{ id: string; name: string; brand: string; aliases: string } | null>(null)
 
   function run(action: () => Promise<ActionResult>, after?: () => void) {
     startTransition(async () => {
@@ -56,7 +57,18 @@ export function FoodList({ products }: { products: FoodRow[] }) {
                 onChange={(event) => setEditing({ ...editing, brand: event.target.value })}
                 className="w-36"
               />
-              <Button size="sm" disabled={pending} onClick={() => run(() => updateFoodAction(product.id, editing.name, editing.brand), () => setEditing(null))}>
+              <Input
+                aria-label={t.data.aliases}
+                placeholder={t.data.aliasesPlaceholder}
+                value={editing.aliases}
+                onChange={(event) => setEditing({ ...editing, aliases: event.target.value })}
+                className="w-56"
+              />
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => run(() => updateFoodAction(product.id, editing.name, editing.brand, editing.aliases), () => setEditing(null))}
+              >
                 {t.data.save}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
@@ -69,6 +81,7 @@ export function FoodList({ products }: { products: FoodRow[] }) {
                 {product.name}
                 {product.brand && <span className="ml-2 text-xs font-normal text-muted-foreground">{product.brand}</span>}
               </span>
+              {product.aliases.length > 0 && <span className="text-xs text-muted-foreground">{t.data.alsoCalled(product.aliases.join('、'))}</span>}
               {product.nutrients && (
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {t.data.perBasis(product.basisText ?? '')}：{product.nutrients}
@@ -81,7 +94,7 @@ export function FoodList({ products }: { products: FoodRow[] }) {
           )}
           {editing?.id !== product.id && (
             <div className="flex gap-1">
-              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditing({ id: product.id, name: product.name, brand: product.brand ?? '' })}>
+              <Button size="sm" variant="ghost" disabled={pending} onClick={() => setEditing({ id: product.id, name: product.name, brand: product.brand ?? '', aliases: product.aliases.join('、') })}>
                 {t.data.edit}
               </Button>
               <Button

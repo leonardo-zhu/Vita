@@ -40,6 +40,11 @@ export default async function RecordsPage({ searchParams }: { searchParams: Prom
       <p className="text-sm text-muted-foreground">{t.data.recordsDescription}</p>
       <p className="text-sm">
         {t.data.totals}：{Math.round(totals.energyKcal)} kcal · P {totals.proteinG.toFixed(1)} g · F {totals.fatG.toFixed(1)} g · C {totals.carbohydrateG.toFixed(1)} g
+        {totals.sodiumMg !== undefined && ` · Na ${Math.round(totals.sodiumMg)} mg`}
+        {totals.sugarG !== undefined && ` · ${t.data.sugar} ${totals.sugarG.toFixed(1)} g`}
+        {loaded.summary.missingExtras.sodiumMg > 0 && totals.sodiumMg !== undefined && (
+          <span className="ml-2 text-xs text-muted-foreground">{t.data.missingExtras(loaded.summary.missingExtras.sodiumMg)}</span>
+        )}
         <span className="ml-2 text-xs text-muted-foreground">{t.data.revision(loaded.revision)}</span>
       </p>
       {loaded.records.length === 0 ? (

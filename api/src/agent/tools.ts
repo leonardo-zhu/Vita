@@ -5,7 +5,7 @@
  */
 import Big from 'big.js'
 
-import type { DayItem, DayRecord, DaySummary, EnergyTarget, Goal, GoalRecommendationResponse, HealthSnapshot, Quantity, ReferenceFood } from '@vita/contract'
+import type { DayItem, DayRecord, DaySummary, EnergyTarget, Goal, GoalRecommendationResponse, HealthSnapshot, NutrientValues, Quantity, ReferenceFood } from '@vita/contract'
 
 import { METRIC_INFO, movingAverage, RATING_LABELS } from '../domain/body.ts'
 import { recommendGoals } from '../domain/recommendation.ts'
@@ -109,6 +109,7 @@ export class ToolRunner {
             productId: product.id,
             name: product.name,
             brandOrSupplier: product.brandOrSupplier ?? undefined,
+            aliases: product.aliases.length ? product.aliases : undefined,
             package: product.package ? quantityOut(product.package) : undefined,
             activeVersionId: product.activeVersion?.id,
             basis: product.activeVersion ? quantityOut(product.activeVersion.basis.quantity) : undefined,
@@ -281,8 +282,17 @@ function energyPlanChange(args: Record<string, unknown>): EnergyPlanChange | nul
 
 // MARK: - 回给模型的结构
 
-function nutrientsOut(values: { energyKcal: number; proteinG: number; fatG: number; carbohydrateG: number }) {
-  return { energyKcal: round(values.energyKcal), proteinG: round(values.proteinG), fatG: round(values.fatG), carbohydrateG: round(values.carbohydrateG) }
+function nutrientsOut(values: NutrientValues) {
+  const extra = (value: number | undefined) => (value === undefined ? undefined : round(value))
+  return {
+    energyKcal: round(values.energyKcal),
+    proteinG: round(values.proteinG),
+    fatG: round(values.fatG),
+    carbohydrateG: round(values.carbohydrateG),
+    sodiumMg: extra(values.sodiumMg),
+    saturatedFatG: extra(values.saturatedFatG),
+    sugarG: extra(values.sugarG),
+  }
 }
 
 function quantityOut(quantity: Quantity) {

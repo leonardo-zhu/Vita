@@ -19,6 +19,7 @@ interface ProductRow {
   package: string | null
   note: string | null
   active_version_id: string | null
+  aliases: string | null
 }
 
 interface VersionRow {
@@ -59,11 +60,13 @@ export class FoodService {
     return products.map((product) => toProduct(product, versions.filter((version) => version.product_id === product.id)))
   }
 
-  /** 名称或品牌包含查询词（忽略全半角、大小写与空白）。个人库很小，不做索引。 */
+  /** 名称、品牌或常用叫法包含查询词（忽略全半角、大小写与空白）。个人库很小，不做索引。 */
   search(query: string): FoodProduct[] {
     const key = normalizeName(query)
     if (!key) return []
-    return this.products().filter((product) => [product.name, product.brandOrSupplier ?? ''].some((name) => normalizeName(name).includes(key)))
+    return this.products().filter((product) =>
+      [product.name, product.brandOrSupplier ?? '', ...product.aliases].some((name) => normalizeName(name).includes(key)),
+    )
   }
 
   preview(change: FoodChange): FoodChangePreview {
@@ -72,7 +75,7 @@ export class FoodService {
 
   apply(change: FoodChange, options: FoodApplyOptions): string {
     const { database, now } = this.context
-    const action = change.kind === 'createProduct' ? 'food.createProduct' : 'food.addVersion'
+    const action = `food.${change.kind}`
     try {
       return transaction(database, () => {
         const productId = this.prepare(change).commit()
@@ -98,10 +101,10 @@ export class FoodService {
     return toProduct(row, versions)
   }
 
-  /** 改名称、品牌、包装规格、备注；没给的项不变。 */
+  /** 改名称、品牌、常用叫法、包装规格、备注；没给的项不变。 */
   updateProduct(
     id: string,
-    changes: { name?: string; brandOrSupplier?: string | null; package?: FoodProduct['package']; note?: string | null },
+    changes: { name?: string; brandOrSupplier?: string | null; aliases?: string[]; package?: FoodProduct['package']; note?: string | null },
     origin: WriteOrigin,
   ): FoodProduct {
     const { database, now } = this.context
@@ -113,9 +116,10 @@ export class FoodService {
       if (pack && !(pack.amount > 0)) throw new ServiceError('food', 'invalidPackage')
       const brand = changes.brandOrSupplier === undefined ? current.brandOrSupplier : changes.brandOrSupplier?.trim() || null
       const note = changes.note === undefined ? current.note : changes.note?.trim() || null
+      const aliases = changes.aliases === undefined ? current.aliases : cleanAliases(changes.aliases, name)
       database
-        .prepare('UPDATE food_products SET name = ?, brand_or_supplier = ?, package = ?, note = ?, updated_at = ? WHERE id = ?')
-        .run(name, brand, pack ? JSON.stringify(pack) : null, note, now().toISOString(), id)
+        .prepare('UPDATE food_products SET name = ?, brand_or_supplier = ?, package = ?, note = ?, aliases = ?, updated_at = ? WHERE id = ?')
+        .run(name, brand, pack ? JSON.stringify(pack) : null, note, aliasesColumn(aliases), now().toISOString(), id)
       return this.product(id)
     })
   }
@@ -178,6 +182,8 @@ export class FoodService {
             productName: product.name,
             brandOrSupplier: product.brandOrSupplier,
             package: product.package,
+            aliases: cleanAliases(product.aliases ?? [], product.name),
+            previous: null,
             basis: version.basis,
             sourceKind: version.sourceKind,
             previousBasis: null,
@@ -186,8 +192,17 @@ export class FoodService {
             const at = this.context.now().toISOString()
             const id = randomUUID()
             database
-              .prepare('INSERT INTO food_products (id, name, brand_or_supplier, package, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-              .run(id, product.name, product.brandOrSupplier, product.package ? JSON.stringify(product.package) : null, product.note, at, at)
+              .prepare('INSERT INTO food_products (id, name, brand_or_supplier, package, note, aliases, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+              .run(
+                id,
+                product.name,
+                product.brandOrSupplier,
+                product.package ? JSON.stringify(product.package) : null,
+                product.note,
+                aliasesColumn(cleanAliases(product.aliases ?? [], product.name)),
+                at,
+                at,
+              )
             this.insertVersion(version, id, at)
             return id
           },
@@ -208,6 +223,8 @@ export class FoodService {
             productName: product.name,
             brandOrSupplier: product.brand_or_supplier,
             package: product.package ? JSON.parse(product.package) : null,
+            aliases: parseAliases(product.aliases),
+            previous: null,
             basis: change.version.basis,
             sourceKind: change.version.sourceKind,
             previousBasis: previous ? (JSON.parse(previous.basis) as FoodVersionBasis) : null,
@@ -217,6 +234,36 @@ export class FoodService {
             if (previous) database.prepare('UPDATE food_versions SET retired_at = ? WHERE id = ?').run(at, previous.id)
             this.insertVersion(change.version, product.id, at)
             return product.id
+          },
+        }
+      }
+
+      case 'updateProduct': {
+        const current = this.product(change.productId)
+        if (!current.activeVersion) throw new ServiceError('food', 'productNotFound')
+        const name = change.name?.trim() || current.name
+        const brand = change.brandOrSupplier === undefined ? current.brandOrSupplier : change.brandOrSupplier?.trim() || null
+        const aliases = change.aliases === null ? current.aliases : cleanAliases(change.aliases, name)
+        if (name === current.name && brand === current.brandOrSupplier && isDeepStrictEqual(aliases, current.aliases)) {
+          throw new ServiceError('food', 'nothingToChange')
+        }
+        return {
+          preview: {
+            kind: 'updateProduct',
+            productName: name,
+            brandOrSupplier: brand,
+            package: current.package,
+            aliases,
+            previous: { name: current.name, brandOrSupplier: current.brandOrSupplier, aliases: current.aliases },
+            basis: current.activeVersion.basis,
+            sourceKind: current.activeVersion.sourceKind,
+            previousBasis: null,
+          },
+          commit: () => {
+            database
+              .prepare('UPDATE food_products SET name = ?, brand_or_supplier = ?, aliases = ?, updated_at = ? WHERE id = ?')
+              .run(name, brand, aliasesColumn(aliases), this.context.now().toISOString(), current.id)
+            return current.id
           },
         }
       }
@@ -278,7 +325,30 @@ function toProduct(row: ProductRow, versionRows: VersionRow[]): FoodProduct {
     brandOrSupplier: row.brand_or_supplier,
     package: row.package ? JSON.parse(row.package) : null,
     note: row.note,
+    aliases: parseAliases(row.aliases),
     activeVersion: versions.find((version) => version.id === row.active_version_id) ?? null,
     versions,
   }
+}
+
+function parseAliases(raw: string | null): string[] {
+  return raw ? (JSON.parse(raw) as string[]) : []
+}
+
+function aliasesColumn(aliases: string[]): string | null {
+  return aliases.length ? JSON.stringify(aliases) : null
+}
+
+/** 去空白、去重，去掉和名称一样的。 */
+function cleanAliases(aliases: string[], name: string): string[] {
+  const seen = new Set([normalizeName(name)])
+  const result: string[] = []
+  for (const alias of aliases) {
+    const trimmed = alias.trim()
+    const key = normalizeName(trimmed)
+    if (!trimmed || seen.has(key)) continue
+    seen.add(key)
+    result.push(trimmed)
+  }
+  return result.slice(0, 20)
 }

@@ -62,7 +62,7 @@ final class HealthSyncService {
             var after = state.failed.isEmpty ? state.cursor : 0
             var hasMore = true
             while hasMore {
-                let page: HealthChangesResponseDTO = try await api.get("/v1/health-sync/changes", query: [URLQueryItem(name: "after", value: String(after))])
+                let page: HealthChangesResponseDTO = try await api.get("/v1/health-sync/changes", query: [URLQueryItem(name: "after", value: String(after)), URLQueryItem(name: "extended", value: "1")])
                 for change in page.changes {
                     // 重拉时只处理之前失败的和游标之后的新变更，已经写好的不重写。
                     let key = Self.key(change.entity, change.id)

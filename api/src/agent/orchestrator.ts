@@ -313,12 +313,20 @@ export class Orchestrator {
             ...products.map((product) => {
               const parts = [`${product.name}［productId ${product.id}］`]
               if (product.brandOrSupplier) parts.push(`品牌 ${product.brandOrSupplier}`)
+              if (product.aliases.length) parts.push(`也叫 ${product.aliases.join('、')}`)
               if (product.package) parts.push(`包装 ${product.package.amount} ${product.package.unit}`)
               const version = product.activeVersion
               if (version) {
                 const { quantity, nutrients: n } = version.basis
                 parts.push(`foodVersionId ${version.id}`)
-                parts.push(`每 ${quantity.amount} ${quantity.unit}：${n.energyKcal} kcal、蛋白质 ${n.proteinG} g、脂肪 ${n.fatG} g、碳水 ${n.carbohydrateG} g`)
+                const extras = [
+                  n.sodiumMg === undefined ? null : `钠 ${n.sodiumMg} mg`,
+                  n.saturatedFatG === undefined ? null : `饱和脂肪 ${n.saturatedFatG} g`,
+                  n.sugarG === undefined ? null : `糖 ${n.sugarG} g`,
+                ].filter(Boolean)
+                parts.push(
+                  `每 ${quantity.amount} ${quantity.unit}：${n.energyKcal} kcal、蛋白质 ${n.proteinG} g、脂肪 ${n.fatG} g、碳水 ${n.carbohydrateG} g${extras.length ? '、' + extras.join('、') : ''}`,
+                )
               }
               return '  - ' + parts.join('；')
             }),

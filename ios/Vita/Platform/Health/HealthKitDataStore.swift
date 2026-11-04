@@ -5,12 +5,23 @@ import HealthKit
 final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
     private let store = HKHealthStore()
 
-    private static let dietaryTypes: [Nutrient: HKQuantityType] = [
+    private static let dietaryTypes: [DietaryKind: HKQuantityType] = [
         .energyKcal: HKQuantityType(.dietaryEnergyConsumed),
         .proteinG: HKQuantityType(.dietaryProtein),
         .fatG: HKQuantityType(.dietaryFatTotal),
         .carbohydrateG: HKQuantityType(.dietaryCarbohydrates),
+        .sodiumMg: HKQuantityType(.dietarySodium),
+        .saturatedFatG: HKQuantityType(.dietaryFatSaturated),
+        .sugarG: HKQuantityType(.dietarySugar),
     ]
+
+    private static func unit(_ kind: DietaryKind) -> HKUnit {
+        switch kind {
+        case .energyKcal: .kilocalorie()
+        case .sodiumMg: .gramUnit(with: .milli)
+        default: .gram()
+        }
+    }
 
     private static var readTypes: Set<HKObjectType> {
         [
@@ -20,7 +31,11 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
         ]
     }
 
+    /// 全部膳食写入类型：申请权限、删旧数据用。
     private static var writeTypes: Set<HKSampleType> { Set(dietaryTypes.values) }
+    /// 四项主营养素：决定膳食写入是否可用。扩展项被拒或没问过不影响它们。
+    private static var coreWriteTypes: Set<HKSampleType> { Set(dietaryTypes.filter { !$0.key.isExtended }.values) }
+    private static var extendedWriteTypes: Set<HKSampleType> { Set(dietaryTypes.filter { $0.key.isExtended }.values) }
 
     /// 体脂秤写入的类型：和膳食一起申请，但授权状态分开判断（膳食写入被拒不影响称重写入）。
     private static var bodyWriteTypes: Set<HKSampleType> {
@@ -38,12 +53,16 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
     /// iOS 不告诉 App 读取是否被允许，只能看写入：任何一项写入有过答复，就说明问过了。
     func hasRequestedAuthorization() async -> Bool {
         guard isAvailable else { return false }
-        return Self.writeTypes.union(Self.bodyWriteTypes).contains { store.authorizationStatus(for: $0) != .notDetermined }
+        return Self.coreWriteTypes.union(Self.bodyWriteTypes).contains { store.authorizationStatus(for: $0) != .notDetermined }
+    }
+
+    func hasUndeterminedExtendedWrite() -> Bool {
+        isAvailable && Self.extendedWriteTypes.contains { store.authorizationStatus(for: $0) == .notDetermined }
     }
 
     func writeAuthorization() -> HealthWriteAuthorization {
         guard isAvailable else { return .denied }
-        let statuses = Self.writeTypes.map { store.authorizationStatus(for: $0) }
+        let statuses = Self.coreWriteTypes.map { store.authorizationStatus(for: $0) }
         if statuses.contains(.sharingDenied) { return .denied }
         if statuses.contains(.notDetermined) { return .notDetermined }
         return .authorized
@@ -127,11 +146,14 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
 
     func replaceDietary(recordID: UUID, with samples: [DietarySample], syncVersion: Int) async throws {
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
-        try await deleteSynced(Nutrient.allCases.map { HealthSyncIdentifier.record(recordID, $0) }, of: Self.writeTypes)
-        guard !samples.isEmpty else { return }
-        let objects = samples.map { sample -> HKQuantitySample in
+        // 只删、只写有权限的类型（扩展项可能没授权）。
+        let allowed = Self.writeTypes.filter { store.authorizationStatus(for: $0) == .sharingAuthorized }
+        try await deleteSynced(DietaryKind.allCases.map { HealthSyncIdentifier.record(recordID, $0) }, of: allowed)
+        let writable = samples.filter { allowed.contains(Self.dietaryTypes[$0.nutrient]!) }
+        guard !writable.isEmpty else { return }
+        let objects = writable.map { sample -> HKQuantitySample in
             let type = Self.dietaryTypes[sample.nutrient]!
-            let unit: HKUnit = sample.nutrient == .energyKcal ? .kilocalorie() : .gram()
+            let unit = Self.unit(sample.nutrient)
             var metadata: [String: Any] = sample.metadata
             metadata[HKMetadataKeySyncIdentifier] = HealthSyncIdentifier.record(recordID, sample.nutrient)
             metadata[HKMetadataKeySyncVersion] = syncVersion
@@ -149,7 +171,7 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
         guard !uuids.isEmpty else { return }
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         let predicate = HKQuery.predicateForObjects(with: Set(uuids))
-        for type in Self.writeTypes {
+        for type in Self.coreWriteTypes {
             try await store.deleteObjects(of: type, predicate: predicate)
         }
     }

@@ -62,6 +62,8 @@ struct DaySummary: Equatable, Sendable {
 
     var totals: NutrientValues
     var includedItemCount: Int
+    /// 计入汇总的条目里，各扩展营养素缺数据的条数。
+    var missingExtras: [ExtraNutrient: Int] = [:]
     var excludedItemCount: Int
     var estimatedItemCount: Int
     /// 生效目标。能量目标随活动计算时，`targets.energyKcal` 已换成这一天算出的值。
@@ -80,6 +82,9 @@ struct DaySummary: Equatable, Sendable {
         let included = items.filter(\.includeInSummary)
         totals = included.reduce(.zero) { $0 + $1.snapshot.values }
         includedItemCount = included.count
+        missingExtras = Dictionary(uniqueKeysWithValues: ExtraNutrient.allCases.map { extra in
+            (extra, included.filter { $0.snapshot.values.value(of: extra) == nil }.count)
+        })
         excludedItemCount = items.count - included.count
         estimatedItemCount = included.filter { $0.snapshot.nutritionSource == .aiEstimated }.count
         self.goal = goal
@@ -91,9 +96,10 @@ struct DaySummary: Equatable, Sendable {
     /// 服务端算好的汇总（`GET /v1/days/:date`）：能量目标随活动计算时，`goal.targets.energyKcal` 已是当天的值。
     init(
         totals: NutrientValues, includedItemCount: Int, excludedItemCount: Int, estimatedItemCount: Int,
-        goal: GoalSnapshot?, energy: EnergyTarget?, balance: EnergyBalance?
+        goal: GoalSnapshot?, energy: EnergyTarget?, balance: EnergyBalance?, missingExtras: [ExtraNutrient: Int] = [:]
     ) {
         self.totals = totals
+        self.missingExtras = missingExtras
         self.includedItemCount = includedItemCount
         self.excludedItemCount = excludedItemCount
         self.estimatedItemCount = estimatedItemCount

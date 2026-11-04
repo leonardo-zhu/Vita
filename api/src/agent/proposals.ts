@@ -42,7 +42,15 @@ const invalid = (field: string) => reject('invalidField', `字段 ${field} 的�
 // MARK: - 参数格式
 
 const QuantityArgs = z.object({ amount: z.number(), unit: z.string() })
-const NutrientArgs = z.object({ energyKcal: z.number(), proteinG: z.number(), fatG: z.number(), carbohydrateG: z.number() })
+const NutrientArgs = z.object({
+  energyKcal: z.number(),
+  proteinG: z.number(),
+  fatG: z.number(),
+  carbohydrateG: z.number(),
+  sodiumMg: z.number().nullish(),
+  saturatedFatG: z.number().nullish(),
+  sugarG: z.number().nullish(),
+})
 
 const ItemArgs = z.object({
   displayName: z.string(),
@@ -83,20 +91,28 @@ const RecordChangePayload = z.object({
 const RecordDeletionPayload = z.object({ recordId: z.string(), replacesPendingId: z.string().nullish() })
 
 const FoodChangePayload = z.object({
-  intent: z.enum(['createProduct', 'addVersion']),
+  intent: z.enum(['createProduct', 'addVersion', 'updateProduct']),
   productId: z.string().nullish(),
   expectedActiveVersionId: z.string().nullish(),
   product: z
-    .object({ name: z.string(), brandOrSupplier: z.string().nullish(), package: QuantityArgs.nullish(), note: z.string().nullish() })
+    .object({
+      name: z.string().nullish(),
+      brandOrSupplier: z.string().nullish(),
+      package: QuantityArgs.nullish(),
+      note: z.string().nullish(),
+      aliases: z.array(z.string()).nullish(),
+    })
     .nullish(),
-  version: z.object({
+  version: z
+    .object({
     source: z.string(),
     labelScanId: z.string().nullish(),
     referenceFoodId: z.string().nullish(),
     basis: QuantityArgs.nullish(),
     values: NutrientArgs.nullish(),
     note: z.string().nullish(),
-  }),
+  })
+    .nullish(),
   replacesPendingId: z.string().nullish(),
 })
 
@@ -252,7 +268,7 @@ function item(args: ItemArgs): ItemDraft {
     case 'aiEstimated':
       if (!nutrition.values) throw missing('item.nutrition.values')
       if (!nutrition.estimateBasis) throw missing('item.nutrition.estimateBasis')
-      input = { source: 'aiEstimated', values: nutrition.values, estimateBasis: nutrition.estimateBasis }
+      input = { source: 'aiEstimated', values: nutrients(nutrition.values), estimateBasis: nutrition.estimateBasis }
       break
   }
   return {
@@ -267,17 +283,32 @@ function item(args: ItemArgs): ItemDraft {
 }
 
 function foodChange(payload: z.infer<typeof FoodChangePayload>, services: Services): FoodChange {
+  if (payload.intent === 'updateProduct') {
+    if (!payload.productId) throw missing('payload.productId')
+    const product = payload.product ?? {}
+    return {
+      kind: 'updateProduct',
+      productId: payload.productId,
+      name: product.name?.trim() || null,
+      // 没给品牌就不改；给了空字符串表示清空。
+      brandOrSupplier: product.brandOrSupplier === undefined || product.brandOrSupplier === null ? undefined : product.brandOrSupplier,
+      aliases: product.aliases ?? null,
+    }
+  }
+  if (!payload.version) throw missing('payload.version')
   const version = versionDraft(payload.version, services)
   if (payload.intent === 'createProduct') {
     if (!payload.product) throw missing('payload.product')
     const { product } = payload
+    if (!product.name?.trim()) throw missing('payload.product.name')
     return {
       kind: 'createProduct',
       product: {
-        name: product.name,
+        name: product.name.trim(),
         brandOrSupplier: product.brandOrSupplier ?? null,
         package: product.package ? quantity(product.package, 'payload.product.package') : null,
         note: product.note ?? null,
+        aliases: product.aliases ?? [],
       },
       version,
     }
@@ -287,7 +318,7 @@ function foodChange(payload: z.infer<typeof FoodChangePayload>, services: Servic
 }
 
 /** source 只接受 nutritionLabel / manualEntry / referenceDerived；AI 估算不能沉淀为食品版本。 */
-function versionDraft(args: z.infer<typeof FoodChangePayload>['version'], services: Services): FoodVersionDraft {
+function versionDraft(args: NonNullable<z.infer<typeof FoodChangePayload>['version']>, services: Services): FoodVersionDraft {
   switch (args.source) {
     case 'referenceDerived': {
       if (!args.referenceFoodId) throw missing('payload.version.referenceFoodId')
@@ -308,7 +339,7 @@ function versionDraft(args: z.infer<typeof FoodChangePayload>['version'], servic
       if (!args.values) throw missing('payload.version.values')
       if (args.source === 'nutritionLabel' && !args.labelScanId) throw missing('payload.version.labelScanId')
       return {
-        basis: { quantity: quantity(args.basis, 'payload.version.basis'), nutrients: args.values },
+        basis: { quantity: quantity(args.basis, 'payload.version.basis'), nutrients: nutrients(args.values) },
         sourceKind: args.source,
         labelScanId: args.source === 'nutritionLabel' ? (args.labelScanId ?? null) : null,
         derivedFromReferenceId: null,
@@ -317,6 +348,17 @@ function versionDraft(args: z.infer<typeof FoodChangePayload>['version'], servic
     }
     default:
       throw reject('estimateNotAllowed', 'AI 估算不能保存为个人食品。只有营养标签、用户提供的数值或公共参考库可以作为来源。')
+  }
+}
+
+/** 模型给的营养值：扩展项是 null 时去掉（存储里“没有”就是不给这个键）。 */
+function nutrients(values: z.infer<typeof NutrientArgs>): FoodVersionDraft['basis']['nutrients'] {
+  const { sodiumMg, saturatedFatG, sugarG, ...core } = values
+  return {
+    ...core,
+    ...(sodiumMg == null ? {} : { sodiumMg }),
+    ...(saturatedFatG == null ? {} : { saturatedFatG }),
+    ...(sugarG == null ? {} : { sugarG }),
   }
 }
 

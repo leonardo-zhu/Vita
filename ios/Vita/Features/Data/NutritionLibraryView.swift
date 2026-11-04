@@ -186,6 +186,9 @@ private struct FoodProductDetailView: View {
                 if let note = product.note {
                     Text(note).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 4)
                 }
+                if !product.aliases.isEmpty {
+                    Text("也叫：" + product.aliases.joined(separator: "、")).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 4)
+                }
                 ForEach(product.versions) { version in
                     VStack(alignment: .leading, spacing: 14) {
                         HStack {
@@ -201,6 +204,12 @@ private struct FoodProductDetailView: View {
                         }
                         Text("每 " + DisplayFormat.quantity(version.basis.quantity)).font(.subheadline).foregroundStyle(.secondary)
                         NutrientGrid(values: version.basis.nutrients)
+                        let extras = ExtraNutrient.allCases.compactMap { extra in
+                            version.basis.nutrients.value(of: extra).map { "\(extra.label) \(DisplayFormat.extra($0, extra))" }
+                        }
+                        if !extras.isEmpty {
+                            Text(extras.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
                         if let note = version.sourceNote {
                             Text(note).font(.caption).foregroundStyle(.secondary)
                         }
@@ -218,15 +227,15 @@ private struct FoodProductDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("编辑", systemImage: "ellipsis") {
-                    Button("修改名称与包装", systemImage: "pencil") { isEditingInfo = true }
+                    Button("修改名称、叫法与包装", systemImage: "pencil") { isEditingInfo = true }
                     Button("修改营养值", systemImage: "chart.bar.doc.horizontal") { isEditingNutrition = true }
                     Button("删除这个食品", systemImage: "trash", role: .destructive) { isConfirmingDelete = true }
                 }
             }
         }
         .sheet(isPresented: $isEditingInfo) {
-            FoodInfoEditor(product: product) { name, brand, package in
-                save { try await services.foods.update(product.id, name: name, brandOrSupplier: brand, package: package) }
+            FoodInfoEditor(product: product) { name, brand, aliases, package in
+                save { try await services.foods.update(product.id, name: name, brandOrSupplier: brand, aliases: aliases, package: package) }
             }
         }
         .sheet(isPresented: $isEditingNutrition) {
@@ -279,19 +288,21 @@ private struct FoodProductDetailView: View {
     }
 }
 
-/// 改名称、品牌、包装规格。
+/// 改名称、品牌、常用叫法、包装规格。
 private struct FoodInfoEditor: View {
-    let onSave: (String, String?, Quantity?) -> Void
+    let onSave: (String, String?, [String], Quantity?) -> Void
     @State private var name: String
     @State private var brand: String
+    @State private var aliases: String
     @State private var packageAmount: String
     @State private var packageUnit: QuantityUnit
     @Environment(\.dismiss) private var dismiss
 
-    init(product: FoodProductSummary, onSave: @escaping (String, String?, Quantity?) -> Void) {
+    init(product: FoodProductSummary, onSave: @escaping (String, String?, [String], Quantity?) -> Void) {
         self.onSave = onSave
         _name = State(initialValue: product.name)
         _brand = State(initialValue: product.brandOrSupplier ?? "")
+        _aliases = State(initialValue: product.aliases.joined(separator: "、"))
         _packageAmount = State(initialValue: product.package.map { "\($0.amount)" } ?? "")
         _packageUnit = State(initialValue: product.package?.unit ?? .gram)
     }
@@ -308,6 +319,13 @@ private struct FoodInfoEditor: View {
             Form {
                 TextField("名称", text: $name)
                 TextField("品牌（可不填）", text: $brand)
+                Section {
+                    TextField("如 小象牛奶、早餐奶", text: $aliases)
+                } header: {
+                    Text("常用叫法")
+                } footer: {
+                    Text("用顿号或逗号隔开。对 Vita 说这些叫法时，它会认出是这个食品。")
+                }
                 Section("包装规格（可不填）") {
                     HStack {
                         TextField("如 950", text: $packageAmount).keyboardType(.decimalPad)
@@ -315,14 +333,15 @@ private struct FoodInfoEditor: View {
                     }
                 }
             }
-            .navigationTitle("修改名称与包装")
+            .navigationTitle("名称、叫法与包装")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
                         let trimmedBrand = brand.trimmingCharacters(in: .whitespacesAndNewlines)
-                        onSave(trimmedName, trimmedBrand.isEmpty ? nil : trimmedBrand, package)
+                        let list = aliases.split(whereSeparator: { "、,，;；".contains($0) }).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                        onSave(trimmedName, trimmedBrand.isEmpty ? nil : trimmedBrand, list, package)
                         dismiss()
                     }
                     .disabled(!isValid)
@@ -338,6 +357,7 @@ private struct FoodNutritionEditor: View {
     @State private var basisAmount: String
     @State private var basisUnit: QuantityUnit
     @State private var values: [Nutrient: String]
+    @State private var extras: [ExtraNutrient: String]
     @State private var note = ""
     @Environment(\.dismiss) private var dismiss
 
@@ -350,6 +370,18 @@ private struct FoodNutritionEditor: View {
             initial[nutrient] = basis.map { "\(nutrient.value(in: $0.nutrients))" } ?? ""
         }
         _values = State(initialValue: initial)
+        var initialExtras: [ExtraNutrient: String] = [:]
+        for extra in ExtraNutrient.allCases {
+            initialExtras[extra] = basis?.nutrients.value(of: extra).map { "\($0)" } ?? ""
+        }
+        _extras = State(initialValue: initialExtras)
+    }
+
+    /// 选填项：空着表示没有这项数据；填了必须是非负数。
+    private func optional(_ extra: ExtraNutrient) -> Decimal?? {
+        let text = (extras[extra] ?? "").trimmingCharacters(in: .whitespaces)
+        if text.isEmpty { return .some(nil) }
+        return number(text).map { .some($0) } ?? nil
     }
 
     private func number(_ text: String?) -> Decimal? {
@@ -360,11 +392,15 @@ private struct FoodNutritionEditor: View {
     private var basis: FoodVersionBasis? {
         guard let amount = number(basisAmount), amount > 0,
               let energy = number(values[.energyKcal]), let protein = number(values[.proteinG]),
-              let fat = number(values[.fatG]), let carbohydrate = number(values[.carbohydrateG])
+              let fat = number(values[.fatG]), let carbohydrate = number(values[.carbohydrateG]),
+              let sodium = optional(.sodiumMg), let saturated = optional(.saturatedFatG), let sugar = optional(.sugarG)
         else { return nil }
         return FoodVersionBasis(
             quantity: Quantity(amount: amount, unit: basisUnit),
-            nutrients: NutrientValues(energyKcal: energy, proteinG: protein, fatG: fat, carbohydrateG: carbohydrate)
+            nutrients: NutrientValues(
+                energyKcal: energy, proteinG: protein, fatG: fat, carbohydrateG: carbohydrate,
+                sodiumMg: sodium, saturatedFatG: saturated, sugarG: sugar
+            )
         )
     }
 
@@ -385,6 +421,17 @@ private struct FoodNutritionEditor: View {
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                             Text(nutrient == .energyKcal ? "千卡" : "g").foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Section("选填（标签上有才填）") {
+                    ForEach(ExtraNutrient.allCases, id: \.self) { extra in
+                        HStack {
+                            Text(extra.label)
+                            TextField("—", text: Binding(get: { extras[extra] ?? "" }, set: { extras[extra] = $0 }))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                            Text(extra.unit).foregroundStyle(.secondary)
                         }
                     }
                 }

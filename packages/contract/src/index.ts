@@ -72,6 +72,13 @@ export const NutrientValues = z.object({
   proteinG: z.number(),
   fatG: z.number(),
   carbohydrateG: z.number(),
+  /**
+   * 可选的扩展营养素（PRD v2.0 §4.3）：来源有就存，没有就不给，不由 AI 估算补齐。
+   * 计算时随四项一起缩放；日合计里只加有这一项的条目，缺的条数见 DaySummary.missingExtras。
+   */
+  sodiumMg: z.number().optional(),
+  saturatedFatG: z.number().optional(),
+  sugarG: z.number().optional(),
 })
 export type NutrientValues = z.infer<typeof NutrientValues>
 
@@ -226,6 +233,8 @@ export type EnergyBalance = z.infer<typeof EnergyBalance>
 export const DaySummary = z.object({
   totals: NutrientValues,
   includedItemCount: z.number().int(),
+  /** 计入汇总的条目里，各扩展营养素缺数据的条数（totals 里这一项只是有数据那些的和）。 */
+  missingExtras: z.object({ sodiumMg: z.number().int(), saturatedFatG: z.number().int(), sugarG: z.number().int() }),
   excludedItemCount: z.number().int(),
   estimatedItemCount: z.number().int(),
   /** 生效目标。能量目标随活动计算时，targets.energyKcal 已换成这一天算出的值。 */
@@ -270,6 +279,8 @@ export const FoodProduct = z.object({
   package: Quantity.nullable(),
   note: z.string().nullable(),
   activeVersion: FoodVersion.nullable(),
+  /** 用户的常用叫法（PRD v2.0 §4.2），给模型匹配用。 */
+  aliases: z.array(z.string()).default([]),
   /** 新的在前。 */
   versions: z.array(FoodVersion),
 })
@@ -328,10 +339,14 @@ export const RecordChangePreview = z.object({
 export type RecordChangePreview = z.infer<typeof RecordChangePreview>
 
 export const FoodChangePreview = z.object({
-  kind: z.enum(['createProduct', 'addVersion']),
+  /** updateProduct：改名称、品牌、常用叫法（对话里“这个以后叫 X”），营养值不变，basis 是当前生效版本。 */
+  kind: z.enum(['createProduct', 'addVersion', 'updateProduct']),
   productName: z.string(),
   brandOrSupplier: z.string().nullable(),
   package: Quantity.nullable(),
+  aliases: z.array(z.string()).default([]),
+  /** updateProduct 改之前的样子，便于对比。 */
+  previous: z.object({ name: z.string(), brandOrSupplier: z.string().nullable(), aliases: z.array(z.string()) }).nullable().default(null),
   basis: FoodVersionBasis,
   sourceKind: FoodVersionSource,
   /** 新版本取代的旧版本基准，便于对比。 */
@@ -688,7 +703,8 @@ export type ChatEvent = z.infer<typeof ChatEvent>
 
 /** 一项营养的 Sample：每项一条，值为计入汇总的 Item 之和，为 0 的不写。 */
 export const DietarySample = z.object({
-  nutrient: z.enum(['energyKcal', 'proteinG', 'fatG', 'carbohydrateG']),
+  /** 扩展营养素只在请求带 `extended=1` 时给（2.3.0 起的 App），旧版本 App 照旧只收四项。 */
+  nutrient: z.enum(['energyKcal', 'proteinG', 'fatG', 'carbohydrateG', 'sodiumMg', 'saturatedFatG', 'sugarG']),
   value: z.number(),
   /** 代表性时刻：餐段取代表性时间、仅日期取 12:00，metadata 里注明。 */
   date: z.iso.datetime(),
@@ -843,6 +859,7 @@ export type DayEditResponse = z.infer<typeof DayEditResponse>
 /** PATCH /v1/foods/:id：改名称、品牌、包装规格、备注。没给的项不变，给 null 清空。 */
 export const FoodProductUpdate = z.object({
   name: z.string().trim().min(1).max(80).optional(),
+  aliases: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   brandOrSupplier: z.string().max(80).nullish(),
   package: Quantity.nullish(),
   note: z.string().max(500).nullish(),

@@ -290,7 +290,7 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
   app.get('/v1/health-sync/changes', (c) => {
     const after = Number(c.req.query('after') ?? 0)
     if (!Number.isInteger(after) || after < 0) return invalidBody(c, 'after 应为非负整数')
-    return c.json(services.healthSync.changes(after) satisfies HealthChangesResponse)
+    return c.json(services.healthSync.changes(after, 100, c.req.query('extended') === '1') satisfies HealthChangesResponse)
   })
 
   /** 从 1.0 迁移：只在业务库为空时接受，整体一个事务。 */
