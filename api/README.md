@@ -52,3 +52,13 @@ curl -X POST http://127.0.0.1:3014/v1/admin/devices \
 6. 推一次 `main`（或在 Actions 里手动运行）。
 
 确认：`curl -s https://vita-api.r4s.leonardo-zhu.me/v1/health` 返回 `{"ok":true,"version":"<commit sha>"}`。
+
+`CONDUIT_BASE_URL` 在 R4S 上填 `http://127.0.0.1:3012`：Conduit 只监听本机，直接连，不绕 Caddy 和 TLS。
+
+### 改了 `.env` 之后重启
+
+compose 里镜像 tag 默认是 `latest`，服务器上没有 GHCR 的拉取凭据，直接 `up` 会报 `unauthorized`。用当前运行的 sha，不拉取（同 Admin）：
+
+```bash
+ssh istoreos 'cd /opt/stacks/vita-api && API_TAG=<当前 sha> docker compose up -d --force-recreate --pull never api'
+```
