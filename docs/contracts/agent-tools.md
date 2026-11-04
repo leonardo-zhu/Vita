@@ -2,6 +2,8 @@
 
 **状态：已实现（2026-10-31）；2.0 起整体移到服务端（2026-11-04）。** 1.0 的实现在 iOS（`AgentToolCatalog`、`AgentToolRunner`、`ProposalToolHandler`、`ChatOrchestrator`，已删除）。现在的实现在 Vita API 的 `api/src/agent/`：`tools.ts`（只读工具与 `updateGoal`）、`proposals.ts`（Propose 类）、`orchestrator.ts`（工具循环）、`config.ts`（工具清单与描述）。
 
+> **2026-11-05 之后的规则（API 与 prompt v7–v10）：** ① `updateProduct` 也可改 `product.package`（如“一袋是 288 g”）；② 按营养标签新建产品（`createProduct` + `version.source = nutritionLabel`）必须带 `product.package`，否则返回 `packageRequired`，模型应先问净含量再提案；③ 提案工具返回 ok 后这一轮立即结束，不再请求模型说“请确认”，要说明的在调用前说完；④ 确认后的接续第一轮请求带 `tool_choice: required`，仍没调工具时服务端提醒一次；⑤ `packageUnavailable`（旧食品没有包装规格却按“一袋”记）的错误信息会指引模型按克数记、确认后用 `updateProduct` 补包装。依据与实验见《Agent 调优记录》。
+
 > **食品库与营养素（2.3，M5）：** `proposeFoodChange` 新增意图 `updateProduct`（`productId` 加 `product.name` / `product.brandOrSupplier` / `product.aliases` 中要改的项，`aliases` 是改后的完整列表；营养值不变，不需要 `version`）；`createProduct` 的 `product.aliases` 记用户的常用叫法。营养值（`version.values` 与 AI 估算的 `nutrition.values`）可带可选的 `sodiumMg`、`saturatedFatG`、`sugarG`，只在来源上有时填；AI 估算的这三项会被丢弃。
 
 > **批量录入（2.1）：** 一条用户消息可以带多张营养标签照片（最多 6 张），附件说明里按顺序列出各张的 `labelScanId`。一天只能有一张确认卡，模型每次只对一张照片提 `proposeFoodChange`，用 `afterConfirm` 写明接下来处理哪几张，确认后经 `/continue` 接着处理。

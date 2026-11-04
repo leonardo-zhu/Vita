@@ -329,7 +329,7 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 3. **拉取时机**：不轮询，不设 6 小时间隔；启动、每次回到前台、设置页“立即刷新”时检查，靠 ETag 拿 304（§5）。
 4. **`dev` 渠道**：首期不要，只有 `stable`；试验用 Admin 试跑~~与本地调试覆盖（§8.2）~~（2.0 起只有试跑）。
 5. **工具描述**：允许远程修改（§3.1），工具清单与参数 schema 仍在代码里。
-6. **诊断日志**：默认开，设置页可关；分发前加首次启动告知并重新评估默认值（§11.4）。
+6. **诊断日志**：默认开，设置页可关；分发前加首次启动告知并重新评估默认值（§11.4）。（2026-11-05：iOS 的诊断上报已删除，Admin 诊断页只剩历史数据。）
 7. **设备鉴权**：现阶段用匿名安装 ID 加服务端限流与封禁；分发前与 Conduit 的设备注册一起改为 App Attest（§11.4）。
 8. **开发环境**：不单独建 Conduit 开发实例，Debug 与 Release 都指向 `https://conduit.r4s.leonardo-zhu.me`（`ios/project.yml`）；Conduit 不可用时沿用 Chat 页现有的错误提示。
 9. **私钥存放**：不签名，暂无私钥；启用签名时私钥不放在 Admin Web 进程里（§7）。
@@ -345,6 +345,8 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 - 实施计划：Phase 0 加入内置默认配置与 `ConfigProvider` 协议；Phase 5 前完成远程拉取、校验与调试覆盖；诊断日志与 Admin 按 §11.5 分期。
 
 ## 14. 实现现状（2026-11-01，M1）
+
+> 历史记录：这里描述的 iOS 远程配置拉取与诊断上报已于 2026-11-05 删除（App 2.3.1），配置改由 Vita API 读取，见文首的 2.0 说明。
 
 **Admin（`admin/`）**：Next.js 16 + SQLite（`node:sqlite`），前端 shadcn/ui（Base UI）+ Tailwind 4，说明与首次部署步骤见 [`admin/README.md`](../../admin/README.md)。
 
@@ -391,6 +393,8 @@ SQLite 中 `jsonb` 字段存为 JSON 文本；`signature`、`key_id` 为将来�
 **没验证的**：没有用真实的 Conduit 和模型跑过试跑（本地用模拟的 Conduit 走通了界面与存储）；生产环境要先配好 Conduit 密钥。
 
 ## 16. 实现现状（2026-11-02，M3）
+
+> 历史记录：这里描述的 iOS 远程配置拉取与诊断上报已于 2026-11-05 删除（App 2.3.1），配置改由 Vita API 读取，见文首的 2.0 说明。
 
 **事件与格式**：`shared/diagnostics/batch.schema.json`，示例 `example-batch.json`。iOS 测试检查编码与示例逐字段一致，Admin 测试用同一个示例校验 schema。三类事件：
 

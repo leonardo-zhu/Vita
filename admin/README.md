@@ -5,7 +5,7 @@ Next.js 管理后台：远程配置的编辑、校验与发布（M1），Prompt 
 约定：
 
 - 包管理器使用 pnpm，仓库根目录是 workspace（ADR-022），lockfile 在根目录；在根目录 `pnpm install` 一次即可。
-- 配置校验使用 `../shared/config-schema/` 中的 JSON Schema；发布的配置 2.0 起由 Vita API 读取（不再是 App）；工具清单与内置 prompt 取自 `../ios/Vita/Resources/DefaultConfig.json`，工具参数 schema 取自 `../shared/agent-tools/tool-parameters.json`，诊断日志格式取自 `../shared/diagnostics/`。这些文件由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
+- 配置校验使用 `../shared/config-schema/` 中的 JSON Schema；发布的配置 2.0 起由 Vita API 读取（不再是 App）；工具清单与内置 prompt 取自 `../shared/config/DefaultConfig.json`，工具参数 schema 取自 `../shared/agent-tools/tool-parameters.json`，诊断日志格式取自 `../shared/diagnostics/`。这些文件由 `scripts/sync-shared.mjs` 在 dev / build / test 前拷进 `src/generated/`（不进 git）。
 - 模型网关不在此处，见独立项目 Conduit。
 
 ## 本地开发
