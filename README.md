@@ -4,21 +4,44 @@ Vita 是一个个人 AI 健康助理：用自然语言记录饮食，追踪营�
 
 ## 文档入口
 
-| 文档 | 用途 | 状态 |
+按下面的顺序读：先建立全貌，再看决策与 Agent，专题按需看，1.0 的历史记录需要时再查。
+
+**一、全貌**
+
+| 文档 | 内容 | 状态 |
 | --- | --- | --- |
-| [PRD v2.0](docs/product/Vita-PRD-v2.0.md) | 2.0 相对 1.0 的产品变化 | 已评审，M1–M5 已实现 |
-| [Vita 2.0 架构设计](docs/architecture/vita-2.0-architecture.md) | 服务端、iOS 改造、Apple 健康同步、迁移，以及 2.0 的进度 | 已评审，M1–M5 已实现 |
-| [PRD v0.6](docs/product/Vita-PRD-v0.6.md) | 1.0 的产品需求，2.0 没改的规则沿用 | 基线 |
-| [身体成分模块](docs/product/Vita-Body-Composition.md) | 体脂秤、指标、校准 | 已实现 |
-| [技术设计文档](docs/architecture/TDD-v0.1.md) | 1.0 的架构、数据、同步与安全设计；领域规则仍有效 | 1.0 基线 |
-| [架构决策记录](docs/architecture/ADR.md) | 已作出的技术决策（ADR-019 起为 2.0） | 已采纳 |
-| [Agent 工具契约](docs/contracts/agent-tools.md) | Agent 工具与写入确认边界；2.0 起在服务端执行 | 已实现 |
-| [模型 Provider 集成规范](docs/contracts/llm-provider.md) | Responses API、工具循环与密钥边界；2.0 起调用方是 Vita API | 已实现，部分被取代 |
-| [Vita Admin 设计](docs/architecture/vita-admin.md) | 配置发布、Prompt 调试、设备令牌、对话追踪与 rewind、记录与食品库管理 | 已部署 |
+| 本 README | 项目是什么、现状、仓库结构、怎么跑起来 | 当前 |
+| [PRD v2.0](docs/product/Vita-PRD-v2.0.md) | 2.0 在产品上改了什么、为什么；没提到的规则沿用 PRD v0.6 | 已评审，M1–M5 已实现 |
+| [Vita 2.0 架构设计](docs/architecture/vita-2.0-architecture.md) | 服务端、App 改造、Apple 健康同步、迁移；§16 是 M1–M5 的进度记录 | 已评审，M1–M5 已实现 |
+
+**二、决策与 Agent**
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [架构决策记录](docs/architecture/ADR.md) | 每个关键技术决定与理由（ADR-019 起为 2.0）；先扫一遍，其他文档引用时再细看 | 已采纳 |
+| [Agent 工具契约](docs/contracts/agent-tools.md) | 模型能调哪些工具、确认门怎么约束它 | 已实现 |
+| [Agent 调优记录](docs/agent-tuning-log.md) | 为 Agent 做过的可靠性与速度优化、实验与模型对比数据、prompt 版本 | 持续更新 |
+
+**三、专题（按需）**
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [Vita Admin 设计](docs/architecture/vita-admin.md) | 后台各页面、配置发布、Prompt 调试、对话与数据管理 | 已部署 |
+| [身体成分模块](docs/product/Vita-Body-Composition.md) | 体脂秤、各项指标的算法与校准 | 已实现 |
+| [api/README](api/README.md)、[admin/README](admin/README.md)、[tools/agent-eval/README](tools/agent-eval/README.md) | 各部分的开发、部署、评测怎么做 | 当前 |
+
+**四、参考与历史（需要时查）**
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [模型 Provider 集成规范](docs/contracts/llm-provider.md) | Responses API、流式、工具循环与密钥边界；2.0 起调用方是 Vita API | 已实现，部分被取代 |
 | [Conduit 项目设计](docs/architecture/llm-gateway-project.md) | 独立的 LLM 网关项目 | 已上线 |
 | [公共营养参考库规范](docs/reference-food-library.md) | 数据来源、收录规则、构建与校验 | 已采纳 |
-| [Agent 调优记录](docs/agent-tuning-log.md) | Agent 的可靠性与速度调优、实验与模型对比数据、prompt 版本 | 持续更新 |
-| [MVP 实施计划](docs/implementation-plan.md) | 1.0 的开发阶段记录与剩余工作 | 1.0 完成，剩余工作按 2.0 更新 |
+| [PRD v0.6](docs/product/Vita-PRD-v0.6.md) | 1.0 的产品需求，2.0 没改的规则沿用 | 1.0 基线 |
+| [技术设计文档](docs/architecture/TDD-v0.1.md) | 1.0 的架构、数据、同步与安全设计；领域规则仍有效 | 1.0 基线 |
+| [MVP 实施计划](docs/implementation-plan.md) | 1.0 的开发阶段记录（按当时写成，不再改）；末尾“剩余工作”按现状维护 | 1.0 完成 |
+
+PRD v0.6、TDD、实施计划的正文与现状不一致是正常的；以现状为准的是本 README、PRD v2.0、2.0 架构设计、ADR、Agent 工具契约与 Agent 调优记录。
 
 ## 当前技术基线
 
