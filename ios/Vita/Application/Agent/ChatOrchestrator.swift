@@ -4,6 +4,8 @@ import Foundation
 struct ChatTurnResult: Equatable, Sendable {
     var reply: ChatEntry?
     var pendingID: UUID?
+    /// 这张卡片确认后要接着做的事（模型在提案里写的 `afterConfirm`）。
+    var afterConfirm: String? = nil
     var requestedDate: LocalDate?
     var goalChanged: Bool
 }
@@ -91,10 +93,30 @@ final class ChatOrchestrator {
         labelScan: UUID? = nil,
         onProgress: @escaping (ChatProgress) -> Void = { _ in }
     ) async throws -> ChatTurnResult {
+        try await recorded { stats in
+            try await runTurn(.user(text, labelScan: labelScan), on: date, stats: &stats, onProgress: onProgress)
+        }
+    }
+
+    /// 用户确认了一张带 `afterConfirm` 的卡片后接着跑一轮：不保存用户消息，只把“已确认、下一步是什么”
+    /// 作为客户端消息交给模型，让一次请求里的多步（如先存食品库再记饮食）连起来。
+    func continueAfterConfirm(
+        _ pendingID: UUID,
+        step: String,
+        on date: LocalDate,
+        onProgress: @escaping (ChatProgress) -> Void = { _ in }
+    ) async throws -> ChatTurnResult {
+        let note = "［客户端：用户刚确认了卡片 \(pendingID.uuidString)，已保存。你提案时写下的下一步：\(step)。现在接着做，数据以上面的当前状态为准；不需要再做就简短说明。］"
+        return try await recorded { stats in
+            try await runTurn(.clientNote(note), on: date, stats: &stats, onProgress: onProgress)
+        }
+    }
+
+    private func recorded(_ turn: (inout TurnStats) async throws -> ChatTurnResult) async throws -> ChatTurnResult {
         let started = now()
         var stats = TurnStats()
         do {
-            let result = try await runTurn(text, on: date, labelScan: labelScan, stats: &stats, onProgress: onProgress)
+            let result = try await turn(&stats)
             record(stats, started: started, outcome: "ok", errorCode: nil, result: result)
             return result
         } catch {
@@ -141,10 +163,15 @@ final class ChatOrchestrator {
         reply.contains("确认卡") && (reply.contains("生成") || reply.contains("下面") || reply.contains("下方"))
     }
 
+    /// 本轮交给模型的消息：用户消息会保存进对话；客户端消息（确认后的接续）不保存。
+    private enum Turn {
+        case user(String, labelScan: UUID?)
+        case clientNote(String)
+    }
+
     private func runTurn(
-        _ text: String,
+        _ turn: Turn,
         on date: LocalDate,
-        labelScan: UUID?,
         stats: inout TurnStats,
         onProgress: @escaping (ChatProgress) -> Void
     ) async throws -> ChatTurnResult {
@@ -170,7 +197,12 @@ final class ChatOrchestrator {
             labelImage: labelImage
         )
         input.append(.system(try clientState(date: date)))
-        input.append(Self.userItem(text, labelScan: labelScan, image: labelScan.flatMap(labelImage)))
+        switch turn {
+        case .user(let text, let labelScan):
+            input.append(Self.userItem(text, labelScan: labelScan, image: labelScan.flatMap(labelImage)))
+        case .clientNote(let note):
+            input.append(.system(note))
+        }
         let instructions = try instructions(config: config)
         let definitions = AgentToolCatalog.definitions(descriptions: config.prompts.tools)
         let requestID = UUID()
@@ -179,6 +211,7 @@ final class ChatOrchestrator {
         var reply = ""
         var steps: [ChatProgress.Step] = []
         var pendingID: UUID?
+        var afterConfirm: String?
         var requestedDate: LocalDate?
         var goalChanged = false
 
@@ -232,7 +265,10 @@ final class ChatOrchestrator {
                 steps[steps.count - 1].failed = outcome.output.hasPrefix(#"{"error""#) || outcome.output.contains(#""ok":false"#)
                 input.append(.functionCall(call))
                 input.append(.functionOutput(callID: call.callID, output: outcome.output))
-                if let id = outcome.pendingID { pendingID = id }
+                if let id = outcome.pendingID {
+                    pendingID = id
+                    afterConfirm = outcome.afterConfirm
+                }
                 if let raw = outcome.requestedDate, let requested = LocalDate(isoString: raw) { requestedDate = requested }
                 goalChanged = goalChanged || outcome.goalChanged
             }
@@ -245,9 +281,13 @@ final class ChatOrchestrator {
         if reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             reply = pendingID != nil ? "请确认下面的卡片。" : "好的。"
         }
-        try services.chatHistory.append(.user, text: text, cardRef: labelScan.map(ChatCardRef.label), on: date)
+        if case .user(let text, let labelScan) = turn {
+            try services.chatHistory.append(.user, text: text, cardRef: labelScan.map(ChatCardRef.label), on: date)
+        }
         let entry = try services.chatHistory.append(.assistant, text: reply, cardRef: pendingID.map(ChatCardRef.pending), on: date)
-        return ChatTurnResult(reply: entry, pendingID: pendingID, requestedDate: requestedDate, goalChanged: goalChanged)
+        return ChatTurnResult(
+            reply: entry, pendingID: pendingID, afterConfirm: afterConfirm, requestedDate: requestedDate, goalChanged: goalChanged
+        )
     }
 
     // MARK: - 上下文

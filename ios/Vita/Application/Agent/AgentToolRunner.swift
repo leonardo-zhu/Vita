@@ -5,6 +5,8 @@ import os
 struct ToolOutcome: Equatable, Sendable {
     var output: String
     var pendingID: UUID?
+    /// 模型在提案里写下的、卡片确认后要做的下一步（`afterConfirm`）。
+    var afterConfirm: String?
     var requestedDate: String?
     var goalChanged = false
 }
@@ -124,6 +126,9 @@ final class AgentToolRunner {
         let result = handler.handle(tool: tool, arguments: try JSONEncoder().encode(JSONValue.object(envelope)), sessionDate: sessionDate)
         var outcome = try Self.encode(result)
         outcome.pendingID = result.pendingId
+        if result.ok, let step = envelope["afterConfirm"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !step.isEmpty {
+            outcome.afterConfirm = step
+        }
         outcome.requestedDate = result.requestedDate
         return outcome
     }

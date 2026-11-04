@@ -36,6 +36,8 @@ final class ChatModel {
     private(set) var requestedDate: LocalDate?
     private(set) var hasToken = false
     private var sendTask: Task<Void, Never>?
+    /// 确认卡确认后要接着做的事，按卡片 ID 记在内存里；App 重启后丢失，用户可以再说一遍。
+    @ObservationIgnored private var afterConfirm: [UUID: String] = [:]
     var draft = ""
     var message: String?
 
@@ -119,31 +121,45 @@ final class ChatModel {
         requestedDate = nil
         outgoing = text
         outgoingImage = image.flatMap(UIImage.init(data:))
+        let date = sessionDate
+        run { [services, orchestrator] onProgress in
+            // attachNutritionLabel：先把照片存到本机，再随消息发给模型读（ADR-016）。
+            var scanID: UUID?
+            if let image {
+                do {
+                    scanID = try services.labels.scan(image).scanID
+                } catch {
+                    throw LabelAttachmentError.saveFailed
+                }
+            }
+            return try await orchestrator.send(text, on: date, labelScan: scanID, onProgress: onProgress)
+        } onFailure: { [weak self] in
+            // 这一轮没有保存，把原文和照片放回输入框，方便重发。
+            guard let self else { return }
+            if draft.isEmpty { draft = text }
+            if attachment == nil { attachment = image }
+        }
+    }
+
+    /// 跑一轮对话并显示进度；结束后清掉进行中的状态并重新读取。
+    private func run(
+        _ turn: @escaping @MainActor (@escaping (ChatProgress) -> Void) async throws -> ChatTurnResult,
+        onFailure: @escaping () -> Void = {}
+    ) {
         streamingText = ""
         activity = .thinking
-        let date = sessionDate
         sendTask = Task {
             do {
-                // attachNutritionLabel：先把照片存到本机，再随消息发给模型读（ADR-016）。
-                var scanID: UUID?
-                if let image {
-                    do {
-                        scanID = try services.labels.scan(image).scanID
-                    } catch {
-                        throw LabelAttachmentError.saveFailed
-                    }
-                }
-                let result = try await orchestrator.send(text, on: date, labelScan: scanID) { [weak self] progress in
+                let result = try await turn { [weak self] progress in
                     self?.streamingText = progress.text
                     self?.activity = progress.activity
                     self?.thinking = progress.thinking
                     self?.steps = progress.steps
                 }
                 requestedDate = result.requestedDate
+                if let id = result.pendingID, let step = result.afterConfirm { afterConfirm[id] = step }
             } catch {
-                // 这一轮没有保存，把原文和照片放回输入框，方便重发。
-                if draft.isEmpty { draft = text }
-                if attachment == nil { attachment = image }
+                onFailure()
                 if error is LabelAttachmentError {
                     message = "没能保存这张照片，请再试一次。"
                 } else if let error = error as? LLMError {
@@ -162,6 +178,15 @@ final class ChatModel {
         }
     }
 
+    /// 卡片确认后，模型在提案里留了下一步（如先存食品库、再记这一份），自动接着跑一轮。
+    private func continueAfterConfirm(_ id: UUID) {
+        guard let step = afterConfirm.removeValue(forKey: id), !isSending else { return }
+        let date = sessionDate
+        run { [orchestrator] onProgress in
+            try await orchestrator.continueAfterConfirm(id, step: step, on: date, onProgress: onProgress)
+        }
+    }
+
     func stop() {
         sendTask?.cancel()
     }
@@ -172,6 +197,9 @@ final class ChatModel {
             try services.pending.confirm(pending.id)
             // 正式写入后把这次变化同步到 Apple 健康；失败不影响本地记录。
             Task { await services.healthSync.run() }
+            reload()
+            continueAfterConfirm(pending.id)
+            return
         } catch PendingServiceError.revisionConflict {
             message = "当天数据在提案后有变化，这张卡片已作废，请重新提出。"
         } catch PendingServiceError.expired {
@@ -184,6 +212,7 @@ final class ChatModel {
 
     func cancel() {
         guard let pending else { return }
+        afterConfirm[pending.id] = nil
         try? services.pending.cancel(pending.id)
         reload()
     }
@@ -298,6 +327,8 @@ struct ChatView: View {
                 .padding(.top, 8)
             }
             .scrollDismissesKeyboard(.interactively)
+            // 对话不长、滚不动时也能收起键盘：点一下消息区域。
+            .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             .onChange(of: model.entries.count) { scrollToBottom(proxy) }
             .onChange(of: model.streamingText) { scrollToBottom(proxy, animated: false) }
             // 思考摘要与步骤清单会让生成中的气泡变高，同样要跟到底部。
@@ -371,7 +402,11 @@ struct ChatView: View {
     private var bottomBar: some View {
         VStack(spacing: 8) {
             if let pending = model.pending {
-                PendingCardView(pending: pending, onConfirm: model.confirm, onCancel: model.cancel)
+                PendingCardView(
+                    pending: pending,
+                    onConfirm: { inputFocused = false; model.confirm() },
+                    onCancel: { inputFocused = false; model.cancel() }
+                )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             inputBar
@@ -394,7 +429,7 @@ struct ChatView: View {
                     .lineLimit(1...6)
                     .focused($inputFocused)
                     .padding(.vertical, 11)
-                    .onSubmit(model.send)
+                    .onSubmit(send)
             Group {
                 if model.isSending {
                     Button(action: model.stop) {
@@ -406,7 +441,7 @@ struct ChatView: View {
                     }
                     .accessibilityLabel("停止")
                 } else {
-                    Button(action: model.send) {
+                    Button(action: send) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.white)
@@ -429,6 +464,13 @@ struct ChatView: View {
         }
         .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
         .animation(.smooth(duration: 0.2), value: inputFocused)
+    }
+
+    /// 发出后收起键盘，让回复和确认卡有地方显示。
+    private func send() {
+        guard model.canSend else { return }
+        inputFocused = false
+        model.send()
     }
 
     private var placeholder: String {

@@ -113,6 +113,29 @@ struct ChatOrchestratorTests {
         #expect(history.map(\.role) == [.user, .assistant, .user, .assistant])
     }
 
+    @Test func afterConfirmContinuesWithoutSavingAUserMessage() async throws {
+        let withStep = eggProposal.replacingOccurrences(of: #"{"sessionDate""#, with: #"{"afterConfirm":"再记一杯牛奶","sessionDate""#)
+        let (services, orchestrator, client) = try make([
+            .success([call("c1", "proposeRecordChange", withStep), done]),
+            .success([.textDelta("先确认这条午餐，确认后我再记牛奶。"), done]),
+            .success([.textDelta("接着记牛奶。"), done]),
+        ])
+        let first = try await orchestrator.send("中午两个水煮蛋 108g，还喝了一杯牛奶", on: Fixtures.day)
+        let pendingID = try #require(first.pendingID)
+        #expect(first.afterConfirm == "再记一杯牛奶")
+
+        _ = try services.pending.confirm(pendingID)
+        let next = try await orchestrator.continueAfterConfirm(pendingID, step: "再记一杯牛奶", on: Fixtures.day)
+        #expect(next.reply?.text == "接着记牛奶。")
+        // 接续轮把“已确认 + 下一步”作为客户端消息放在最后，历史里的卡片注记也已变成已确认。
+        let input = client.requests[2].input
+        guard case .system(let note) = input.last else { Issue.record("最后一项应是客户端消息"); return }
+        #expect(note.contains(pendingID.uuidString) && note.contains("再记一杯牛奶"))
+        #expect(input.contains { if case .assistant(let text) = $0 { text.contains("用户已确认，已保存") } else { false } })
+        // 只多了一条助手回复，没有用户消息。
+        #expect(try services.chatHistory.messages(on: Fixtures.day).map(\.role) == [.user, .assistant, .assistant])
+    }
+
     @Test func otherDateAsksToSwitchWithoutWriting() async throws {
         let yesterday = eggProposal.replacingOccurrences(of: "2026-10-30", with: "2026-10-29")
         let (services, orchestrator, _) = try make([

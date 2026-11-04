@@ -96,6 +96,7 @@
 - `quantity.unit` 可用 g / kg / mg / 斤 / 两 / ml / L 及中文写法，由客户端标准化为 g / ml；计数单位（个、碗）须由模型换算或省略用量走估算。
 - `nutrition.source` 为 `referenceFood` / `personalFoodVersion` 时只看 ID，附带的 `values` 一律忽略；`aiEstimated` 必须带 `values` 与 `estimateBasis`。
 - `proposeRecordDeletion` 的 `payload` 为 `{ "recordId", "replacesPendingId"? }`。
+- 三个 Propose 工具都可带顶层可选字段 `afterConfirm`（字符串）：这次请求在卡片确认后还有下一步时写下（如先存食品库、再记这一份）。客户端在用户确认后自动接着跑一轮，以客户端消息告诉模型“已确认 + 下一步”，不保存用户消息；用户取消则丢弃。它只记在内存里，App 重启后丢失。
 - 结果为 `{ ok, pendingId?, requestedDate?, error?: { code, message } }`。错误码：`requiresDateSwitch`、`pendingActive`、`pendingNotFound`、`revisionConflict`、`recordNotFound`、`itemNotFound`、`emptyRecord`、`invalidItem`、`missingField`、`invalidField`、`malformedArguments`、`unknownTool`。
 
 ### `proposeFoodChange`

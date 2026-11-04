@@ -215,6 +215,10 @@
             "required": [
               "intent"
             ]
+          },
+          "afterConfirm": {
+            "type": "string",
+            "description": "可选。用户这次的请求在这张卡片确认后还有下一步时填写，如“按 80 g 记录刚吃完的这份蛋糕”；用户确认后客户端会带着它让你继续。没有后续就省略。"
           }
         },
         "required": [
@@ -373,6 +377,10 @@
             "required": [
               "recordId"
             ]
+          },
+          "afterConfirm": {
+            "type": "string",
+            "description": "可选。用户这次的请求在这张卡片确认后还有下一步时填写，如“按 80 g 记录刚吃完的这份蛋糕”；用户确认后客户端会带着它让你继续。没有后续就省略。"
           }
         },
         "required": [
@@ -505,6 +513,10 @@
               "intent",
               "version"
             ]
+          },
+          "afterConfirm": {
+            "type": "string",
+            "description": "可选。用户这次的请求在这张卡片确认后还有下一步时填写，如“按 80 g 记录刚吃完的这份蛋糕”；用户确认后客户端会带着它让你继续。没有后续就省略。"
           }
         },
         "required": [
