@@ -44,6 +44,14 @@ xcodebuild test -project Vita.xcodeproj -scheme Vita -destination 'platform=iOS 
 
 代码位于 `ios/Vita/`（App / Application / Domain / Data / Features / Platform），测试位于 `ios/VitaTests/`。当前进度：1.0 的 Phase 0–5 完成；2.0 的 M1–M3 已实现，见[架构设计 §16](docs/architecture/vita-2.0-architecture.md#16-分期)；剩余工作见[实施计划](docs/implementation-plan.md#剩余工作)。
 
+### 版本号
+
+规则见 [ADR-023](docs/architecture/ADR.md)，简单说：
+
+- **App**：`ios/project.yml` 的 `MARKETING_VERSION`。产品代际变了动主版本；完成一个里程碑或一批新功能，次版本 +1、修订归零；只修 bug 修订 +1。和那批改动放在同一个提交里，装手机前改好。构建号和提交哈希自动写入，不用管。
+- **API、Admin**：不设版本号，看提交哈希（`/v1/health` 返回的 `version`、镜像标签）。
+- **接口**：`/v1` 只加不删，手机上的旧版本要能继续用；必须破坏时开 `/v2`。
+
 ### 运行
 
 1. App 的数据都在 Vita API（地址由 `ios/project.yml` 的 `VITA_API_BASE_URL` 决定），模型经 API 调 Conduit，手机上没有模型密钥。

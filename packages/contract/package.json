@@ -1,6 +1,6 @@
 {
   "name": "@vita/contract",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
   "description": "Vita API 的请求与响应定义，API 用来校验，Admin 用来调用（ADR-022）",
   "type": "module",
