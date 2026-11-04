@@ -213,6 +213,8 @@ const MIGRATIONS = [
   ALTER TABLE chat_traces ADD COLUMN label_scan_ids TEXT;`,
   `-- 删除个人食品（M4）：只做标记，不再出现在食品库与模型的上下文里；已有记录的营养快照与来源名不受影响
   ALTER TABLE food_products ADD COLUMN deleted_at TEXT;`,
+  `-- Admin 把消息排除出模型的上下文（rewind）：消息照常显示与保留，只是不再发给模型
+  ALTER TABLE chat_messages ADD COLUMN excluded_at TEXT;`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

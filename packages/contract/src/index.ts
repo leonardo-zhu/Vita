@@ -595,9 +595,50 @@ export const ChatMessage = z.object({
   cardRef: CardRef.nullable(),
   /** 用户消息附带的全部标签照片，按顺序；没有时为空数组。 */
   labelScanIds: z.array(z.uuid()).default([]),
+  /** Admin 设了“不再发给模型”：照常显示，只是不进模型的上下文。 */
+  excludedFromContext: z.boolean().default(false),
   createdAt: z.iso.datetime(),
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
+
+/** PATCH /v1/admin/messages/:id */
+export const MessageContextRequest = z.object({ excludedFromContext: z.boolean() })
+export type MessageContextRequest = z.infer<typeof MessageContextRequest>
+
+/** 对话追踪的一轮（只给 Admin）。 */
+export const ChatTrace = z.object({
+  requestId: z.string(),
+  sessionDate: z.string(),
+  kind: z.enum(['message', 'continuation']),
+  model: z.string(),
+  configVersion: z.string(),
+  inputText: z.string(),
+  labelScanIds: z.array(z.string()),
+  reply: z.string().nullable(),
+  reasoning: z.string().nullable(),
+  steps: z.array(z.object({ tool: z.string(), arguments: z.string(), output: z.string(), resultCode: z.string() })),
+  pendingId: z.string().nullable(),
+  outcome: z.enum(['ok', 'error', 'cancelled']),
+  errorCode: z.string().nullable(),
+  rounds: z.number().int(),
+  tokensIn: z.number().int().nullable(),
+  tokensOut: z.number().int().nullable(),
+  tokensCached: z.number().int().nullable(),
+  hitMaxRounds: z.boolean(),
+  latencyMs: z.number().int(),
+  createdAt: z.string(),
+})
+export type ChatTrace = z.infer<typeof ChatTrace>
+
+/** GET /v1/admin/traces?date=：这一天的每轮追踪，按时间顺序（保留 90 天）。 */
+export const TracesResponse = z.object({ traces: z.array(ChatTrace) })
+export type TracesResponse = z.infer<typeof TracesResponse>
+
+/** GET /v1/admin/conversation-days：有对话的日期，新的在前。 */
+export const ConversationDaysResponse = z.object({
+  days: z.array(z.object({ date: z.string(), messages: z.number().int(), excluded: z.number().int(), lastAt: z.string() })),
+})
+export type ConversationDaysResponse = z.infer<typeof ConversationDaysResponse>
 
 /** GET /v1/days/:date/messages：按时间顺序。 */
 export const MessagesResponse = z.object({ messages: z.array(ChatMessage) })
@@ -733,7 +774,7 @@ export const ImportBundle = z.object({
   ),
   goals: z.array(Goal.extend({ evidence: z.unknown().nullable(), createdAt: z.iso.datetime() })),
   /** 1.0 的确认卡不迁移，指向它们的 cardRef 由手机清掉。 */
-  messages: z.array(ChatMessage.omit({ labelScanIds: true }).extend({ sessionDate: LocalDate })),
+  messages: z.array(ChatMessage.omit({ labelScanIds: true, excludedFromContext: true }).extend({ sessionDate: LocalDate })),
   labelScans: z.array(z.object({ id: z.uuid(), createdAt: z.iso.datetime(), contentType: z.string(), dataBase64: z.string() })),
   weighings: z.array(
     z.object({

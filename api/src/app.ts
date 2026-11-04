@@ -35,6 +35,10 @@ import {
   type LabelScanResponse,
   ManualBodyMetrics,
   type MessagesResponse,
+  MessageContextRequest,
+  type ChatMessage,
+  type ConversationDaysResponse,
+  type TracesResponse,
   type ListDevicesResponse,
   type MeResponse,
   type PendingResponse,
@@ -80,6 +84,7 @@ function failure(c: Context, status: ContentfulStatusCode, code: string, message
 const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
   notFound: [404, '没有这张卡片。'],
   weighingNotFound: [404, '没有这次称重。'],
+  messageNotFound: [404, '没有这条消息。'],
   notConfirmed: [409, '这张卡片还没有确认。'],
   noFollowUp: [409, '这张卡片没有要接着做的事。'],
   alreadyContinued: [409, '这张卡片已经接着做过了。'],
@@ -431,6 +436,20 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
     const file = services.labels.read(c.req.param('id'))
     if (!file) return failure(c, 404, 'labelNotFound', '找不到这张标签照片。')
     return c.body(new Uint8Array(file.bytes), 200, { 'content-type': file.contentType, 'cache-control': 'private, max-age=86400' })
+  })
+
+  // MARK: - 对话管理（只给 Admin）
+
+  app.get('/v1/admin/conversation-days', (c) => c.json({ days: services.chat.days() } satisfies ConversationDaysResponse))
+  app.get('/v1/admin/traces', (c) => {
+    const date = c.req.query('date') ?? ''
+    return isLocalDate(date) ? c.json({ traces: services.chat.traces(date) } satisfies TracesResponse) : invalidDate(c)
+  })
+  /** rewind：消息不再发给模型（或恢复）。消息本身保留。 */
+  app.patch('/v1/admin/messages/:id', async (c) => {
+    const body = await parseBody(c, MessageContextRequest)
+    if (!body) return invalidBody(c, '需要 excludedFromContext')
+    return c.json(services.chat.setExcluded(c.req.param('id'), body.excludedFromContext, { actor: actorName(c.get('actor')) }) satisfies ChatMessage)
   })
 
   // MARK: - 设备管理（只给 Admin）

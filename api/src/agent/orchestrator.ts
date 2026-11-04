@@ -196,8 +196,15 @@ export class Orchestrator {
    */
   private historyInput(history: ChatMessage[], config: AgentConfig): LLMInputItem[] {
     const limit = Math.max(config.context.maxRecentMessages, 0)
-    return (limit === 0 ? [] : history.slice(-limit)).flatMap((message): LLMInputItem[] => {
+    const recent = limit === 0 ? [] : history.filter((message) => !message.excludedFromContext).slice(-limit)
+    // 只有最近一条带照片的消息重发原图（追问、批量录入的接续还要看）；更早的照片每轮重发既慢又会干扰模型，只留一句说明。
+    const latestWithLabels = recent.findLast((message) => message.role === 'user' && message.labelScanIds.length > 0)
+    return recent.flatMap((message): LLMInputItem[] => {
       if (message.role === 'user') {
+        if (message.labelScanIds.length > 0 && message !== latestWithLabels) {
+          const note = `［客户端附件：之前发过 ${message.labelScanIds.length} 张营养标签照片（labelScanId: ${message.labelScanIds.join('、')}），已处理过，图片不再附上。］`
+          return [{ type: 'user', text: message.text ? `${message.text}\n\n${note}` : note }]
+        }
         return [this.userItem(message.text, message.labelScanIds, config)]
       }
       if (message.cardRef?.type !== 'pending') return [{ type: 'assistant', text: message.text }]

@@ -232,6 +232,20 @@ describe('上下文', () => {
     await send('继续')
     expect((client.requests[1].input[0] as { images: unknown[] }).images).toHaveLength(3)
   })
+
+  it('更早的照片不再重发，只留文字说明', async () => {
+    const { services, client, send } = make([[text('好'), done], [text('好'), done], [text('好'), done]])
+    const save = () => services.labels.save(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg', ORIGIN)
+    const [first, second] = [save(), save()]
+    await send({ kind: 'message', text: '酸菜鱼', labelScanIds: [first] })
+    await send({ kind: 'message', text: '牛奶', labelScanIds: [second] })
+    await send('950ml')
+    const input = client.requests[2].input as { type: string; text?: string; images?: unknown[] }[]
+    const old = input.find((item) => item.text?.startsWith('酸菜鱼'))!
+    expect(old.images).toBeUndefined()
+    expect(old.text).toContain(`之前发过 1 张营养标签照片（labelScanId: ${first}）`)
+    expect(input.find((item) => item.text?.startsWith('牛奶'))!.images).toHaveLength(1)
+  })
 })
 
 describe('目标与食品库工具', () => {
@@ -438,6 +452,19 @@ describe('模型声称生成了卡片却没调用工具', () => {
     expect(result.pendingId).not.toBeNull()
     expect(result.reply.text).not.toContain('这次实际没有生成确认卡')
     expect(JSON.stringify(client.requests[1].input)).toContain('没有调用任何工具')
+  })
+
+  it('Admin 排除的消息不再发给模型，追踪和日期列表照常可查', async () => {
+    const { services, client, send } = make([[text('已生成确认卡。'), done], [text('还是没有卡'), done], [text('好的'), done]])
+    await send('存一下这个牛奶')
+    const [userMessage, fakeReply] = services.chat.messages(DAY)
+    services.chat.setExcluded(userMessage.id, true, ORIGIN)
+    expect(services.chat.setExcluded(fakeReply.id, true, ORIGIN).excludedFromContext).toBe(true)
+    await send('记一个鸡蛋')
+    expect(JSON.stringify(client.requests.at(-1)!.input)).not.toContain('存一下这个牛奶')
+    expect(services.chat.days()).toEqual([{ date: DAY, messages: 4, excluded: 2, lastAt: expect.any(String) }])
+    expect(services.chat.traces(DAY).map((trace) => trace.inputText)).toEqual(['存一下这个牛奶', '记一个鸡蛋'])
+    expect(() => services.chat.setExcluded('00000000-0000-4000-8000-000000000000', true, ORIGIN)).toThrow('chat.messageNotFound')
   })
 
   it('只是提到以前的卡片时不改', async () => {
