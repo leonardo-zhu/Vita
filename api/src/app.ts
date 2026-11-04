@@ -4,11 +4,13 @@
  * 鉴权：`Authorization: Bearer <令牌>`。手机用设备令牌，Admin 用服务令牌（只放在两个容器的 .env 里）。
  * `/v1/health` 不需要鉴权；`/v1/admin/*` 只认服务令牌。错误一律返回 `{ error: { code, message } }`。
  */
-import { createHash, timingSafeEqual } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 
 import {
   type ActivePendingResponse,
   ActivityUpload,
+  type ChatEvent,
+  ChatRequest,
   CreateDeviceRequest,
   type CreateDeviceResponse,
   type DayResponse,
@@ -21,7 +23,9 @@ import {
   type HealthResponse,
   type HealthSnapshot,
   HealthUpload,
+  type LabelScanResponse,
   ManualBodyMetrics,
+  type MessagesResponse,
   type ListDevicesResponse,
   type MeResponse,
   type PendingResponse,
@@ -33,18 +37,24 @@ import {
   WeighingUpload,
 } from '@vita/contract'
 import { Hono, type Context } from 'hono'
+import { streamSSE } from 'hono/streaming'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { z } from 'zod'
 
+import { LLMError } from './agent/llm.ts'
+import type { Orchestrator, Turn } from './agent/orchestrator.ts'
 import { audit } from './db.ts'
 import { authenticateDevice, createDevice, listDevices, revokeDevice } from './devices.ts'
 import { recommendGoals } from './domain/recommendation.ts'
 import { isLocalDate } from './domain/time.ts'
+import { MAX_LABEL_BYTES } from './services/chat.ts'
 import { ServiceError } from './services/context.ts'
 import type { Services } from './services/index.ts'
 
 export interface AppOptions {
   services: Services
+  /** 没配 Conduit 时为 null：对话接口返回 503，其余照常。 */
+  agent: Orchestrator | null
   serviceToken: string
   version: string
 }
@@ -61,6 +71,11 @@ function failure(c: Context, status: ContentfulStatusCode, code: string, message
 const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
   notFound: [404, '没有这张卡片。'],
   weighingNotFound: [404, '没有这次称重。'],
+  notConfirmed: [409, '这张卡片还没有确认。'],
+  noFollowUp: [409, '这张卡片没有要接着做的事。'],
+  alreadyContinued: [409, '这张卡片已经接着做过了。'],
+  unsupportedImage: [415, '只支持 JPEG、PNG 或 HEIC 照片。'],
+  imageTooLarge: [413, '照片太大了，请压缩后再传。'],
   invalidMetrics: [422, '读数超出合理范围，没有保存。'],
   expired: [409, '这张卡片已过期，没有写入任何数据。'],
   notActive: [409, '这张卡片已经结束了。'],
@@ -89,7 +104,7 @@ async function parseBody<T extends z.ZodType>(c: Context, schema: T): Promise<z.
   return parsed.success ? parsed.data : null
 }
 
-export function createApp({ services, serviceToken, version }: AppOptions) {
+export function createApp({ services, agent, serviceToken, version }: AppOptions) {
   const { database, now } = services.context
   const app = new Hono<AppEnv>()
 
@@ -226,6 +241,96 @@ export function createApp({ services, serviceToken, version }: AppOptions) {
   app.delete('/v1/weighings/:id', (c) => {
     services.body.delete(c.req.param('id'), { actor: actorName(c.get('actor')) })
     return c.body(null, 204)
+  })
+
+  // MARK: - 对话（Agent 在服务端跑，进度以 SSE 推给手机）
+
+  /** 进行中的轮次，用来响应"停止"。 */
+  const turns = new Map<string, AbortController>()
+
+  /**
+   * 跑一轮并把进度推给客户端。客户端断线时这一轮照样跑完并保存（重连后读历史即可），只有调停止接口才会中止。
+   * 失败或被停止时什么都不保存，最后一个事件是 error。
+   */
+  const runTurn = (c: Context, turn: Turn, date: string) => {
+    if (!agent) return failure(c, 503, 'agentUnavailable', '服务端没有配置模型网关，暂时不能对话。')
+    const controller = new AbortController()
+    const requestId = randomUUID()
+    const actor = actorName(c.get('actor'))
+    turns.set(requestId, controller)
+    return streamSSE(c, async (stream) => {
+      let open = true
+      stream.onAbort(() => {
+        open = false
+      })
+      // 写入是异步的：串成一条链保证顺序，结束前等它写完，最后的 done / error 才不会丢。
+      let writes = Promise.resolve()
+      const emit = (event: ChatEvent) => {
+        writes = writes.then(async () => {
+          if (!open) return
+          try {
+            await stream.writeSSE({ event: event.type, data: JSON.stringify(event) })
+          } catch {
+            open = false
+          }
+        })
+      }
+      try {
+        const result = await agent.run(turn, date, actor, emit, controller.signal, requestId)
+        emit({ type: 'done', ...result })
+      } catch (error) {
+        if (controller.signal.aborted) {
+          emit({ type: 'error', code: 'cancelled', message: '已停止，这一轮没有保存。' })
+        } else if (error instanceof LLMError) {
+          emit({ type: 'error', code: error.code, message: error.userMessage })
+        } else {
+          console.error(error)
+          emit({ type: 'error', code: 'internal', message: '服务暂时无法处理这个请求。' })
+        }
+      } finally {
+        turns.delete(requestId)
+        await writes
+      }
+    })
+  }
+
+  app.get('/v1/days/:date/messages', (c) => {
+    const date = c.req.param('date')
+    return isLocalDate(date) ? c.json({ messages: services.chat.messages(date) } satisfies MessagesResponse) : invalidDate(c)
+  })
+  app.post('/v1/days/:date/chat', async (c) => {
+    const date = c.req.param('date')
+    if (!isLocalDate(date)) return invalidDate(c)
+    const body = await parseBody(c, ChatRequest)
+    if (!body || (!body.text.trim() && !body.labelScanId)) return invalidBody(c, '消息为空')
+    if (body.labelScanId && !services.labels.exists(body.labelScanId)) return failure(c, 404, 'labelNotFound', '找不到这张标签照片，请重新上传。')
+    return runTurn(c, { kind: 'message', text: body.text.trim(), labelScanId: body.labelScanId ?? null }, date)
+  })
+  /** 确认了一张带 afterConfirm 的卡片后，接着跑一轮。每张卡片只能接续一次。 */
+  app.post('/v1/pending/:id/continue', (c) => {
+    const id = c.req.param('id')
+    const { sessionDate, step } = services.pending.claimContinuation(id)
+    return runTurn(c, { kind: 'continuation', pendingId: id, step }, sessionDate)
+  })
+  app.post('/v1/chat-turns/:requestId/cancel', (c) => {
+    turns.get(c.req.param('requestId'))?.abort()
+    return c.body(null, 204)
+  })
+
+  // MARK: - 标签照片
+
+  app.post('/v1/label-scans', async (c) => {
+    const declared = Number(c.req.header('content-length') ?? 0)
+    if (declared > MAX_LABEL_BYTES) return serviceFailure(c, new ServiceError('label', 'imageTooLarge'))
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const contentType = (c.req.header('content-type') ?? '').split(';')[0].trim()
+    const labelScanId = services.labels.save(bytes, contentType, { actor: actorName(c.get('actor')) })
+    return c.json({ labelScanId } satisfies LabelScanResponse, 201)
+  })
+  app.get('/v1/label-scans/:id', (c) => {
+    const file = services.labels.read(c.req.param('id'))
+    if (!file) return failure(c, 404, 'labelNotFound', '找不到这张标签照片。')
+    return c.body(new Uint8Array(file.bytes), 200, { 'content-type': file.contentType, 'cache-control': 'private, max-age=86400' })
   })
 
   // MARK: - 设备管理（只给 Admin）

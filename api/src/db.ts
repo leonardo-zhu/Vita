@@ -160,6 +160,46 @@ const MIGRATIONS = [
     created_at               TEXT NOT NULL
   );
   CREATE INDEX scale_weighings_time ON scale_weighings(measured_at);`,
+  `-- 对话（TDD §3.4）：按日期组织，只存用户与助手的文字和附带的卡片引用，不存工具 payload
+  CREATE TABLE chat_messages (
+    id            TEXT PRIMARY KEY,
+    session_date  TEXT NOT NULL,
+    role          TEXT NOT NULL,           -- user / assistant
+    text          TEXT NOT NULL,
+    card_ref      TEXT,                    -- pending:<id> 或 label:<id>
+    created_at    TEXT NOT NULL
+  );
+  CREATE INDEX chat_messages_session ON chat_messages(session_date, created_at);
+  -- 对话追踪（架构设计 §10.3）：每轮的原话、回复、推理、工具调用与结果，只在 Admin 里看，保留 90 天
+  CREATE TABLE chat_traces (
+    request_id             TEXT PRIMARY KEY,
+    session_date           TEXT NOT NULL,
+    kind                   TEXT NOT NULL,  -- message：用户发消息；continuation：确认后接续
+    config_version         TEXT NOT NULL,
+    system_prompt_version  INTEGER NOT NULL,
+    model                  TEXT NOT NULL,
+    input_text             TEXT NOT NULL,  -- 用户原话，或接续时给模型的提示
+    label_scan_id          TEXT,
+    reply                  TEXT,
+    reasoning              TEXT,
+    steps                  TEXT NOT NULL,  -- [{tool, arguments, output, resultCode}] JSON
+    pending_id             TEXT,
+    outcome                TEXT NOT NULL,  -- ok / error / cancelled
+    error_code             TEXT,
+    rounds                 INTEGER NOT NULL,
+    tokens_in              INTEGER,
+    tokens_out             INTEGER,
+    tokens_cached          INTEGER,
+    hit_max_rounds         INTEGER NOT NULL,
+    latency_ms             INTEGER NOT NULL,
+    created_at             TEXT NOT NULL
+  );
+  CREATE INDEX chat_traces_time ON chat_traces(created_at);
+  -- 标签照片文件（ADR-016）：手机压缩后上传，存在文件目录，库里只记引用
+  ALTER TABLE label_scans ADD COLUMN file TEXT;
+  ALTER TABLE label_scans ADD COLUMN content_type TEXT;
+  -- 确认后的接续只跑一次
+  ALTER TABLE pending_actions ADD COLUMN continued_at TEXT;`,
 ]
 
 /**

@@ -1,7 +1,8 @@
 # Vita API：打包成单个 dist/server.js 的 Node 服务。CI 在 ARM runner 上构建 linux/arm64。
 #
-# 构建上下文是仓库根目录（docker build -f api/Dockerfile .）：要用根目录的 pnpm workspace 与 lockfile，
-# 以及 packages/contract。上下文只放这几样，见 Dockerfile.dockerignore。
+# 构建上下文是仓库根目录（docker build -f api/Dockerfile .）：要用根目录的 pnpm workspace 与 lockfile、
+# packages/contract，以及打包进去的内置配置（ios/Vita/Resources/DefaultConfig.json）与工具参数
+# （shared/agent-tools/tool-parameters.json）。上下文只放这几样，见 Dockerfile.dockerignore。
 #
 # 运行时需要的环境变量见 .env.example。SQLite 在 /data，要挂成卷。
 # 默认只监听 127.0.0.1，由同机的 Caddy 反代（R4S 上用 network_mode: host）。
@@ -15,6 +16,8 @@ COPY api/package.json api/
 COPY packages/contract/package.json packages/contract/
 RUN pnpm install --frozen-lockfile --filter vita-api...
 COPY packages/contract packages/contract
+COPY ios/Vita/Resources/DefaultConfig.json ios/Vita/Resources/DefaultConfig.json
+COPY shared/agent-tools/tool-parameters.json shared/agent-tools/tool-parameters.json
 COPY api api
 ARG VITA_API_VERSION=dev
 RUN cd api && VITA_API_VERSION=$VITA_API_VERSION pnpm build

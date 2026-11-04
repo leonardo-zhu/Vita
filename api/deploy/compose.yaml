@@ -11,7 +11,7 @@ services:
     container_name: vita-api
     restart: unless-stopped
     network_mode: host
-    # 服务令牌（与 Admin 的 .env 填同一个值），模板见 api/.env.example。只在服务器上维护
+    # 服务令牌（与 Admin 的 .env 填同一个值）与 Conduit 密钥，模板见 api/.env.example。只在服务器上维护
     env_file:
       - .env
     environment:
@@ -22,12 +22,16 @@ services:
       - VITA_API_DATA_DIR=/data
       - VITA_API_REFERENCE_FILE=/reference/reference-foods.json
       - VITA_API_TIME_ZONE=Asia/Shanghai
+      - VITA_API_FILES_DIR=/data/files
+      - VITA_API_PUBLISHED_CONFIG=/published/stable.json
       - NODE_OPTIONS=--max-old-space-size=192
     volumes:
       # 容器里以 node 用户（uid 1000）运行，首次部署前 chown 1000:1000
       - /opt/vita-api/data:/data
       # 公共营养参考库：含私有来源，不进镜像（ADR-006），本地构建后手动拷到这里
       - /opt/vita-api/reference:/reference:ro
+      # Admin 发布的配置（system prompt、工具描述、模型参数），每轮对话开始时读；Admin 发布后下一轮生效
+      - /opt/vita-admin/published:/published:ro
     mem_limit: 256m
     labels:
       - "app=vita-api"

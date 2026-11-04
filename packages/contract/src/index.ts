@@ -577,3 +577,58 @@ export type ScaleReadingRequest = z.infer<typeof ScaleReadingRequest>
 /** calibrationChanged 为 true 时，采用的公式变了，全部称重的体脂率都可能变化，手机要重写 Apple 健康里的历史。 */
 export const ScaleReadingResponse = z.object({ weighing: Weighing, calibrationChanged: z.boolean() })
 export type ScaleReadingResponse = z.infer<typeof ScaleReadingResponse>
+
+// MARK: - 对话（TDD §3.4、架构设计 §10）。Agent 在服务端跑，进度以 SSE 推给手机
+
+/** 消息附带的卡片：指向确认卡，或用户发的营养标签照片。 */
+export const CardRef = z.object({ type: z.enum(['pending', 'label']), id: z.uuid() })
+export type CardRef = z.infer<typeof CardRef>
+
+export const ChatMessage = z.object({
+  id: z.uuid(),
+  role: z.enum(['user', 'assistant']),
+  text: z.string(),
+  cardRef: CardRef.nullable(),
+  createdAt: z.iso.datetime(),
+})
+export type ChatMessage = z.infer<typeof ChatMessage>
+
+/** GET /v1/days/:date/messages：按时间顺序。 */
+export const MessagesResponse = z.object({ messages: z.array(ChatMessage) })
+export type MessagesResponse = z.infer<typeof MessagesResponse>
+
+/** POST /v1/days/:date/chat：照片先经 POST /v1/label-scans 上传，再带上 labelScanId。 */
+export const ChatRequest = z.object({
+  text: z.string().max(4000),
+  labelScanId: z.uuid().nullish(),
+})
+export type ChatRequest = z.infer<typeof ChatRequest>
+
+/** POST /v1/label-scans（请求体是 JPEG 本身）。 */
+export const LabelScanResponse = z.object({ labelScanId: z.uuid() })
+export type LabelScanResponse = z.infer<typeof LabelScanResponse>
+
+/**
+ * 一轮对话的 SSE 事件（event 名同 type，data 是这个 JSON）。顺序：started → 若干 reasoning / text / step → done 或 error。
+ * 文字与推理是增量，客户端自己拼；推理只在生成时展示，不保存。断线后这一轮在服务端照样跑完并保存，重连后读历史即可。
+ */
+export const ChatEvent = z.discriminatedUnion('type', [
+  /** 停止时用它调 POST /v1/chat-turns/:requestId/cancel。 */
+  z.object({ type: z.literal('started'), requestId: z.uuid() }),
+  z.object({ type: z.literal('reasoning'), delta: z.string() }),
+  z.object({ type: z.literal('text'), delta: z.string() }),
+  /** 一次工具调用：先 running，结束时 done 或 failed（工具返回错误，模型通常会据此改正）。 */
+  z.object({ type: z.literal('step'), index: z.number().int(), tool: z.string(), status: z.enum(['running', 'done', 'failed']) }),
+  z.object({
+    type: z.literal('done'),
+    /** 保存后的助手回复；附带确认卡时 cardRef 指向它。 */
+    reply: ChatMessage,
+    pendingId: z.uuid().nullable(),
+    /** 模型提到了别的日期：只提示切换，不自动跳转。 */
+    requestedDate: LocalDate.nullable(),
+    goalChanged: z.boolean(),
+  }),
+  /** 这一轮没有保存（用户消息也没有），客户端把原文放回输入框。 */
+  z.object({ type: z.literal('error'), code: z.string(), message: z.string() }),
+])
+export type ChatEvent = z.infer<typeof ChatEvent>

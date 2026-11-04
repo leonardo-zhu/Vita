@@ -24,7 +24,7 @@ beforeEach(() => {
     now: () => new Date('2026-11-04T08:00:00Z'),
     timeZone: () => 'Asia/Shanghai',
   })
-  app = createApp({ services, serviceToken: SERVICE_TOKEN, version: 'test' })
+  app = createApp({ services, agent: null, serviceToken: SERVICE_TOKEN, version: 'test' })
 })
 
 function request(path: string, init: { token?: string; method?: string; body?: unknown } = {}) {

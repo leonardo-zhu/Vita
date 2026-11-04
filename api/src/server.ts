@@ -6,6 +6,9 @@ import path from 'node:path'
 
 import { serve } from '@hono/node-server'
 
+import { PublishedConfigSource } from './agent/config.ts'
+import { ResponsesClient } from './agent/llm.ts'
+import { Orchestrator } from './agent/orchestrator.ts'
 import { createApp } from './app.ts'
 import { dataDir, openDatabase } from './db.ts'
 import { ReferenceCatalog } from './domain/reference.ts'
@@ -34,8 +37,23 @@ try {
 console.log(`公共营养参考库：${reference.count} 条`)
 
 const database = openDatabase()
-const services = createServices({ database, reference, now: () => new Date(), timeZone: () => timeZone })
-const app = createApp({ services, serviceToken, version: process.env.VITA_API_VERSION ?? 'dev' })
+// 标签照片等文件；默认在数据目录下的 files/。
+const services = createServices({ database, reference, now: () => new Date(), timeZone: () => timeZone }, process.env.VITA_API_FILES_DIR)
+// 模型经 Conduit 调用，密钥只在服务端（架构设计 §8）。没配时对话接口返回 503，其余照常。
+const conduitURL = process.env.CONDUIT_BASE_URL
+const conduitKey = process.env.CONDUIT_API_KEY
+const agent =
+  conduitURL && conduitKey
+    ? new Orchestrator({
+        services,
+        client: new ResponsesClient(conduitURL, conduitKey),
+        // Admin 发布的 stable.json（只读挂载）；没有时用内置默认值。
+        config: new PublishedConfigSource(process.env.VITA_API_PUBLISHED_CONFIG ?? null),
+      })
+    : null
+if (!agent) console.warn('没有配置 CONDUIT_BASE_URL / CONDUIT_API_KEY，对话不可用')
+
+const app = createApp({ services, agent, serviceToken, version: process.env.VITA_API_VERSION ?? 'dev' })
 const port = Number(process.env.PORT ?? 3014)
 // 不用 HOSTNAME：不少 shell 会把它设成机器名
 const hostname = process.env.VITA_API_HOST ?? '127.0.0.1'

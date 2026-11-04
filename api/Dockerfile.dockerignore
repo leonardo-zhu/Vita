@@ -6,6 +6,8 @@
 !admin/package.json
 !api
 !packages/contract
+!ios/Vita/Resources/DefaultConfig.json
+!shared/agent-tools/tool-parameters.json
 api/node_modules
 api/dist
 api/.data

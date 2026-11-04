@@ -1,6 +1,8 @@
 /**
  * 测试夹具，对应 1.0 的 VitaTests/TestSupport 与 RecordDraftFixtures：同一个日期、时刻、时区与小型参考库。
  */
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { openDatabase } from '../db.ts'
@@ -28,7 +30,10 @@ export class TestClock {
 export function setup() {
   const clock = new TestClock()
   const database = openDatabase(':memory:')
-  const services = createServices({ database, reference: referenceCatalog(), now: () => clock.now, timeZone: () => SHANGHAI })
+  const services = createServices(
+    { database, reference: referenceCatalog(), now: () => clock.now, timeZone: () => SHANGHAI },
+    mkdtempSync(path.join(tmpdir(), 'vita-files-')),
+  )
   return { clock, database, services }
 }
 

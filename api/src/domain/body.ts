@@ -228,3 +228,36 @@ function leastSquares(rows: Row[]): [number, number, number] | null {
   }
   return [m[0][n] / m[0][0], m[1][n] / m[1][1], m[2][n] / m[2][2]]
 }
+
+// MARK: - 展示信息（给 Agent 的工具结果用；App 自己有一份界面文案）
+
+export const RATING_LABELS: Record<BodyRating, string> = { low: '偏低', standard: '标准', high: '偏高', veryHigh: '过高', excellent: '优秀' }
+
+/** 名称、单位、显示位数。百分比指标的值是 0–1，显示时乘 100。体重是秤测的，BMI 由体重和身高算出，其余都是估算。 */
+export const METRIC_INFO: Record<BodyMetricKind, { title: string; unit: '' | 'kg' | '%' | '千卡'; digits: number; estimated: boolean }> = {
+  weight: { title: '体重', unit: 'kg', digits: 2, estimated: false },
+  bmi: { title: 'BMI', unit: '', digits: 1, estimated: false },
+  bodyFat: { title: '体脂率', unit: '%', digits: 1, estimated: true },
+  leanMass: { title: '去脂体重', unit: 'kg', digits: 1, estimated: true },
+  basalMetabolism: { title: '基础代谢', unit: '千卡', digits: 0, estimated: true },
+  fatMass: { title: '脂肪量', unit: 'kg', digits: 1, estimated: true },
+  subcutaneousFatRate: { title: '皮下脂肪率', unit: '%', digits: 1, estimated: true },
+  subcutaneousFatMass: { title: '皮下脂肪量', unit: 'kg', digits: 1, estimated: true },
+  muscleMass: { title: '肌肉量', unit: 'kg', digits: 1, estimated: true },
+  muscleRate: { title: '肌肉率', unit: '%', digits: 1, estimated: true },
+  skeletalMuscleMass: { title: '骨骼肌量', unit: 'kg', digits: 1, estimated: true },
+  skeletalMuscleRate: { title: '骨骼肌率', unit: '%', digits: 1, estimated: true },
+  waterRate: { title: '体水分率', unit: '%', digits: 1, estimated: true },
+  waterMass: { title: '体水分量', unit: 'kg', digits: 1, estimated: true },
+  proteinMass: { title: '蛋白质', unit: 'kg', digits: 1, estimated: true },
+  proteinRate: { title: '蛋白质占比', unit: '%', digits: 1, estimated: true },
+  boneMass: { title: '骨量', unit: 'kg', digits: 1, estimated: true },
+}
+
+/** 每个点往前 `days` 天（含当天）内所有点的平均，用来抹平喝水、进食带来的单次波动。`points` 按时间升序。 */
+export function movingAverage(points: { time: number; value: number }[], days = 7): number[] {
+  return points.map((point) => {
+    const window = points.filter((other) => other.time <= point.time && point.time - other.time < days * 86_400_000)
+    return window.reduce((sum, other) => sum + other.value, 0) / window.length
+  })
+}

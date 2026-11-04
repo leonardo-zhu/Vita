@@ -120,6 +120,21 @@ export class PendingService {
     return this.get(id)
   }
 
+  /**
+   * 确认后接着做下一步（afterConfirm）：只有已确认、带下一步、还没接续过的卡片可以，而且只给一次。
+   * 返回会话日期和下一步，由调用方跑一轮接续。
+   */
+  claimContinuation(id: string): { sessionDate: string; step: string } {
+    const row = this.find(id)
+    if (row.status !== 'confirmed') throw new ServiceError('pending', 'notConfirmed', { status: row.status })
+    if (!row.after_confirm) throw new ServiceError('pending', 'noFollowUp')
+    const claimed = this.context.database
+      .prepare('UPDATE pending_actions SET continued_at = ? WHERE id = ? AND continued_at IS NULL')
+      .run(this.context.now().toISOString(), id)
+    if (claimed.changes !== 1) throw new ServiceError('pending', 'alreadyContinued')
+    return { sessionDate: row.session_date, step: row.after_confirm }
+  }
+
   /** 每个入口都先调用：把到期的确认卡标为过期。 */
   expireDue() {
     const { database, now } = this.context

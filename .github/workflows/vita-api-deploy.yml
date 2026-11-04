@@ -8,6 +8,8 @@ on:
       - "api/**"
       - "!api/**.md"
       - "packages/contract/**"
+      - "ios/Vita/Resources/DefaultConfig.json"
+      - "shared/agent-tools/**"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
