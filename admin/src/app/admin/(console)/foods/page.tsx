@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { titled } from '@/i18n/metadata'
 import { getT } from '@/i18n/server'
+import { formatTime } from '@/lib/format'
 import { foods, vitaApiConfigured } from '@/server/vita-api'
 
 import { FoodList } from './food-list'
@@ -33,29 +34,24 @@ export default async function FoodsPage() {
         <p className="text-sm text-muted-foreground">{t.data.noFoods}</p>
       ) : (
         <FoodList
-          products={sorted.map((product) => {
-            const basis = product.activeVersion?.basis
-            return {
-              id: product.id,
-              name: product.name,
-              brand: product.brandOrSupplier,
-              aliases: product.aliases,
-              packageText: product.package ? `${product.package.amount} ${product.package.unit}` : null,
-              basisText: basis ? `${basis.quantity.amount} ${basis.quantity.unit}` : null,
-              nutrients: basis
-                ? [
-                    `${Math.round(basis.nutrients.energyKcal)} kcal · P ${basis.nutrients.proteinG} g · F ${basis.nutrients.fatG} g · C ${basis.nutrients.carbohydrateG} g`,
-                    basis.nutrients.sodiumMg === undefined ? null : `Na ${basis.nutrients.sodiumMg} mg`,
-                    basis.nutrients.saturatedFatG === undefined ? null : `SFA ${basis.nutrients.saturatedFatG} g`,
-                    basis.nutrients.sugarG === undefined ? null : `${t.data.sugar} ${basis.nutrients.sugarG} g`,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                : null,
-              versions: product.versions.length,
-              labelScanId: product.activeVersion?.labelScanId ?? null,
-            }
-          })}
+          products={sorted.map((product) => ({
+            id: product.id,
+            name: product.name,
+            brand: product.brandOrSupplier,
+            aliases: product.aliases,
+            note: product.note,
+            package: product.package,
+            activeVersionId: product.activeVersion?.id ?? null,
+            labelScanId: product.activeVersion?.labelScanId ?? null,
+            versions: product.versions.map((version) => ({
+              id: version.id,
+              active: version.id === product.activeVersion?.id,
+              basis: version.basis,
+              source: version.sourceKind,
+              sourceNote: version.sourceNote,
+              createdAt: formatTime(Math.floor(Date.parse(version.createdAt) / 1000)),
+            })),
+          }))}
         />
       )}
     </div>

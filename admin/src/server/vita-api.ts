@@ -17,6 +17,8 @@ import {
   TracesResponse,
   type Device,
   type FoodProduct,
+  type FoodProductUpdate,
+  type FoodVersionRequest,
   type ItemAmountRequest,
 } from '@vita/contract'
 import type { z } from 'zod'
@@ -119,8 +121,14 @@ export async function foods(): Promise<FoodProduct[]> {
   return (await call('/v1/foods', FoodsResponse)).products
 }
 
-export async function updateFood(id: string, body: { name: string; brandOrSupplier: string | null; aliases: string[] }) {
+/** 名称、品牌、叫法、包装、备注：不影响已有记录的计算，直接改。 */
+export async function updateFood(id: string, body: FoodProductUpdate) {
   return (await call(`/v1/foods/${encodeURIComponent(id)}`, FoodProductResponse, { method: 'PATCH', body: JSON.stringify(body) })).product
+}
+
+/** 营养值不能就地改：存为新版本并生效，旧版本保留，已有记录按当时的版本不变。 */
+export async function addFoodVersion(id: string, body: FoodVersionRequest) {
+  return (await call(`/v1/foods/${encodeURIComponent(id)}/versions`, FoodProductResponse, { method: 'POST', body: JSON.stringify(body) })).product
 }
 
 export async function deleteFood(id: string) {

@@ -25,6 +25,7 @@ export type AuditAction =
   | 'item_rescale'
   | 'food_update'
   | 'food_delete'
+  | 'food_version'
 
 export interface AuditEntry {
   actor: string

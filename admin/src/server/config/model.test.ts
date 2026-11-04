@@ -36,11 +36,12 @@ describe('buildPublished', () => {
     const config = buildPublished(draft, {
       configVersion: '2026-11-01.1',
       previous: null,
-      history: { system: 7 },
+      // 历史里发布过的版本比内置的还高时，新版本要越过它。
+      history: { system: builtin.prompts.system.version + 3 },
     })
     expect(config.prompts.system).toEqual({
       id: builtin.prompts.system.id,
-      version: 8,
+      version: builtin.prompts.system.version + 4,
       text: '新的系统 prompt',
     })
     expect(config.prompts.tools[tool]).toEqual({
