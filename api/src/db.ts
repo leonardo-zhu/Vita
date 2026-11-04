@@ -29,7 +29,109 @@ const MIGRATIONS = [
     result       TEXT NOT NULL,            -- success / failure
     error_code   TEXT
   );`,
+  `-- 业务数据（TDD §3，对应 1.0 的 SwiftData 模型）。时刻一律是 ISO 8601（UTC），JSON 列存领域对象
+  -- 每个日期一个，revision 每次正式写入递增；提案带上它，确认时不一致即拒绝（TDD §5.2）
+  CREATE TABLE day_sessions (
+    local_date  TEXT PRIMARY KEY,          -- YYYY-MM-DD
+    time_zone   TEXT NOT NULL,             -- 创建时固定，之后不重写
+    revision    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+  );
+  CREATE TABLE consumption_records (
+    id            TEXT PRIMARY KEY,
+    session_date  TEXT NOT NULL REFERENCES day_sessions(local_date) ON DELETE CASCADE,
+    event_time    TEXT NOT NULL,           -- EventTime JSON
+    sort_time     TEXT NOT NULL,           -- 代表性时刻，只用于排序
+    meal_label    TEXT,
+    note          TEXT,
+    revision      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+  );
+  CREATE INDEX consumption_records_session ON consumption_records(session_date);
+  -- 营养快照在创建 / 修改时写定，之后不随食品版本或参考库变化
+  CREATE TABLE consumption_items (
+    id                    TEXT PRIMARY KEY,
+    record_id             TEXT NOT NULL REFERENCES consumption_records(id) ON DELETE CASCADE,
+    position              INTEGER NOT NULL,
+    group_name            TEXT,
+    display_name          TEXT NOT NULL,
+    original_amount_text  TEXT NOT NULL,
+    quantity              TEXT,            -- Quantity JSON
+    amount_source         TEXT NOT NULL,
+    snapshot              TEXT NOT NULL,   -- NutritionSnapshot JSON
+    include_in_summary    INTEGER NOT NULL,
+    food_product_id       TEXT,
+    food_version_id       TEXT,
+    reference_food_id     TEXT,
+    created_at            TEXT NOT NULL,
+    updated_at            TEXT NOT NULL
+  );
+  CREATE INDEX consumption_items_record ON consumption_items(record_id);
+  CREATE TABLE food_products (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    brand_or_supplier  TEXT,
+    package            TEXT,               -- Quantity JSON
+    note               TEXT,
+    active_version_id  TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+  );
+  -- 不可变：创建后不修改，纠正时新建版本并切换生效版本（TDD §4.3）
+  CREATE TABLE food_versions (
+    id                         TEXT PRIMARY KEY,
+    product_id                 TEXT NOT NULL REFERENCES food_products(id) ON DELETE CASCADE,
+    basis                      TEXT NOT NULL,  -- FoodVersionBasis JSON
+    source_kind                TEXT NOT NULL,
+    label_scan_id              TEXT,
+    derived_from_reference_id  TEXT,
+    source_note                TEXT,
+    created_at                 TEXT NOT NULL,
+    retired_at                 TEXT
+  );
+  CREATE INDEX food_versions_product ON food_versions(product_id);
+  -- 营养标签照片的存档记录；照片文件本身随 M3 的上传接口落地
+  CREATE TABLE label_scans (
+    id          TEXT PRIMARY KEY,
+    created_at  TEXT NOT NULL
+  );
+  -- 确认卡（ADR-004、ADR-008）。每个日期最多一张待确认；payload 是确认时原样执行的变更
+  CREATE TABLE pending_actions (
+    id                 TEXT PRIMARY KEY,
+    session_date       TEXT NOT NULL,
+    expected_revision  INTEGER NOT NULL,
+    payload            TEXT,               -- PendingChange JSON；结束后保留，用于审计
+    payload_hash       TEXT NOT NULL,      -- payload 的 sha256，确认前核对
+    preview            TEXT,               -- 确认卡内容 JSON；结束后清空
+    status             TEXT NOT NULL,      -- readyForConfirmation / confirmed / cancelled / expired
+    created_at         TEXT NOT NULL,
+    expires_at         TEXT NOT NULL,
+    resolved_at        TEXT,
+    resolution_code    TEXT,
+    result_id          TEXT,
+    request_id         TEXT,
+    after_confirm      TEXT
+  );
+  CREATE INDEX pending_actions_active ON pending_actions(session_date, status);
+  ALTER TABLE audit_events ADD COLUMN request_id TEXT;`,
 ]
+
+/**
+ * 在一个事务里执行 `body`，失败时回滚并把错误抛出。不能嵌套：内层需要同一事务时由外层传入回调（见 records.apply 的 alongside）。
+ */
+export function transaction<T>(database: DatabaseSync, body: () => T): T {
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const result = body()
+    database.exec('COMMIT')
+    return result
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  }
+}
 
 export function dataDir(): string {
   return path.resolve(process.env.VITA_API_DATA_DIR ?? '.data')
@@ -62,11 +164,18 @@ function migrate(database: DatabaseSync) {
   }
 }
 
-export function audit(
-  database: DatabaseSync,
-  entry: { actor: string; action: string; targetId?: string; result: 'success' | 'failure'; errorCode?: string; at: Date },
-) {
+export interface AuditEntry {
+  actor: string
+  action: string
+  targetId?: string | null
+  result: 'success' | 'failure'
+  errorCode?: string | null
+  requestId?: string | null
+  at: Date
+}
+
+export function audit(database: DatabaseSync, entry: AuditEntry) {
   database
-    .prepare('INSERT INTO audit_events (occurred_at, actor, action, target_id, result, error_code) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(entry.at.toISOString(), entry.actor, entry.action, entry.targetId ?? '', entry.result, entry.errorCode ?? null)
+    .prepare('INSERT INTO audit_events (occurred_at, actor, action, target_id, result, error_code, request_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(entry.at.toISOString(), entry.actor, entry.action, entry.targetId ?? '', entry.result, entry.errorCode ?? null, entry.requestId ?? null)
 }

@@ -8,6 +8,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createApp } from './app.ts'
 import { openDatabase } from './db.ts'
+import { ReferenceCatalog } from './domain/reference.ts'
+import { createServices } from './services/index.ts'
 
 const SERVICE_TOKEN = 'test-service-token-0123456789abcdef'
 
@@ -16,7 +18,13 @@ let app: ReturnType<typeof createApp>
 
 beforeEach(() => {
   database = openDatabase(':memory:')
-  app = createApp({ database, serviceToken: SERVICE_TOKEN, version: 'test', now: () => new Date('2026-11-04T08:00:00Z') })
+  const services = createServices({
+    database,
+    reference: ReferenceCatalog.empty,
+    now: () => new Date('2026-11-04T08:00:00Z'),
+    timeZone: () => 'Asia/Shanghai',
+  })
+  app = createApp({ services, serviceToken: SERVICE_TOKEN, version: 'test' })
 })
 
 function request(path: string, init: { token?: string; method?: string; body?: unknown } = {}) {

@@ -5,16 +5,20 @@
  * `/v1/health` 不需要鉴权；`/v1/admin/*` 只认服务令牌。错误一律返回 `{ error: { code, message } }`。
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
-import type { DatabaseSync } from 'node:sqlite'
 
 import {
+  type ActivePendingResponse,
   CreateDeviceRequest,
   type CreateDeviceResponse,
+  type DayResponse,
   type Device,
   type ErrorResponse,
+  type FoodsResponse,
   type HealthResponse,
   type ListDevicesResponse,
   type MeResponse,
+  type PendingResponse,
+  type ReferenceSearchResponse,
 } from '@vita/contract'
 import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
@@ -22,12 +26,14 @@ import type { z } from 'zod'
 
 import { audit } from './db.ts'
 import { authenticateDevice, createDevice, listDevices, revokeDevice } from './devices.ts'
+import { isLocalDate } from './domain/time.ts'
+import { ServiceError } from './services/context.ts'
+import type { Services } from './services/index.ts'
 
 export interface AppOptions {
-  database: DatabaseSync
+  services: Services
   serviceToken: string
   version: string
-  now?: () => Date
 }
 
 type Actor = { kind: 'admin' } | { kind: 'device'; device: Device }
@@ -36,6 +42,20 @@ type AppEnv = { Variables: { actor: Actor } }
 
 function failure(c: Context, status: ContentfulStatusCode, code: string, message: string) {
   return c.json({ error: { code, message } } satisfies ErrorResponse, status)
+}
+
+/** 业务规则的拒绝：不存在 404，状态不允许（过期、已结束、数据已变）409，其余 422。 */
+const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
+  notFound: [404, '没有这张卡片。'],
+  expired: [409, '这张卡片已过期，没有写入任何数据。'],
+  notActive: [409, '这张卡片已经结束了。'],
+  revisionConflict: [409, '当天数据在提案后有变化，这张卡片已作废，请重新提出。'],
+  payloadTampered: [409, '这张卡片的内容校验不通过，已作废。'],
+}
+
+function serviceFailure(c: Context, error: ServiceError) {
+  const [status, message] = SERVICE_FAILURES[error.code] ?? [422, '这次操作不符合规则，没有写入任何数据。']
+  return failure(c, status, error.code, message)
 }
 
 /** 比较前先各取 sha256，长度一致才能用 timingSafeEqual，也不泄露长度。 */
@@ -54,10 +74,12 @@ async function parseBody<T extends z.ZodType>(c: Context, schema: T): Promise<z.
   return parsed.success ? parsed.data : null
 }
 
-export function createApp({ database, serviceToken, version, now = () => new Date() }: AppOptions) {
+export function createApp({ services, serviceToken, version }: AppOptions) {
+  const { database, now } = services.context
   const app = new Hono<AppEnv>()
 
   app.onError((error, c) => {
+    if (error instanceof ServiceError) return serviceFailure(c, error)
     console.error(error)
     return failure(c, 500, 'internal', '服务暂时无法处理这个请求。')
   })
@@ -89,6 +111,32 @@ export function createApp({ database, serviceToken, version, now = () => new Dat
     if (actor.kind !== 'device') return failure(c, 403, 'forbidden', '这个接口只给设备令牌用。')
     return c.json({ device: actor.device } satisfies MeResponse)
   })
+
+  // MARK: - 饮食数据
+
+  const invalidDate = (c: Context) => failure(c, 400, 'invalidDate', '日期格式应为 YYYY-MM-DD。')
+  app.get('/v1/days/:date', (c) => {
+    const date = c.req.param('date')
+    return isLocalDate(date) ? c.json(services.days.day(date) satisfies DayResponse) : invalidDate(c)
+  })
+  app.get('/v1/days/:date/pending', (c) => {
+    const date = c.req.param('date')
+    return isLocalDate(date) ? c.json({ pending: services.pending.active(date) } satisfies ActivePendingResponse) : invalidDate(c)
+  })
+
+  // 确认卡只能由用户在卡片上确认或取消；提案由 Agent 在服务端生成（M2），不对外开放。
+  app.post('/v1/pending/:id/confirm', (c) =>
+    c.json({ pending: services.pending.confirm(c.req.param('id'), { actor: actorName(c.get('actor')) }) } satisfies PendingResponse),
+  )
+  app.post('/v1/pending/:id/cancel', (c) =>
+    c.json({ pending: services.pending.cancel(c.req.param('id'), { actor: actorName(c.get('actor')) }) } satisfies PendingResponse),
+  )
+
+  app.get('/v1/foods', (c) => {
+    const query = c.req.query('q')
+    return c.json({ products: query ? services.foods.search(query) : services.foods.products() } satisfies FoodsResponse)
+  })
+  app.get('/v1/reference-foods', (c) => c.json(services.context.reference.browse(c.req.query('q') ?? '') satisfies ReferenceSearchResponse))
 
   // MARK: - 设备管理（只给 Admin）
 

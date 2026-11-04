@@ -1,0 +1,425 @@
+[
+  {
+    "id": "vita.reference.chicken-breast.raw",
+    "canonicalName": "鸡胸肉（生）",
+    "aliases": [
+      "鸡胸肉",
+      "鸡胸",
+      "生鸡胸"
+    ],
+    "category": "poultry",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 120,
+      "proteinG": 22.5,
+      "fatG": 2.6,
+      "carbohydrateG": 0.0
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-001",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.chicken-breast.cooked",
+    "canonicalName": "鸡胸肉（熟）",
+    "aliases": [
+      "鸡胸肉",
+      "鸡胸",
+      "熟鸡胸"
+    ],
+    "category": "poultry",
+    "preparationState": "cooked",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 165,
+      "proteinG": 31.0,
+      "fatG": 3.6,
+      "carbohydrateG": 0.0
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-002",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.egg.whole.raw",
+    "canonicalName": "鸡蛋（生）",
+    "aliases": [
+      "鸡蛋",
+      "生鸡蛋"
+    ],
+    "category": "egg",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 143,
+      "proteinG": 12.6,
+      "fatG": 9.5,
+      "carbohydrateG": 0.7
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-003",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.egg.whole.boiled",
+    "canonicalName": "鸡蛋（煮）",
+    "aliases": [
+      "鸡蛋",
+      "水煮蛋",
+      "白煮蛋"
+    ],
+    "category": "egg",
+    "preparationState": "boiled",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 155,
+      "proteinG": 12.6,
+      "fatG": 10.6,
+      "carbohydrateG": 1.1
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-004",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.rice.white.cooked",
+    "canonicalName": "米饭（熟）",
+    "aliases": [
+      "米饭",
+      "白米饭"
+    ],
+    "category": "grain",
+    "preparationState": "cooked",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 130,
+      "proteinG": 2.7,
+      "fatG": 0.3,
+      "carbohydrateG": 28.2
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-005",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.rice.white.raw",
+    "canonicalName": "大米（生）",
+    "aliases": [
+      "大米",
+      "生米"
+    ],
+    "category": "grain",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 365,
+      "proteinG": 7.1,
+      "fatG": 0.7,
+      "carbohydrateG": 80.0
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-006",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.oats.rolled.raw",
+    "canonicalName": "燕麦片",
+    "aliases": [
+      "燕麦",
+      "燕麦片"
+    ],
+    "category": "grain",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 379,
+      "proteinG": 13.2,
+      "fatG": 6.5,
+      "carbohydrateG": 67.7
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-007",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.milk.whole",
+    "canonicalName": "牛奶（全脂）",
+    "aliases": [
+      "牛奶",
+      "全脂牛奶",
+      "纯牛奶"
+    ],
+    "category": "dairy",
+    "preparationState": "asSold",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 61,
+      "proteinG": 3.2,
+      "fatG": 3.3,
+      "carbohydrateG": 4.8
+    },
+    "densityGPerMl": 1.03,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-008",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.milk.skim",
+    "canonicalName": "牛奶（脱脂）",
+    "aliases": [
+      "牛奶",
+      "脱脂牛奶"
+    ],
+    "category": "dairy",
+    "preparationState": "asSold",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 34,
+      "proteinG": 3.4,
+      "fatG": 0.1,
+      "carbohydrateG": 5.0
+    },
+    "densityGPerMl": 1.03,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-009",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.tofu.firm.raw",
+    "canonicalName": "豆腐（北豆腐）",
+    "aliases": [
+      "豆腐",
+      "北豆腐",
+      "老豆腐"
+    ],
+    "category": "legume",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 144,
+      "proteinG": 17.3,
+      "fatG": 8.7,
+      "carbohydrateG": 2.8
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-010",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.salmon.atlantic.raw",
+    "canonicalName": "三文鱼（生）",
+    "aliases": [
+      "三文鱼",
+      "生三文鱼"
+    ],
+    "category": "fish",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 208,
+      "proteinG": 20.4,
+      "fatG": 13.4,
+      "carbohydrateG": 0.0
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-011",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.broccoli.raw",
+    "canonicalName": "西兰花（生）",
+    "aliases": [
+      "西兰花",
+      "西蓝花"
+    ],
+    "category": "vegetable",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 34,
+      "proteinG": 2.8,
+      "fatG": 0.4,
+      "carbohydrateG": 6.6
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-012",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.tomato.raw",
+    "canonicalName": "番茄",
+    "aliases": [
+      "番茄",
+      "西红柿"
+    ],
+    "category": "vegetable",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 18,
+      "proteinG": 0.9,
+      "fatG": 0.2,
+      "carbohydrateG": 3.9
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-013",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.banana.raw",
+    "canonicalName": "香蕉",
+    "aliases": [
+      "香蕉"
+    ],
+    "category": "fruit",
+    "preparationState": "raw",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 89,
+      "proteinG": 1.1,
+      "fatG": 0.3,
+      "carbohydrateG": 22.8
+    },
+    "densityGPerMl": null,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-014",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  },
+  {
+    "id": "vita.reference.olive-oil",
+    "canonicalName": "橄榄油",
+    "aliases": [
+      "橄榄油"
+    ],
+    "category": "oil",
+    "preparationState": "asSold",
+    "base": {
+      "quantity": 100,
+      "unit": "g"
+    },
+    "nutrients": {
+      "energyKcal": 884,
+      "proteinG": 0.0,
+      "fatG": 100.0,
+      "carbohydrateG": 0.0
+    },
+    "densityGPerMl": 0.91,
+    "source": {
+      "provider": "Vita test fixture",
+      "dataType": "fixture",
+      "externalId": "fixture-015",
+      "retrievedFromRelease": "n/a",
+      "attribution": "Approximate values modelled on USDA FoodData Central (CC0 1.0); for tests only, not reviewed data."
+    }
+  }
+]

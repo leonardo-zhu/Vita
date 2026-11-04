@@ -11,7 +11,7 @@
 ## 本地开发
 
 ```bash
-cp .env.example .env.local   # 填 VITA_API_SERVICE_TOKEN（至少 32 个字符）
+cp .env.example .env.local   # 填 VITA_API_SERVICE_TOKEN（至少 32 个字符）与 VITA_API_REFERENCE_FILE
 pnpm dev                      # http://127.0.0.1:3014/v1/health
 pnpm test
 ```
@@ -31,6 +31,9 @@ curl -X POST http://127.0.0.1:3014/v1/admin/devices \
 | `src/app.ts` | 路由与鉴权：设备令牌给手机，服务令牌给 Admin，`/v1/admin/*` 只认服务令牌 |
 | `src/db.ts` | SQLite 打开与迁移（`user_version`，只追加）、审计 |
 | `src/devices.ts` | 设备令牌的签发、校验、吊销；库里只存 sha256 |
+| `src/domain/` | 纯领域逻辑：本地日期与时区、摄入时间、单位换算与营养计算（十进制）、参考库、变更的类型 |
+| `src/services/` | 记录、食品库、确认卡、一天的数据；每个写操作一个事务，成功失败都记审计（移植自 1.0 的同名 Swift 服务） |
+| `src/test/` | 测试夹具：与 1.0 相同的日期、时刻、时区与小型参考库 |
 | `scripts/build.mjs` | esbuild 打包 |
 | `deploy/` | R4S 上的 compose 与 Caddy 配置 |
 
@@ -41,9 +44,10 @@ curl -X POST http://127.0.0.1:3014/v1/admin/devices \
 ### 首次准备（在 R4S 上，只做一次）
 
 1. **部署目录**：`mkdir -p /opt/stacks/vita-api`，属组与 `/opt/stacks/vita-admin` 一致，runner 要能写。
-2. **数据目录**：`mkdir -p /opt/vita-api/data && chown 1000:1000 /opt/vita-api/data`（容器里以 node 用户运行）。
-3. **`.env`**：`/opt/stacks/vita-api/.env`，填 `VITA_API_SERVICE_TOKEN`（`openssl rand -base64 32`）。值里不能有 `$`。
-4. **Caddy**：`/opt/stacks/caddy/Caddyfile` 追加 `deploy/Caddyfile.snippet` 的内容，先 `validate` 再 `reload`。`vita-api.r4s.leonardo-zhu.me` 已被 `*.r4s` 通配覆盖，不用另加 DNS。
-5. 推一次 `main`（或在 Actions 里手动运行）。
+2. **数据目录**：`mkdir -p /opt/vita-api/data /opt/vita-api/reference && chown 1000:1000 /opt/vita-api/data`（容器里以 node 用户运行）。
+3. **参考库**：本地 `python3 -I tools/reference-food/build.py` 构建后，把 `ios/Resources/ReferenceFood/reference-foods.json` 拷到 R4S 的 `/opt/vita-api/reference/`。只放在服务器上，不进仓库、不进镜像（ADR-006）；更新后重启容器生效。
+4. **`.env`**：`/opt/stacks/vita-api/.env`，填 `VITA_API_SERVICE_TOKEN`（`openssl rand -base64 32`）。值里不能有 `$`。
+5. **Caddy**：`/opt/stacks/caddy/Caddyfile` 追加 `deploy/Caddyfile.snippet` 的内容，先 `validate` 再 `reload`。`vita-api.r4s.leonardo-zhu.me` 已被 `*.r4s` 通配覆盖，不用另加 DNS。
+6. 推一次 `main`（或在 Actions 里手动运行）。
 
 确认：`curl -s https://vita-api.r4s.leonardo-zhu.me/v1/health` 返回 `{"ok":true,"version":"<commit sha>"}`。

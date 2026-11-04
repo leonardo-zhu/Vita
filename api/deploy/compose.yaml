@@ -20,10 +20,14 @@ services:
       - VITA_API_HOST=127.0.0.1
       - TZ=Asia/Shanghai
       - VITA_API_DATA_DIR=/data
+      - VITA_API_REFERENCE_FILE=/reference/reference-foods.json
+      - VITA_API_TIME_ZONE=Asia/Shanghai
       - NODE_OPTIONS=--max-old-space-size=192
     volumes:
       # 容器里以 node 用户（uid 1000）运行，首次部署前 chown 1000:1000
       - /opt/vita-api/data:/data
+      # 公共营养参考库：含私有来源，不进镜像（ADR-006），本地构建后手动拷到这里
+      - /opt/vita-api/reference:/reference:ro
     mem_limit: 256m
     labels:
       - "app=vita-api"

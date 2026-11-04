@@ -210,7 +210,7 @@ Apple 健康本身经 iCloud 在同一 Apple ID 的设备间同步，这不是�
 
 与 PRD v2.0 §7 对应：
 
-M1 进度（2026-11-04）：根目录 pnpm workspace（沿用 Admin 原来的 lockfile，依赖版本不变）、`packages/contract`、`api/` 骨架（健康检查、设备令牌的签发 / 校验 / 吊销、SQLite 迁移、审计）、Dockerfile、compose、Caddy 配置与 CI 已完成；Admin 的构建改为从根目录安装（standalone 产物里 `server.js` 移到 `admin/` 下）。业务数据的表与接口尚未开始。部署地址的环境变量用 `VITA_API_HOST`，不用 `HOSTNAME`（很多 shell 会把它设成机器名）。
+M1 进度（2026-11-04）：根目录 pnpm workspace（沿用 Admin 原来的 lockfile，依赖版本不变）、`packages/contract`、`api/` 骨架（健康检查、设备令牌的签发 / 校验 / 吊销、SQLite 迁移、审计）、Dockerfile、compose、Caddy 配置与 CI 已完成；Admin 的构建改为从根目录安装（standalone 产物里 `server.js` 移到 `admin/` 下）。业务数据（同日）：记录、食品库、确认卡、一天的数据已移植，表结构见 `api/src/db.ts` 第 2 版迁移；营养计算用 big.js 做十进制运算，对应 1.0 的 `Decimal`；1.0 的相关测试逐条移植（API 共 67 个测试），并用本地构建的真实参考库（1451 条）跑通加载与查询。接口：`GET /v1/days/:date`、`GET /v1/days/:date/pending`、`POST /v1/pending/:id/confirm` / `cancel`、`GET /v1/foods`、`GET /v1/reference-foods`；提案只由服务端的 Agent 生成（M2），不对外开放。新建日期会话与确认卡过期按服务端配置的时区（`VITA_API_TIME_ZONE`，默认上海）计算。尚未移植：目标与能量目标、健康数据、身体成分、对话。部署地址的环境变量用 `VITA_API_HOST`，不用 `HOSTNAME`（很多 shell 会把它设成机器名）。
 
 | 阶段 | 技术内容 |
 | --- | --- |
