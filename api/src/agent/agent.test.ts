@@ -423,12 +423,21 @@ describe('对话追踪', () => {
 
 describe('模型声称生成了卡片却没调用工具', () => {
   it('去掉照抄的注记，并说明什么都没保存', async () => {
-    const { services, send } = make([[text('已根据标签生成鲜牛奶的存库确认卡。\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］'), done]])
+    const fake = text('已根据标签生成鲜牛奶的存库确认卡。\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］')
+    const { services, send } = make([[fake, done], [text('已生成确认卡。'), done]])
     const result = await send('存一下这个牛奶')
     expect(result.pendingId).toBeNull()
     expect(result.reply.text).not.toContain('客户端注')
     expect(result.reply.text).toContain('这次实际没有生成确认卡')
     expect(services.chat.messages(DAY).at(-1)?.text).toBe(result.reply.text)
+  })
+
+  it('提醒一次后模型真的调用了工具，卡片照常生成', async () => {
+    const { client, send } = make([[text('已生成鸡蛋的确认卡，请确认。'), done], [call('c1', 'proposeRecordChange', eggProposal), done], [text('请确认下面的卡片。'), done]])
+    const result = await send('记一个鸡蛋')
+    expect(result.pendingId).not.toBeNull()
+    expect(result.reply.text).not.toContain('这次实际没有生成确认卡')
+    expect(JSON.stringify(client.requests[1].input)).toContain('没有调用任何工具')
   })
 
   it('只是提到以前的卡片时不改', async () => {

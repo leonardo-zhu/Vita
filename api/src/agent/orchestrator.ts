@@ -88,6 +88,7 @@ export class Orchestrator {
         reply, reasoning, steps, pendingId, outcome, errorCode, usage, latencyMs: Date.now() - started,
       })
 
+    let nudged = false
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         usage.rounds = round + 1
@@ -131,7 +132,15 @@ export class Orchestrator {
         }
         reply = join(reply, roundText)
         if (roundText) input.push({ type: 'assistant', text: roundText })
-        if (calls.length === 0) break
+        if (calls.length === 0) {
+          // 模型有时只在文字里说“已生成确认卡”却没调用工具：提醒一次，让它真的调用。
+          if (!pendingId && !nudged && round < MAX_TOOL_ROUNDS - 1 && claimsCard(roundText)) {
+            nudged = true
+            input.push({ type: 'system', text: UNBACKED_CARD_NUDGE })
+            continue
+          }
+          break
+        }
 
         for (const call of calls) {
           const index = steps.length
@@ -379,6 +388,14 @@ function join(first: string, second: string): string {
   return `${first}\n\n${second}`
 }
 
+/** 只认“生成了卡片 / 请确认下面这张”这类说法，提到以前的卡片（“上一张已确认”）不算。 */
+export function claimsCard(text: string): boolean {
+  return /生成[^。\n]{0,16}(确认)?卡|请确认(下面|这张)|下面的(确认)?卡片/.test(stripFakeNotes(text))
+}
+
+const UNBACKED_CARD_NUDGE =
+  '［系统：你刚才说生成了确认卡，但没有调用任何工具，所以用户看不到卡片，也什么都没保存。现在直接调用对应的提案工具（proposeFoodChange / proposeRecordChange 等）生成这张卡，不要再重复刚才的文字。］'
+
 /** 模型偶尔会照着历史里的格式自己写“［客户端注…］”“［系统…］”，这些只能由服务端加，回复里出现就去掉。 */
 export function stripFakeNotes(reply: string): string {
   return reply.replace(/\s*［(?:客户端|系统)[^］]*］/g, '').trimEnd()
@@ -390,9 +407,8 @@ export function stripFakeNotes(reply: string): string {
  */
 export function guardUnbackedCardClaim(reply: string): string {
   const stripped = stripFakeNotes(reply)
-  // 只认“生成了卡片 / 请确认下面这张”这类说法，提到以前的卡片（“上一张已确认”）不算。
-  const claimsCard = /生成[^。\n]{0,16}(确认)?卡|请确认(下面|这张)|下面的(确认)?卡片/.test(stripped)
-  if (!claimsCard && stripped === reply.trimEnd()) return reply
-  if (!claimsCard) return stripped
+  const claims = claimsCard(stripped)
+  if (!claims && stripped === reply.trimEnd()) return reply
+  if (!claims) return stripped
   return `${stripped}\n\n（这次实际没有生成确认卡，没有保存任何数据。请再说一次，或换个说法。）`
 }
