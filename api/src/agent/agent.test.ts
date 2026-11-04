@@ -44,7 +44,7 @@ function make(rounds: (LLMEvent[] | LLMError)[]) {
   const agent = new Orchestrator({ services: context.services, client, config: new StaticConfigSource() })
   const events: ChatEvent[] = []
   const send = (turn: Turn | string, signal = new AbortController().signal) =>
-    agent.run(typeof turn === 'string' ? { kind: 'message', text: turn, labelScanId: null } : turn, DAY, 'device:test', (event) => events.push(event), signal)
+    agent.run(typeof turn === 'string' ? { kind: 'message', text: turn, labelScanIds: [] } : turn, DAY, 'device:test', (event) => events.push(event), signal)
   return { ...context, client, agent, events, send }
 }
 
@@ -206,7 +206,7 @@ describe('上下文', () => {
   it('标签照片随消息发给模型，并带上 labelScanId；下一轮重放时照片还在', async () => {
     const { services, client, send } = make([[text('这是什么牌子的？'), done], [text('好的'), done]])
     const labelScanId = services.labels.save(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg', ORIGIN)
-    await send({ kind: 'message', text: '', labelScanId })
+    await send({ kind: 'message', text: '', labelScanIds: [labelScanId] })
     const sent = client.requests[0].input.at(-1)!
     expect(sent).toMatchObject({ type: 'user', images: [{ dataURL: expect.stringMatching(/^data:image\/jpeg;base64,/), detail: BUILTIN_CONFIG.labelImage.detail }] })
     expect((sent as { text: string }).text).toContain(`labelScanId: ${labelScanId}`)
@@ -214,6 +214,25 @@ describe('上下文', () => {
 
     await send('是伊利纯牛奶')
     expect(client.requests[1].input[0]).toMatchObject({ type: 'user', images: [{ detail: BUILTIN_CONFIG.labelImage.detail }] })
+  })
+
+  it('批量录入：多张照片按顺序发给模型，并说明一次只提一个食品', async () => {
+    const { services, client, send } = make([[text('先看第一张。'), done], [text('好的'), done]])
+    const save = () => services.labels.save(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), 'image/jpeg', ORIGIN)
+    const ids = [save(), save(), save()]
+    await send({ kind: 'message', text: '这几个都存进食品库', labelScanIds: ids })
+    const sent = client.requests[0].input.at(-1) as { text: string; images: unknown[] }
+    expect(sent.images).toHaveLength(3)
+    expect(sent.text).toContain(`1. labelScanId: ${ids[0]}`)
+    expect(sent.text).toContain(`3. labelScanId: ${ids[2]}`)
+    expect(sent.text).toContain('afterConfirm')
+    const [message] = services.chat.messages(DAY)
+    expect(message.labelScanIds).toEqual(ids)
+    expect(message.cardRef).toEqual({ type: 'label', id: ids[0] })
+
+    // 下一轮（如确认后的接续）重放这条消息时三张照片都还在。
+    await send('继续')
+    expect((client.requests[1].input[0] as { images: unknown[] }).images).toHaveLength(3)
   })
 })
 

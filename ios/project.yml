@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     # 版本号规则见 ADR-023：主版本 = 产品代际，次版本 = 一个里程碑或一批新功能，修订 = 只修 bug；
     # 和那批改动放在同一个提交里，装手机前改好。构建号与提交由下面的构建脚本在每次构建时写入（见 Vita 目标的 postBuildScripts）。
-    MARKETING_VERSION: "2.0.1"
+    MARKETING_VERSION: "2.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   Vita:

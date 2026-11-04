@@ -15,6 +15,7 @@ interface MessageRow {
   role: ChatMessage['role']
   text: string
   card_ref: string | null
+  label_scan_ids: string | null
   created_at: string
 }
 
@@ -34,18 +35,25 @@ export class ChatService {
   /** 某天的全部消息，按时间顺序。 */
   messages(date: string): ChatMessage[] {
     const rows = this.context.database
-      .prepare('SELECT id, role, text, card_ref, created_at FROM chat_messages WHERE session_date = ? ORDER BY created_at, rowid')
+      .prepare('SELECT id, role, text, card_ref, label_scan_ids, created_at FROM chat_messages WHERE session_date = ? ORDER BY created_at, rowid')
       .all(date) as unknown as MessageRow[]
-    return rows.map((row) => ({ id: row.id, role: row.role, text: row.text, cardRef: parseCardRef(row.card_ref), createdAt: row.created_at }))
+    return rows.map((row) => {
+      const cardRef = parseCardRef(row.card_ref)
+      // 只带一张照片的旧消息（含 1.0 导入的）没有 label_scan_ids，从 card_ref 推出来。
+      const labelScanIds = row.label_scan_ids ? (JSON.parse(row.label_scan_ids) as string[]) : cardRef?.type === 'label' ? [cardRef.id] : []
+      return { id: row.id, role: row.role, text: row.text, cardRef, labelScanIds, createdAt: row.created_at }
+    })
   }
 
-  append(date: string, role: ChatMessage['role'], text: string, cardRef: CardRef | null): ChatMessage {
+  /** 用户消息带照片时传 labelScanIds，cardRef 自动指向第一张。 */
+  append(date: string, role: ChatMessage['role'], text: string, cardRef: CardRef | null, labelScanIds: string[] = []): ChatMessage {
     const id = randomUUID()
     const createdAt = this.context.now().toISOString()
+    const ref = cardRef ?? (labelScanIds.length ? { type: 'label' as const, id: labelScanIds[0] } : null)
     this.context.database
-      .prepare('INSERT INTO chat_messages (id, session_date, role, text, card_ref, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, date, role, text, cardRef ? `${cardRef.type}:${cardRef.id}` : null, createdAt)
-    return { id, role, text, cardRef, createdAt }
+      .prepare('INSERT INTO chat_messages (id, session_date, role, text, card_ref, label_scan_ids, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, date, role, text, ref ? `${ref.type}:${ref.id}` : null, labelScanIds.length ? JSON.stringify(labelScanIds) : null, createdAt)
+    return { id, role, text, cardRef: ref, labelScanIds, createdAt }
   }
 }
 

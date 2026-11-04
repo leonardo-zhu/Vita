@@ -99,6 +99,7 @@ struct ChatServiceTests {
         let stub = APIStub()
         let pendingID = UUID()
         let scanID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let second = UUID()
         stub.onStream("/v1/days/2026-10-30/chat", events: [
             #"{"type":"started","requestId":"\#(UUID().apiString)"}"#,
             #"{"type":"reasoning","delta":"想一想"}"#,
@@ -109,7 +110,7 @@ struct ChatServiceTests {
             #"{"type":"done","reply":\#(reply("已生成确认卡。", card: #"{"type":"pending","id":"\#(pendingID.apiString)"}"#)),"pendingId":"\#(pendingID.apiString)","requestedDate":null,"goalChanged":false}"#,
         ])
         var seen: [ChatProgress] = []
-        let result = try await ChatService(api: stub.client()).send("中午吃了鸡胸肉", on: Fixtures.day, labelScan: scanID) { seen.append($0) }
+        let result = try await ChatService(api: stub.client()).send("中午吃了鸡胸肉", on: Fixtures.day, labelScans: [scanID, second]) { seen.append($0) }
 
         #expect(result.pendingID == pendingID)
         #expect(result.reply?.cardRef == .pending(pendingID))
@@ -119,7 +120,8 @@ struct ChatServiceTests {
         #expect(seen.last?.steps == [.init(tool: "searchReferenceFoods", done: true)])
         let body = try #require(stub.requests.first).json()
         #expect(body["text"] as? String == "中午吃了鸡胸肉")
-        #expect(body["labelScanId"] as? String == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        #expect(body["labelScanIds"] as? [String] == ["aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", second.apiString])
+        #expect(body["labelScanId"] == nil)
     }
 
     @Test func errorEventsThrowWithTheServerMessage() async throws {
@@ -143,6 +145,21 @@ struct ChatServiceTests {
         await #expect(throws: APIError.server(status: 503, code: "agentUnavailable", message: "暂时不能对话")) {
             try await ChatService(api: stub.client()).send("hi", on: Fixtures.day)
         }
+    }
+
+    @Test func messagesCarryAllTheirLabelPhotos() async throws {
+        let stub = APIStub()
+        let (a, b) = (UUID(), UUID())
+        stub.on("GET", "/v1/days/2026-10-30/messages", json: """
+        {"messages":[
+          {"id":"\(UUID().apiString)","role":"user","text":"","cardRef":{"type":"label","id":"\(a.apiString)"},"labelScanIds":["\(a.apiString)","\(b.apiString)"],"createdAt":"2026-10-30T12:00:00.000Z"},
+          {"id":"\(UUID().apiString)","role":"user","text":"旧版服务端","cardRef":{"type":"label","id":"\(b.apiString)"},"createdAt":"2026-10-30T12:01:00.000Z"}
+        ]}
+        """)
+        let messages = try await ChatService(api: stub.client()).messages(on: Fixtures.day)
+        #expect(messages[0].labelIDs == [a, b])
+        // 没有 labelScanIds 的旧响应从 cardRef 推出那一张。
+        #expect(messages[1].labelIDs == [b])
     }
 
     @Test func continuationUsesThePendingEndpoint() async throws {

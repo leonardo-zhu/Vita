@@ -584,11 +584,17 @@ export type ScaleReadingResponse = z.infer<typeof ScaleReadingResponse>
 export const CardRef = z.object({ type: z.enum(['pending', 'label']), id: z.uuid() })
 export type CardRef = z.infer<typeof CardRef>
 
+/** 一条消息最多带几张营养标签照片（批量录入，2.1）。 */
+export const MAX_LABELS_PER_MESSAGE = 6
+
 export const ChatMessage = z.object({
   id: z.uuid(),
   role: z.enum(['user', 'assistant']),
   text: z.string(),
+  /** 带标签照片时指向第一张（只认一张的旧客户端照样能显示）。 */
   cardRef: CardRef.nullable(),
+  /** 用户消息附带的全部标签照片，按顺序；没有时为空数组。 */
+  labelScanIds: z.array(z.uuid()).default([]),
   createdAt: z.iso.datetime(),
 })
 export type ChatMessage = z.infer<typeof ChatMessage>
@@ -597,10 +603,14 @@ export type ChatMessage = z.infer<typeof ChatMessage>
 export const MessagesResponse = z.object({ messages: z.array(ChatMessage) })
 export type MessagesResponse = z.infer<typeof MessagesResponse>
 
-/** POST /v1/days/:date/chat：照片先经 POST /v1/label-scans 上传，再带上 labelScanId。 */
+/**
+ * POST /v1/days/:date/chat：照片先经 POST /v1/label-scans 上传，再带上它们的 ID。
+ * 多张用 labelScanIds（按顺序，最多 MAX_LABELS_PER_MESSAGE 张）；只有一张的旧客户端用 labelScanId，两者可以同时给，合并去重。
+ */
 export const ChatRequest = z.object({
   text: z.string().max(4000),
   labelScanId: z.uuid().nullish(),
+  labelScanIds: z.array(z.uuid()).max(MAX_LABELS_PER_MESSAGE).nullish(),
 })
 export type ChatRequest = z.infer<typeof ChatRequest>
 
@@ -723,7 +733,7 @@ export const ImportBundle = z.object({
   ),
   goals: z.array(Goal.extend({ evidence: z.unknown().nullable(), createdAt: z.iso.datetime() })),
   /** 1.0 的确认卡不迁移，指向它们的 cardRef 由手机清掉。 */
-  messages: z.array(ChatMessage.extend({ sessionDate: LocalDate })),
+  messages: z.array(ChatMessage.omit({ labelScanIds: true }).extend({ sessionDate: LocalDate })),
   labelScans: z.array(z.object({ id: z.uuid(), createdAt: z.iso.datetime(), contentType: z.string(), dataBase64: z.string() })),
   weighings: z.array(
     z.object({

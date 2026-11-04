@@ -7,6 +7,8 @@ struct ChatEntry: Equatable, Sendable, Identifiable {
     var text: String
     var cardRef: ChatCardRef?
     var createdAt: Date
+    /// 用户消息附带的营养标签照片，按顺序。
+    var labelIDs: [UUID] = []
 }
 
 /// 一轮对话的结果。
@@ -87,10 +89,13 @@ final class ChatService {
         return response.messages.map(\.domain)
     }
 
-    /// 发一条消息。照片先经 `LabelScanService.upload` 传上去，这里只带它的 ID。
-    func send(_ text: String, on date: LocalDate, labelScan: UUID? = nil, onProgress: @escaping (ChatProgress) -> Void = { _ in }) async throws -> ChatTurnResult {
-        try await run(api.stream("/v1/days/\(date.isoString)/chat", body: ChatRequestDTO(text: text, labelScanId: labelScan)), onProgress: onProgress)
+    /// 发一条消息。照片先经 `LabelScanService.upload` 传上去，这里只带它们的 ID（按顺序，最多 `maxLabels` 张）。
+    func send(_ text: String, on date: LocalDate, labelScans: [UUID] = [], onProgress: @escaping (ChatProgress) -> Void = { _ in }) async throws -> ChatTurnResult {
+        try await run(api.stream("/v1/days/\(date.isoString)/chat", body: ChatRequestDTO(text: text, labelScanIds: labelScans)), onProgress: onProgress)
     }
+
+    /// 一条消息最多带几张营养标签照片，与服务端的 `MAX_LABELS_PER_MESSAGE` 一致。
+    static let maxLabels = 6
 
     /// 确认了一张带 `afterConfirm` 的卡片后接着跑一轮。每张卡片只能接续一次。
     func continueAfterConfirm(_ pendingID: UUID, onProgress: @escaping (ChatProgress) -> Void = { _ in }) async throws -> ChatTurnResult {

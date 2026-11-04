@@ -307,6 +307,11 @@ describe('对话接口', () => {
     const { call } = await withAgent([])
     expect((await call(`/v1/days/${DAY}/chat`, 'POST', { text: '  ' })).status).toBe(400)
     expect((await call(`/v1/days/${DAY}/chat`, 'POST', { text: '看看', labelScanId: randomUUID() })).status).toBe(404)
+    expect((await call(`/v1/days/${DAY}/chat`, 'POST', { text: '看看', labelScanIds: [randomUUID()] })).status).toBe(404)
+    // 最多 6 张；labelScanId 与 labelScanIds 合并后也算在内。
+    const seven = Array.from({ length: 7 }, () => randomUUID())
+    expect((await call(`/v1/days/${DAY}/chat`, 'POST', { text: '', labelScanIds: seven })).status).toBe(400)
+    expect((await call(`/v1/days/${DAY}/chat`, 'POST', { text: '', labelScanIds: seven.slice(0, 6), labelScanId: seven[6] })).status).toBe(400)
     const { call: noAgent } = await withDevice()
     expect((await noAgent(`/v1/days/${DAY}/chat`, 'POST', { text: '早' })).status).toBe(503)
   })

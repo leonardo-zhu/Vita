@@ -11,6 +11,7 @@ import {
   ActivityUpload,
   type ChatEvent,
   ChatRequest,
+  MAX_LABELS_PER_MESSAGE,
   CreateDeviceRequest,
   type CreateDeviceResponse,
   type DayResponse,
@@ -323,9 +324,12 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
     const date = c.req.param('date')
     if (!isLocalDate(date)) return invalidDate(c)
     const body = await parseBody(c, ChatRequest)
-    if (!body || (!body.text.trim() && !body.labelScanId)) return invalidBody(c, '消息为空')
-    if (body.labelScanId && !services.labels.exists(body.labelScanId)) return failure(c, 404, 'labelNotFound', '找不到这张标签照片，请重新上传。')
-    return runTurn(c, { kind: 'message', text: body.text.trim(), labelScanId: body.labelScanId ?? null }, date)
+    if (!body) return invalidBody(c, '消息为空')
+    const labelScanIds = [...new Set([...(body.labelScanIds ?? []), ...(body.labelScanId ? [body.labelScanId] : [])])]
+    if (!body.text.trim() && labelScanIds.length === 0) return invalidBody(c, '消息为空')
+    if (labelScanIds.length > MAX_LABELS_PER_MESSAGE) return invalidBody(c, `一条消息最多带 ${MAX_LABELS_PER_MESSAGE} 张照片`)
+    if (labelScanIds.some((id) => !services.labels.exists(id))) return failure(c, 404, 'labelNotFound', '找不到这张标签照片，请重新上传。')
+    return runTurn(c, { kind: 'message', text: body.text.trim(), labelScanIds }, date)
   })
   /** 确认了一张带 afterConfirm 的卡片后，接着跑一轮。每张卡片只能接续一次。 */
   app.post('/v1/pending/:id/continue', (c) => {

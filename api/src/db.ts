@@ -208,6 +208,9 @@ const MIGRATIONS = [
     created_at  TEXT NOT NULL
   );
   CREATE INDEX health_changes_entity ON health_changes(entity, entity_id);`,
+  `-- 一条消息可以带多张标签照片（批量录入）：按顺序存 JSON 数组。card_ref 仍记第一张，只认一张的旧客户端照样显示
+  ALTER TABLE chat_messages ADD COLUMN label_scan_ids TEXT;
+  ALTER TABLE chat_traces ADD COLUMN label_scan_ids TEXT;`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

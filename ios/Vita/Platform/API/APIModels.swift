@@ -556,10 +556,14 @@ struct ChatMessageDTO: Decodable, Sendable {
     var role: ChatRole
     var text: String
     var cardRef: CardRefDTO?
+    /// 2.1 起有；更早的服务端没有这个字段时从 cardRef 推出。
+    var labelScanIds: [UUID]?
     var createdAt: Date
 
     var domain: ChatEntry {
-        ChatEntry(id: id, role: role, text: text, cardRef: cardRef?.domain, createdAt: createdAt)
+        let ref = cardRef?.domain
+        let labels: [UUID] = labelScanIds ?? (ref.flatMap { if case .label(let id) = $0 { [id] } else { nil } } ?? [])
+        return ChatEntry(id: id, role: role, text: text, cardRef: ref, createdAt: createdAt, labelIDs: labels)
     }
 }
 
@@ -569,15 +573,15 @@ struct MessagesResponseDTO: Decodable, Sendable {
 
 struct ChatRequestDTO: Encodable, Sendable {
     var text: String
-    var labelScanId: UUID?
+    var labelScanIds: [UUID] = []
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(text, forKey: .text)
-        try container.encodeIfPresent(labelScanId?.apiString, forKey: .labelScanId)
+        if !labelScanIds.isEmpty { try container.encode(labelScanIds.map(\.apiString), forKey: .labelScanIds) }
     }
 
-    private enum CodingKeys: String, CodingKey { case text, labelScanId }
+    private enum CodingKeys: String, CodingKey { case text, labelScanIds }
 }
 
 struct LabelScanResponseDTO: Decodable, Sendable {

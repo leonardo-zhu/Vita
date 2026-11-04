@@ -25,9 +25,9 @@ final class ChatModel {
     /// 发送中的用户消息：一轮成功后服务端才和回复一起保存，先在界面上显示。
     private(set) var outgoing: String?
     /// 发送中消息附带的标签照片，只用于显示。
-    private(set) var outgoingImage: UIImage?
-    /// 待发送的营养标签照片（已压缩的 JPEG）；发送时先上传到 Vita 服务，再随消息发出。
-    private(set) var attachment: Data?
+    private(set) var outgoingImages: [UIImage] = []
+    /// 待发送的营养标签照片（已压缩的 JPEG，按添加顺序，最多 `ChatService.maxLabels` 张）；发送时先逐张上传到 Vita 服务，再随消息发出。
+    private(set) var attachments: [Data] = []
     /// 消息里标签照片的缩略图，读到一张显示一张。
     private(set) var thumbnails: [UUID: UIImage] = [:]
     /// 历史消息里卡片的结局。
@@ -49,16 +49,20 @@ final class ChatModel {
 
     var today: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
     var isSending: Bool { streamingText != nil }
-    var canSend: Bool { !isSending && !isConfirming && (attachment != nil || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-    var attachmentImage: UIImage? { attachment.flatMap(UIImage.init(data:)) }
+    var canSend: Bool { !isSending && !isConfirming && (!attachments.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+    var attachmentImages: [UIImage] { attachments.compactMap(UIImage.init(data:)) }
+    /// 还能再加几张。
+    var remainingAttachments: Int { max(ChatService.maxLabels - attachments.count, 0) }
 
-    /// 选好照片后先放在输入框上方，用户可以再补一句（如品名、喝了多少）再发。
+    /// 选好照片后先放在输入框上方，用户可以再补一句（如品名、喝了多少）再发。可以放好几张，一次录入多个食品。
     func attach(_ image: UIImage) {
-        attachment = Self.compressed(image)
+        guard remainingAttachments > 0, let data = Self.compressed(image) else { return }
+        attachments.append(data)
     }
 
-    func removeAttachment() {
-        attachment = nil
+    func removeAttachment(at index: Int) {
+        guard attachments.indices.contains(index) else { return }
+        attachments.remove(at: index)
     }
 
     private static func scaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
@@ -78,9 +82,9 @@ final class ChatModel {
         return resized.jpegData(compressionQuality: 0.85)
     }
 
-    func labelThumbnail(_ ref: ChatCardRef) -> UIImage? {
-        guard case .label(let id) = ref else { return nil }
-        return thumbnails[id]
+    /// 一条消息附带的标签照片，读到几张显示几张。
+    func labelThumbnails(_ entry: ChatEntry) -> [UIImage] {
+        entry.labelIDs.compactMap { thumbnails[$0] }
     }
 
     func cardStatus(_ ref: ChatCardRef) -> PendingStatus? {
@@ -110,15 +114,13 @@ final class ChatModel {
     /// 历史里的卡片结局与标签照片，逐个读取，读到就显示。
     private func loadAttachments() async {
         for entry in entries {
-            switch entry.cardRef {
-            case .pending(let id) where cardStatuses[id] == nil || cardStatuses[id] == .readyForConfirmation:
+            if case .pending(let id) = entry.cardRef, cardStatuses[id] == nil || cardStatuses[id] == .readyForConfirmation {
                 if let snapshot = try? await services.pending.pending(id) { cardStatuses[id] = snapshot.status }
-            case .label(let id) where thumbnails[id] == nil:
+            }
+            for id in entry.labelIDs where thumbnails[id] == nil {
                 if let data = await services.labels.image(id), let original = UIImage(data: data) {
                     thumbnails[id] = Self.scaled(original, maxSide: 440)
                 }
-            default:
-                break
             }
         }
     }
@@ -136,29 +138,29 @@ final class ChatModel {
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
-        let image = attachment
+        let images = attachments
         draft = ""
-        attachment = nil
+        attachments = []
         requestedDate = nil
         outgoing = text
-        outgoingImage = image.flatMap(UIImage.init(data:))
+        outgoingImages = images.compactMap(UIImage.init(data:))
         let date = sessionDate
         run { [services] onProgress in
-            // attachNutritionLabel：先把照片传到 Vita 服务，再随消息发出（ADR-016）。
-            var scanID: UUID?
-            if let image {
+            // attachNutritionLabel：先把照片逐张传到 Vita 服务，再随消息发出（ADR-016）。
+            var scanIDs: [UUID] = []
+            for image in images {
                 do {
-                    scanID = try await services.labels.upload(image)
+                    scanIDs.append(try await services.labels.upload(image))
                 } catch {
                     throw LabelAttachmentError.uploadFailed
                 }
             }
-            return try await services.chat.send(text, on: date, labelScan: scanID, onProgress: onProgress)
+            return try await services.chat.send(text, on: date, labelScans: scanIDs, onProgress: onProgress)
         } onFailure: { [weak self] in
             // 这一轮没有保存，把原文和照片放回输入框，方便重发。
             guard let self else { return }
             if draft.isEmpty { draft = text }
-            if attachment == nil { attachment = image }
+            if attachments.isEmpty { attachments = images }
         }
     }
 
@@ -191,7 +193,7 @@ final class ChatModel {
                 }
             }
             outgoing = nil
-            outgoingImage = nil
+            outgoingImages = []
             streamingText = nil
             activity = nil
             thinking = ""
@@ -265,7 +267,7 @@ struct ChatView: View {
     @AppStorage(OnboardingState.key) private var onboardingCompleted = false
     @FocusState private var inputFocused: Bool
     @State private var isPickingPhoto = false
-    @State private var pickedPhoto: PhotosPickerItem?
+    @State private var pickedPhotos: [PhotosPickerItem] = []
     @State private var isTakingPhoto = false
 
     /// 设置里清空数据之后调用。
@@ -303,13 +305,20 @@ struct ChatView: View {
                 }
         }
         .tint(VitaTheme.intake)
-        .photosPicker(isPresented: $isPickingPhoto, selection: $pickedPhoto, matching: .images)
-        .onChange(of: pickedPhoto) {
-            guard let item = pickedPhoto else { return }
-            pickedPhoto = nil
+        // 一次可以选好几张（批量录入多个食品），按选择的顺序加进附件。
+        .photosPicker(
+            isPresented: $isPickingPhoto, selection: $pickedPhotos,
+            maxSelectionCount: max(model.remainingAttachments, 1), selectionBehavior: .ordered, matching: .images
+        )
+        .onChange(of: pickedPhotos) {
+            let items = pickedPhotos
+            guard !items.isEmpty else { return }
+            pickedPhotos = []
             Task {
-                if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
-                    model.attach(image)
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
+                        model.attach(image)
+                    }
                 }
             }
         }
@@ -330,11 +339,11 @@ struct ChatView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if model.entries.isEmpty && !model.isSending { emptyState }
                     ForEach(model.entries) { entry in
-                        MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus), image: entry.cardRef.flatMap(model.labelThumbnail))
+                        MessageRow(entry: entry, cardStatus: entry.cardRef.flatMap(model.cardStatus), images: model.labelThumbnails(entry))
                             .id(entry.id)
                     }
                     if let text = model.outgoing {
-                        MessageRow(entry: ChatEntry(id: UUID(), role: .user, text: text, createdAt: Date()), image: model.outgoingImage)
+                        MessageRow(entry: ChatEntry(id: UUID(), role: .user, text: text, createdAt: Date()), images: model.outgoingImages)
                             .id("outgoing")
                     }
                     if let text = model.streamingText {
@@ -432,8 +441,8 @@ struct ChatView: View {
     /// 输入框与发送按钮放在同一个圆角容器里；多行时按钮贴底。左侧的“+”用来附上营养标签照片。
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let image = model.attachmentImage {
-                attachmentPreview(image)
+            if !model.attachments.isEmpty {
+                attachmentPreview(model.attachmentImages)
             }
             HStack(alignment: .bottom, spacing: 2) {
                 attachMenu
@@ -487,7 +496,8 @@ struct ChatView: View {
     }
 
     private var placeholder: String {
-        if model.attachment != nil { return "补充品名、吃了多少（可不填）" }
+        if model.attachments.count > 1 { return "补充说明（可不填），如“都存进食品库”" }
+        if !model.attachments.isEmpty { return "补充品名、吃了多少（可不填）" }
         return model.sessionDate == model.today ? "说说吃了什么…" : "补记 \(DisplayFormat.shortDate(model.sessionDate)) 吃了什么…"
     }
 
@@ -504,33 +514,43 @@ struct ChatView: View {
                 .frame(width: 34, height: 34)
                 .background(Color.primary.opacity(0.06), in: .circle)
         }
-        .disabled(model.isSending)
+        .disabled(model.isSending || model.remainingAttachments == 0)
         .padding(.leading, 6)
         .padding(.bottom, 6)
         .accessibilityLabel("附上营养标签照片")
     }
 
-    private func attachmentPreview(_ image: UIImage) -> some View {
-        HStack(spacing: 10) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 52, height: 52)
-                .clipShape(.rect(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("营养标签").font(VitaType.secondary.weight(.semibold))
-                Text("随消息发给模型读取，原图存在你的 Vita 服务上。")
-                    .font(VitaType.meta)
-                    .foregroundStyle(.secondary)
+    /// 输入框上方的待发照片：一张时显示说明，多张时横向排开，每张都能单独移除。
+    private func attachmentPreview(_ images: [UIImage]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(images.enumerated()), id: \.offset) { index, image in
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 52, height: 52)
+                            .clipShape(.rect(cornerRadius: 10))
+                            .overlay(alignment: .topTrailing) {
+                                Button("移除第 \(index + 1) 张照片", systemImage: "xmark.circle.fill") { model.removeAttachment(at: index) }
+                                    .labelStyle(.iconOnly)
+                                    .font(.body)
+                                    .foregroundStyle(.white, .black.opacity(0.55))
+                                    .offset(x: 6, y: -6)
+                            }
+                            .padding(.top, 6)
+                            .padding(.trailing, 6)
+                    }
+                }
             }
-            Spacer(minLength: 0)
-            Button("移除照片", systemImage: "xmark.circle.fill", action: model.removeAttachment)
-                .labelStyle(.iconOnly)
-                .font(.title3)
+            Text(images.count > 1
+                 ? "\(images.count) 张营养标签，每张一个食品，会逐个生成确认卡；还能加 \(model.remainingAttachments) 张。"
+                 : "营养标签：随消息发给模型读取，原图存在你的 Vita 服务上。")
+                .font(VitaType.meta)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
-        .padding(.top, 10)
+        .padding(.top, 6)
         .padding(.bottom, 2)
     }
 
@@ -569,7 +589,7 @@ private struct MessageRow: View {
     let entry: ChatEntry
     var cardStatus: PendingStatus?
     /// 用户消息附带的营养标签照片。
-    var image: UIImage?
+    var images: [UIImage] = []
     /// 仅用于生成中的回复：已调用的工具、当前步骤与推理摘要。
     var steps: [ChatProgress.Step] = []
     var activity: ChatProgress.Activity?
@@ -581,7 +601,7 @@ private struct MessageRow: View {
             HStack {
                 Spacer(minLength: 48)
                 VStack(alignment: .trailing, spacing: 6) {
-                    if let image {
+                    if images.count == 1, let image = images.first {
                         // 按原比例显示，宽的标签不被裁掉。
                         Image(uiImage: image)
                             .resizable()
@@ -590,6 +610,20 @@ private struct MessageRow: View {
                             .clipShape(.rect(cornerRadius: 16))
                             .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.08)) }
                             .accessibilityLabel("营养标签照片")
+                    } else if images.count > 1 {
+                        // 多张时排成方格，每行最多三张。
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(84), spacing: 6), count: min(images.count, 3)), alignment: .trailing, spacing: 6) {
+                            ForEach(Array(images.enumerated()), id: \.offset) { _, image in
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 84, height: 84)
+                                    .clipShape(.rect(cornerRadius: 12))
+                                    .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08)) }
+                            }
+                        }
+                        .fixedSize()
+                        .accessibilityLabel("\(images.count) 张营养标签照片")
                     }
                     if !entry.text.isEmpty {
                         Text(entry.text)

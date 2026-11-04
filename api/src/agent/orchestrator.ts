@@ -20,7 +20,7 @@ const TRACE_RETENTION_DAYS = 90
 
 /** 本轮交给模型的：用户消息会保存进对话；确认后的接续不保存用户消息。 */
 export type Turn =
-  | { kind: 'message'; text: string; labelScanId: string | null }
+  | { kind: 'message'; text: string; labelScanIds: string[] }
   | { kind: 'continuation'; pendingId: string; step: string }
 
 export interface TurnResult {
@@ -68,7 +68,7 @@ export class Orchestrator {
     const input = this.historyInput(chat.messages(date), config)
     input.push({ type: 'system', text: this.clientState(date) })
     const turnText = turn.kind === 'message' ? turn.text : continuationNote(turn.pendingId, turn.step)
-    input.push(turn.kind === 'message' ? this.userItem(turn.text, turn.labelScanId, config) : { type: 'system', text: turnText })
+    input.push(turn.kind === 'message' ? this.userItem(turn.text, turn.labelScanIds, config) : { type: 'system', text: turnText })
     const instructions = this.instructions(config)
     const definitions = TOOL_SPECS.map((spec) => ({ name: spec.name, description: config.prompts.tools[spec.name]?.description ?? '', parameters: spec.parameters }))
 
@@ -84,7 +84,7 @@ export class Orchestrator {
     const trace = (outcome: 'ok' | 'error' | 'cancelled', errorCode: string | null) =>
       this.saveTrace({
         requestId, date, kind: turn.kind, config, inputText: turnText,
-        labelScanId: turn.kind === 'message' ? turn.labelScanId : null,
+        labelScanIds: turn.kind === 'message' ? turn.labelScanIds : [],
         reply, reasoning, steps, pendingId, outcome, errorCode, usage, latencyMs: Date.now() - started,
       })
 
@@ -164,7 +164,7 @@ export class Orchestrator {
       emit({ type: 'text', delta: reply })
     }
     if (turn.kind === 'message') {
-      chat.append(date, 'user', turn.text, turn.labelScanId ? { type: 'label', id: turn.labelScanId } : null)
+      chat.append(date, 'user', turn.text, null, turn.labelScanIds)
     }
     const saved = chat.append(date, 'assistant', reply, pendingId ? { type: 'pending', id: pendingId } : null)
     trace('ok', null)
@@ -181,7 +181,7 @@ export class Orchestrator {
     const limit = Math.max(config.context.maxRecentMessages, 0)
     return (limit === 0 ? [] : history.slice(-limit)).map((message): LLMInputItem => {
       if (message.role === 'user') {
-        return message.cardRef?.type === 'label' ? this.userItem(message.text, message.cardRef.id, config) : { type: 'user', text: message.text }
+        return this.userItem(message.text, message.labelScanIds, config)
       }
       if (message.cardRef?.type !== 'pending') return { type: 'assistant', text: message.text }
       return { type: 'assistant', text: `${message.text}\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，${this.cardStatus(message.cardRef)}。］` }
@@ -205,15 +205,30 @@ export class Orchestrator {
     }
   }
 
-  /** 用户消息；附带标签照片时在文字后注明 labelScanId，照片作为图片输入。照片读不到时只留说明。 */
-  private userItem(text: string, labelScanId: string | null, config: AgentConfig): LLMInputItem {
-    if (!labelScanId) return { type: 'user', text }
-    const image = this.labelImage(labelScanId, config)
-    const note = image
-      ? `［客户端附件：营养标签照片，labelScanId: ${labelScanId}］`
-      : `［客户端附件：营养标签照片，labelScanId: ${labelScanId}；照片已无法读取］`
+  /**
+   * 用户消息；附带标签照片时在文字后注明各张的 labelScanId，照片按同样的顺序作为图片输入。照片读不到时只留说明。
+   * 多张是批量录入：一天同时只能有一张确认卡，所以让模型一次只提一个食品，用 afterConfirm 接着处理剩下的。
+   * 这条规则写在代码里而不是系统 prompt 里：Admin 发布的 prompt 会整段替换内置的，规则不能跟着丢。
+   */
+  userItem(text: string, labelScanIds: string[], config: AgentConfig): LLMInputItem {
+    if (labelScanIds.length === 0) return { type: 'user', text }
+    const loaded = labelScanIds.map((id) => ({ id, image: this.labelImage(id, config) }))
+    const images = loaded.flatMap((item) => (item.image ? [item.image] : []))
+    let note: string
+    if (loaded.length === 1) {
+      const [{ id, image }] = loaded
+      note = image ? `［客户端附件：营养标签照片，labelScanId: ${id}］` : `［客户端附件：营养标签照片，labelScanId: ${id}；照片已无法读取］`
+    } else {
+      const lines = loaded.map(({ id, image }, index) => `${index + 1}. labelScanId: ${id}${image ? '' : '（照片已无法读取）'}`)
+      note = [
+        `［客户端附件：${loaded.length} 张营养标签照片，图片按下面的顺序附上：`,
+        ...lines,
+        '这是批量录入：每张通常是一个不同的食品。一天同时只能有一张确认卡，所以一次只提一个食品，从第 1 张开始；提案时用 afterConfirm 写明接下来要处理的那几张（列出它们的 labelScanId），用户确认后会接着让你继续。',
+        '某张读不清或不是营养标签，说明后跳过；几张拍的是同一个食品（如正面和营养成分表）时合成一个食品，labelScanId 用营养成分表那张。用户取消了某张卡片，就停下来问要不要继续剩下的。］',
+      ].join('\n')
+    }
     const body = text ? `${text}\n\n${note}` : note
-    return image ? { type: 'user', text: body, images: [image] } : { type: 'user', text: body }
+    return images.length ? { type: 'user', text: body, images } : { type: 'user', text: body }
   }
 
   private labelImage(id: string, config: AgentConfig): LLMImage | null {
@@ -291,7 +306,7 @@ export class Orchestrator {
     kind: Turn['kind']
     config: AgentConfig
     inputText: string
-    labelScanId: string | null
+    labelScanIds: string[]
     reply: string
     reasoning: string
     steps: Step[]
@@ -305,8 +320,8 @@ export class Orchestrator {
     this.deps.services.context.database
       .prepare(
         `INSERT INTO chat_traces (request_id, session_date, kind, config_version, system_prompt_version, model, input_text, label_scan_id, reply, reasoning,
-           steps, pending_id, outcome, error_code, rounds, tokens_in, tokens_out, tokens_cached, hit_max_rounds, latency_ms, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           steps, pending_id, outcome, error_code, rounds, tokens_in, tokens_out, tokens_cached, hit_max_rounds, latency_ms, created_at, label_scan_ids)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         trace.requestId,
@@ -316,7 +331,7 @@ export class Orchestrator {
         trace.config.prompts.system.version,
         trace.config.llm.modelId,
         trace.inputText,
-        trace.labelScanId,
+        trace.labelScanIds[0] ?? null,
         trace.reply || null,
         trace.reasoning || null,
         JSON.stringify(trace.steps),
@@ -330,6 +345,7 @@ export class Orchestrator {
         usage.hitMaxRounds ? 1 : 0,
         trace.latencyMs,
         this.deps.services.context.now().toISOString(),
+        trace.labelScanIds.length ? JSON.stringify(trace.labelScanIds) : null,
       )
   }
 
