@@ -288,8 +288,7 @@ describe('对话接口', () => {
 
   it('确认带下一步的卡片后接续一次；再接续返回 409', async () => {
     const { call } = await withAgent([
-      [{ type: 'functionCall', call: { callId: 'c1', name: 'proposeRecordChange', arguments: JSON.stringify(proposal) } }, completed],
-      [{ type: 'textDelta', delta: '确认后我再记牛奶。' }, completed],
+      [{ type: 'textDelta', delta: '确认后我再记牛奶。' }, { type: 'functionCall', call: { callId: 'c1', name: 'proposeRecordChange', arguments: JSON.stringify(proposal) } }, completed],
       [{ type: 'textDelta', delta: '接着记牛奶。' }, completed],
     ])
     const first = await events(await call(`/v1/days/${DAY}/chat`, 'POST', { text: '中午吃了外卖，还喝了牛奶' }))

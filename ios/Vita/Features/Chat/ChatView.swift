@@ -329,8 +329,10 @@ struct ChatView: View {
             CameraPicker { image in model.attach(image) }
                 .ignoresSafeArea()
         }
-        .task { await model.reload() }
-        .onChange(of: scenePhase) { if scenePhase == .active { Task { await model.reload() } } }
+        // 不做下拉刷新（最新消息在底部，滑到顶再刷新不顺手）：每次切到 Chat、回到前台时自动刷新。
+        // TabView 里切回这一页会再触发 .task。正在回复时不刷，免得打断这一轮。
+        .task { if !model.isSending { await model.reload() } }
+        .onChange(of: scenePhase) { if scenePhase == .active, !model.isSending { Task { await model.reload() } } }
     }
 
     // MARK: - 消息列表
@@ -369,8 +371,6 @@ struct ChatView: View {
                 .padding(.top, 8)
             }
             .scrollDismissesKeyboard(.interactively)
-            // 下拉刷新：重新取这天的消息与待确认卡片。正在回复时不刷，免得打断这一轮。
-            .refreshable { if !model.isSending { await model.reload() } }
             // 对话不长、滚不动时也能收起键盘：点一下消息区域。
             .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             .onChange(of: model.entries.count) { scrollToBottom(proxy) }

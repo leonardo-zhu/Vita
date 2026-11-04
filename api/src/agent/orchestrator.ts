@@ -142,6 +142,8 @@ export class Orchestrator {
           break
         }
 
+        let roundPending = false
+        let roundFailed = false
         for (const call of calls) {
           const index = steps.length
           emit({ type: 'step', index, tool: call.name, status: 'running' })
@@ -150,10 +152,17 @@ export class Orchestrator {
           emit({ type: 'step', index, tool: call.name, status: outcome.resultCode === 'ok' ? 'done' : 'failed' })
           input.push({ type: 'functionCall', call }, { type: 'functionOutput', callId: call.callId, output: outcome.output })
           // afterConfirm 已随确认卡保存，确认后由 /continue 接续。
-          if (outcome.pendingId) pendingId = outcome.pendingId
+          if (outcome.pendingId) {
+            pendingId = outcome.pendingId
+            roundPending = true
+          }
+          if (outcome.resultCode !== 'ok') roundFailed = true
           if (outcome.requestedDate) requestedDate = outcome.requestedDate
           goalChanged ||= outcome.goalChanged
         }
+        // 卡片生成成功就结束这一轮：再请求一次只是为了写一句“请确认卡片”，却要多等十几秒（每轮首字 10–15 秒）。
+        // 卡片前的说明已经在这一轮的文字里；没有文字时用默认的一句。确认后的下一步走 afterConfirm。
+        if (roundPending && !roundFailed) break
         if (round === MAX_TOOL_ROUNDS - 1) {
           usage.hitMaxRounds = true
           const note = '这次处理步骤太多，我先停在这里。请换个说法再试一次。'

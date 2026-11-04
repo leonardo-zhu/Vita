@@ -75,14 +75,14 @@ const eggProposal = {
 }
 
 describe('工具循环与确认门', () => {
-  it('查参考库 → 提出确认卡 → 回复；提案不写正式数据，确认后才写', async () => {
+  it('查参考库 → 提出确认卡 → 卡片生成即结束，不再多请求一轮；提案不写正式数据，确认后才写', async () => {
     const { services, client, events, send } = make([
       [{ type: 'reasoning', delta: '先查参考库' }, text('我查一下。'), call('c1', 'searchReferenceFoods', { query: '水煮蛋' }), done],
-      [call('c2', 'proposeRecordChange', eggProposal), done],
-      [text('请确认这条午餐。'), done],
+      [text('请确认这条午餐。'), call('c2', 'proposeRecordChange', eggProposal), done],
     ])
     const result = await send('中午吃了 2 个水煮蛋，称了一共 108g')
     expect(result.pendingId).not.toBeNull()
+    expect(client.requests).toHaveLength(2)
     expect(result.reply).toMatchObject({ role: 'assistant', text: '我查一下。\n\n请确认这条午餐。', cardRef: { type: 'pending', id: result.pendingId } })
     // 推给客户端的文字拼起来与保存的回复一致。
     expect(events.filter((e) => e.type === 'text').map((e) => (e as { delta: string }).delta).join('')).toBe(result.reply.text)
@@ -172,12 +172,14 @@ describe('上下文', () => {
   })
 
   it('历史里附带确认卡的回复加上卡片结局的注记', async () => {
-    const { services, client, send } = make([[call('c1', 'proposeRecordChange', eggProposal), done], [text('请确认卡片。'), done], [text('好'), done]])
+    const { services, client, send } = make([[call('c1', 'proposeRecordChange', eggProposal), done], [text('好'), done]])
     const first = await send('中午两个水煮蛋')
+    // 卡片前没有文字时用默认的一句。
+    expect(first.reply.text).toBe('请确认下面的卡片。')
     services.pending.confirm(first.pendingId!, ORIGIN)
     await send('谢谢')
-    expect(client.requests[2].input[1]).toEqual({ type: 'assistant', text: '请确认卡片。' })
-    expect(client.requests[2].input[2]).toEqual({ type: 'system', text: '［系统：上一条助手回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］' })
+    expect(client.requests[1].input[1]).toEqual({ type: 'assistant', text: '请确认下面的卡片。' })
+    expect(client.requests[1].input[2]).toEqual({ type: 'system', text: '［系统：上一条助手回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］' })
   })
 
   it('个人食品库整库进系统指令，搜索工具也返回整库', async () => {
@@ -319,8 +321,7 @@ describe('目标与食品库工具', () => {
 describe('确认后接续', () => {
   it('确认带下一步的卡片后接着跑一轮，不保存用户消息；只能接续一次', async () => {
     const { services, client, send } = make([
-      [call('c1', 'proposeRecordChange', { ...eggProposal, afterConfirm: '再记一杯牛奶' }), done],
-      [text('先确认这条午餐，确认后我再记牛奶。'), done],
+      [text('先确认这条午餐，确认后我再记牛奶。'), call('c1', 'proposeRecordChange', { ...eggProposal, afterConfirm: '再记一杯牛奶' }), done],
       [text('接着记牛奶。'), done],
     ])
     const first = await send('中午两个水煮蛋 108g，还喝了一杯牛奶')
@@ -335,7 +336,7 @@ describe('确认后接续', () => {
     const next = await send({ kind: 'continuation', pendingId: first.pendingId!, step: claimed.step })
     expect(next.reply.text).toBe('接着记牛奶。')
     // 接续轮把"已确认 + 下一步"作为系统消息放在最后，历史里的卡片注记也已变成已确认。
-    const input = client.requests[2].input
+    const input = client.requests[1].input
     expect(input.at(-1)).toMatchObject({ type: 'system', text: expect.stringContaining('再记一杯牛奶') })
     expect(input.some((item) => item.type === 'system' && item.text.includes('用户已确认，已保存'))).toBe(true)
     expect(services.chat.messages(DAY).map((m) => m.role)).toEqual(['user', 'assistant', 'assistant'])
