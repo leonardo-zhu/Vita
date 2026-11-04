@@ -448,6 +448,16 @@ struct ChatView: View {
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        // 输入框与底部标签栏之间、标签栏两侧会透出滚动的消息，看起来像一条缝：从上往下渐变成页面底色，把它们盖住。
+        .background(alignment: .bottom) {
+            LinearGradient(
+                stops: [.init(color: VitaTheme.backgroundBottom.opacity(0), location: 0), .init(color: VitaTheme.backgroundBottom, location: 0.35)],
+                startPoint: .top, endPoint: .bottom
+            )
+            .padding(.top, -24)
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
+        }
         .animation(.smooth, value: model.pending?.id)
     }
 
@@ -576,7 +586,11 @@ struct ChatView: View {
                         let date = model.sessionDate
                         return Calendar.current.date(from: DateComponents(year: date.year, month: date.month, day: date.day)) ?? Date()
                     },
-                    set: { model.switchTo(LocalDate(date: $0, timeZone: .current)) }
+                    // 选中一天就关掉日历：选日期就是要去那一天，不用再点“完成”。
+                    set: {
+                        model.switchTo(LocalDate(date: $0, timeZone: .current))
+                        isPickingDate = false
+                    }
                 ),
                 in: ...Date(),
                 displayedComponents: .date

@@ -232,7 +232,10 @@ struct DataView: View {
                 "日期",
                 selection: Binding(
                     get: { Calendar.current.date(from: DateComponents(year: model.date.year, month: model.date.month, day: model.date.day)) ?? Date() },
-                    set: { model.date = LocalDate(date: $0, timeZone: .current) }
+                    set: {
+                        model.date = LocalDate(date: $0, timeZone: .current)
+                        isPickingDate = false
+                    }
                 ),
                 in: ...Date(),
                 displayedComponents: .date
