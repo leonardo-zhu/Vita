@@ -364,6 +364,9 @@ struct ChatView: View {
             // 对话不长、滚不动时也能收起键盘：点一下消息区域。
             .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             .onChange(of: model.entries.count) { scrollToBottom(proxy) }
+            // 发出后先显示自己的消息并滚到底；键盘收起会改变布局，收完再滚一次，免得停在半截。
+            .onChange(of: model.outgoing) { scrollToBottom(proxy) }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in scrollToBottom(proxy) }
             .onChange(of: model.streamingText) { scrollToBottom(proxy, animated: false) }
             // 思考摘要与步骤清单会让生成中的气泡变高，同样要跟到底部。
             .onChange(of: model.thinking) { scrollToBottom(proxy, animated: false) }
