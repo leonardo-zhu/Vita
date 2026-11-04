@@ -7,7 +7,6 @@ import UIKit
 @Observable
 final class ChatModel {
     private let services: AppServices
-    private let orchestrator: ChatOrchestrator
     private let now: () -> Date
     private let timeZone: () -> TimeZone
 
@@ -23,21 +22,21 @@ final class ChatModel {
     private(set) var thinking = ""
     /// 这一轮调用过的工具；不保存。
     private(set) var steps: [ChatProgress.Step] = []
-    /// 发送中的用户消息：一轮成功后才和回复一起保存，先在界面上显示。
+    /// 发送中的用户消息：一轮成功后服务端才和回复一起保存，先在界面上显示。
     private(set) var outgoing: String?
     /// 发送中消息附带的标签照片，只用于显示。
     private(set) var outgoingImage: UIImage?
-    /// 待发送的营养标签照片（已压缩的 JPEG）；发送时存到本机，再随消息发给模型。
+    /// 待发送的营养标签照片（已压缩的 JPEG）；发送时先上传到 Vita 服务，再随消息发出。
     private(set) var attachment: Data?
-    /// 缩略图缓存：在视图取值时写入，不参与界面刷新。
-    @ObservationIgnored private var thumbnails: [UUID: UIImage] = [:]
+    /// 消息里标签照片的缩略图，读到一张显示一张。
+    private(set) var thumbnails: [UUID: UIImage] = [:]
+    /// 历史消息里卡片的结局。
+    private(set) var cardStatuses: [UUID: PendingStatus] = [:]
     private(set) var pending: PendingSnapshot?
     /// 模型提到了别的日期：只提示切换，不自动跳转（TDD §5.2）。
     private(set) var requestedDate: LocalDate?
-    private(set) var hasToken = false
+    private(set) var isConfirming = false
     private var sendTask: Task<Void, Never>?
-    /// 确认卡确认后要接着做的事，按卡片 ID 记在内存里；App 重启后丢失，用户可以再说一遍。
-    @ObservationIgnored private var afterConfirm: [UUID: String] = [:]
     var draft = ""
     var message: String?
 
@@ -45,13 +44,12 @@ final class ChatModel {
         self.services = services
         self.now = now
         self.timeZone = timeZone
-        orchestrator = ChatOrchestrator(services: services, client: services.container.llmClient, now: now, timeZone: timeZone)
         sessionDate = LocalDate(date: now(), timeZone: timeZone())
     }
 
     var today: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
     var isSending: Bool { streamingText != nil }
-    var canSend: Bool { !isSending && (attachment != nil || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
+    var canSend: Bool { !isSending && !isConfirming && (attachment != nil || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
     var attachmentImage: UIImage? { attachment.flatMap(UIImage.init(data:)) }
 
     /// 选好照片后先放在输入框上方，用户可以再补一句（如品名、喝了多少）再发。
@@ -69,7 +67,7 @@ final class ChatModel {
         return UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
     }
 
-    /// 长边压到 2000 像素以内存到本机，作为食品版本的来源依据；发给模型时再按远程配置缩放。
+    /// 长边压到 2000 像素以内再上传；服务端存这一份作为食品版本的来源依据，发给模型时不再缩放。
     private static func compressed(_ image: UIImage) -> Data? {
         let longest = max(image.size.width, image.size.height)
         let scale = min(1, 2000 / max(longest, 1))
@@ -80,27 +78,48 @@ final class ChatModel {
         return resized.jpegData(compressionQuality: 0.85)
     }
 
-    /// 消息里标签照片的缩略图，按附件记录读取本机原图。
     func labelThumbnail(_ ref: ChatCardRef) -> UIImage? {
         guard case .label(let id) = ref else { return nil }
-        if let cached = thumbnails[id] { return cached }
-        guard let reference = try? services.labels.imageReference(forScan: id),
-              let data = try? services.labels.imageData(reference),
-              let original = UIImage(data: data) else { return nil }
-        let image = Self.scaled(original, maxSide: 440)
-        thumbnails[id] = image
-        return image
+        return thumbnails[id]
     }
 
-    func reload() {
+    func cardStatus(_ ref: ChatCardRef) -> PendingStatus? {
+        guard case .pending(let id) = ref else { return nil }
+        return cardStatuses[id]
+    }
+
+    func reload() async {
         if followsToday { sessionDate = today }
-        hasToken = ((try? services.container.secrets.read(.conduitToken)) ?? nil)?.isEmpty == false
+        let date = sessionDate
         do {
-            try services.pending.expireDue()
-            pending = try services.pending.active(on: sessionDate)
-            entries = try services.chatHistory.messages(on: sessionDate)
+            async let pending = services.pending.active(on: date)
+            async let entries = services.chat.messages(on: date)
+            let (loadedPending, loadedEntries) = try await (pending, entries)
+            // 切换日期之后才回来的旧结果不用。
+            guard date == sessionDate else { return }
+            self.pending = loadedPending
+            self.entries = loadedEntries
+        } catch let error as APIError {
+            message = "无法读取对话：\(error.userMessage)"
         } catch {
             message = "无法读取对话：\(error)"
+        }
+        await loadAttachments()
+    }
+
+    /// 历史里的卡片结局与标签照片，逐个读取，读到就显示。
+    private func loadAttachments() async {
+        for entry in entries {
+            switch entry.cardRef {
+            case .pending(let id) where cardStatuses[id] == nil || cardStatuses[id] == .readyForConfirmation:
+                if let snapshot = try? await services.pending.pending(id) { cardStatuses[id] = snapshot.status }
+            case .label(let id) where thumbnails[id] == nil:
+                if let data = await services.labels.image(id), let original = UIImage(data: data) {
+                    thumbnails[id] = Self.scaled(original, maxSide: 440)
+                }
+            default:
+                break
+            }
         }
     }
 
@@ -109,7 +128,9 @@ final class ChatModel {
         sessionDate = min(date, today)
         followsToday = sessionDate == today
         requestedDate = nil
-        reload()
+        entries = []
+        pending = nil
+        Task { await reload() }
     }
 
     func send() {
@@ -122,17 +143,17 @@ final class ChatModel {
         outgoing = text
         outgoingImage = image.flatMap(UIImage.init(data:))
         let date = sessionDate
-        run { [services, orchestrator] onProgress in
-            // attachNutritionLabel：先把照片存到本机，再随消息发给模型读（ADR-016）。
+        run { [services] onProgress in
+            // attachNutritionLabel：先把照片传到 Vita 服务，再随消息发出（ADR-016）。
             var scanID: UUID?
             if let image {
                 do {
-                    scanID = try services.labels.scan(image).scanID
+                    scanID = try await services.labels.upload(image)
                 } catch {
-                    throw LabelAttachmentError.saveFailed
+                    throw LabelAttachmentError.uploadFailed
                 }
             }
-            return try await orchestrator.send(text, on: date, labelScan: scanID, onProgress: onProgress)
+            return try await services.chat.send(text, on: date, labelScan: scanID, onProgress: onProgress)
         } onFailure: { [weak self] in
             // 这一轮没有保存，把原文和照片放回输入框，方便重发。
             guard let self else { return }
@@ -157,12 +178,13 @@ final class ChatModel {
                     self?.steps = progress.steps
                 }
                 requestedDate = result.requestedDate
-                if let id = result.pendingID, let step = result.afterConfirm { afterConfirm[id] = step }
             } catch {
                 onFailure()
                 if error is LabelAttachmentError {
-                    message = "没能保存这张照片，请再试一次。"
-                } else if let error = error as? LLMError {
+                    message = "没能上传这张照片，请再试一次。"
+                } else if let error = error as? ChatTurnError {
+                    message = error.message
+                } else if let error = error as? APIError {
                     message = error.userMessage
                 } else if !(error is CancellationError) {
                     message = "发送失败：\(error)"
@@ -174,60 +196,63 @@ final class ChatModel {
             activity = nil
             thinking = ""
             steps = []
-            reload()
-        }
-    }
-
-    /// 卡片确认后，模型在提案里留了下一步（如先存食品库、再记这一份），自动接着跑一轮。
-    private func continueAfterConfirm(_ id: UUID) {
-        guard let step = afterConfirm.removeValue(forKey: id), !isSending else { return }
-        let date = sessionDate
-        run { [orchestrator] onProgress in
-            try await orchestrator.continueAfterConfirm(id, step: step, on: date, onProgress: onProgress)
+            await reload()
         }
     }
 
     func stop() {
+        services.chat.stop()
         sendTask?.cancel()
     }
 
     func confirm() {
-        guard let pending else { return }
-        do {
-            try services.pending.confirm(pending.id)
-            // 正式写入后把这次变化同步到 Apple 健康；失败不影响本地记录。
-            Task { await services.healthSync.run() }
-            reload()
-            continueAfterConfirm(pending.id)
-            return
-        } catch PendingServiceError.revisionConflict {
-            message = "当天数据在提案后有变化，这张卡片已作废，请重新提出。"
-        } catch PendingServiceError.expired {
-            message = "这张卡片已过期，没有写入任何数据。"
-        } catch {
-            message = "确认失败：\(error)"
+        guard let pending, !isConfirming else { return }
+        isConfirming = true
+        Task {
+            defer { isConfirming = false }
+            do {
+                try await services.pending.confirm(pending.id)
+                cardStatuses[pending.id] = .confirmed
+                // 正式写入后把这次变化同步到 Apple 健康；失败不影响服务端的记录。
+                Task { await services.healthSync.run() }
+                // 模型在提案里留了下一步（如先存食品库、再记这一份）：服务端接着跑一轮。
+                if pending.afterConfirm != nil, !isSending {
+                    self.pending = nil
+                    run { [services] onProgress in try await services.chat.continueAfterConfirm(pending.id, onProgress: onProgress) }
+                    return
+                }
+            } catch let error as APIError {
+                switch error.code {
+                case "revisionConflict": message = "当天数据在提案后有变化，这张卡片已作废，请重新提出。"
+                case "expired": message = "这张卡片已过期，没有写入任何数据。"
+                default: message = "确认失败：\(error.userMessage)"
+                }
+            } catch {
+                message = "确认失败：\(error)"
+            }
+            await reload()
         }
-        reload()
     }
 
     func cancel() {
-        guard let pending else { return }
-        afterConfirm[pending.id] = nil
-        try? services.pending.cancel(pending.id)
-        reload()
+        guard let pending, !isConfirming else { return }
+        isConfirming = true
+        Task {
+            defer { isConfirming = false }
+            do {
+                try await services.pending.cancel(pending.id)
+                cardStatuses[pending.id] = .cancelled
+            } catch let error as APIError {
+                message = error.userMessage
+            } catch {}
+            await reload()
+        }
     }
-
-    /// 历史消息里卡片的结局：已确认、已取消或已过期。仍待确认的卡片在底部单独显示。
-    func cardStatus(_ ref: ChatCardRef) -> PendingStatus? {
-        guard case .pending(let id) = ref, let snapshot = try? services.pending.pending(id) else { return nil }
-        return snapshot.status
-    }
-
 }
 
-/// 标签照片没能存到本机。
+/// 标签照片没能传到 Vita 服务。
 enum LabelAttachmentError: Error {
-    case saveFailed
+    case uploadFailed
 }
 
 /// Chat 页（PRD §3.1）：按日期组织的对话。模型只能提出确认卡，记录在用户点确认后才保存。
@@ -273,7 +298,7 @@ struct ChatView: View {
                     Text(model.message ?? "")
                 }
                 .sheet(isPresented: $isPickingDate) { datePicker }
-                .sheet(isPresented: $isShowingSettings, onDismiss: model.reload) {
+                .sheet(isPresented: $isShowingSettings, onDismiss: { Task { await model.reload() } }) {
                     SettingsView(services: services, onReplayOnboarding: { onboardingCompleted = false }, onDataReset: onDataReset)
                 }
         }
@@ -292,8 +317,8 @@ struct ChatView: View {
             CameraPicker { image in model.attach(image) }
                 .ignoresSafeArea()
         }
-        .onAppear { model.reload() }
-        .onChange(of: scenePhase) { if scenePhase == .active { model.reload() } }
+        .task { await model.reload() }
+        .onChange(of: scenePhase) { if scenePhase == .active { Task { await model.reload() } } }
     }
 
     // MARK: - 消息列表
@@ -347,47 +372,35 @@ struct ChatView: View {
         }
     }
 
-    @ViewBuilder
     private var emptyState: some View {
-        if !model.hasToken {
-            InvitationCard(
-                symbol: "key.fill",
-                tint: VitaTheme.protein,
-                title: "连接模型服务",
-                message: "填入 Conduit 访问令牌后，就可以用对话记录饮食。",
-                actionTitle: "去设置",
-                action: { isShowingSettings = true }
-            )
-        } else {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(model.sessionDate == model.today ? "今天吃了什么？" : "补记 \(DisplayFormat.date(model.sessionDate))")
-                        .font(.title2.weight(.bold))
-                    Text("用平常的话说就行，Vita 会算好营养，你确认后才保存。")
-                        .font(VitaType.body)
-                        .foregroundStyle(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Self.suggestions, id: \.text) { suggestion in
-                        Button {
-                            model.draft = suggestion.text
-                            inputFocused = true
-                        } label: {
-                            Label(suggestion.text, systemImage: suggestion.symbol)
-                                .font(VitaType.body)
-                                .foregroundStyle(.primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .background(VitaTheme.card, in: .capsule)
-                                .overlay { Capsule().strokeBorder(Color.primary.opacity(0.06)) }
-                        }
-                        .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.sessionDate == model.today ? "今天吃了什么？" : "补记 \(DisplayFormat.date(model.sessionDate))")
+                    .font(.title2.weight(.bold))
+                Text("用平常的话说就行，Vita 会算好营养，你确认后才保存。")
+                    .font(VitaType.body)
+                    .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Self.suggestions, id: \.text) { suggestion in
+                    Button {
+                        model.draft = suggestion.text
+                        inputFocused = true
+                    } label: {
+                        Label(suggestion.text, systemImage: suggestion.symbol)
+                            .font(VitaType.body)
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(VitaTheme.card, in: .capsule)
+                            .overlay { Capsule().strokeBorder(Color.primary.opacity(0.06)) }
                     }
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(.top, 24)
-            .padding(.horizontal, 4)
         }
+        .padding(.top, 24)
+        .padding(.horizontal, 4)
     }
 
     /// 空状态里的示例，点一下填进输入框（不直接发送）。
@@ -506,7 +519,7 @@ struct ChatView: View {
                 .clipShape(.rect(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 2) {
                 Text("营养标签").font(VitaType.secondary.weight(.semibold))
-                Text("随消息发给模型读取，原图也存在本机。")
+                Text("随消息发给模型读取，原图存在你的 Vita 服务上。")
                     .font(VitaType.meta)
                     .foregroundStyle(.secondary)
             }

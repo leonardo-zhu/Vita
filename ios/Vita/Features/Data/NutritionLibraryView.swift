@@ -76,7 +76,7 @@ struct NutritionLibraryView: View {
         }
         .background { VitaTheme.background }
         .navigationTitle("营养库")
-        .onAppear(perform: reload)
+        .task { await reload() }
         .overlay {
             if let failure {
                 ContentUnavailableView("无法读取营养库", systemImage: "exclamationmark.triangle", description: Text(failure))
@@ -84,10 +84,12 @@ struct NutritionLibraryView: View {
         }
     }
 
-    private func reload() {
+    private func reload() async {
         do {
-            products = try services.foods.products()
+            products = try await services.foods.products()
             failure = nil
+        } catch let error as APIError {
+            failure = error.userMessage
         } catch {
             failure = String(describing: error)
         }
@@ -178,14 +180,8 @@ private struct FoodProductDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        if let reference = version.labelImageReference,
-                           let data = try? labels.imageData(reference),
-                           let image = UIImage(data: data) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxHeight: 180)
-                                .clipShape(.rect(cornerRadius: 12))
+                        if let reference = version.labelImageReference {
+                            LabelImage(reference: reference, labels: labels)
                         }
                         Text("每 " + DisplayFormat.quantity(version.basis.quantity)).font(.subheadline).foregroundStyle(.secondary)
                         NutrientGrid(values: version.basis.nutrients)
@@ -202,5 +198,27 @@ private struct FoodProductDetailView: View {
         .background { VitaTheme.background }
         .navigationTitle(product.name)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 食品版本的标签照片，从 Vita 服务读取。
+private struct LabelImage: View {
+    let reference: String
+    let labels: LabelScanService
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 180)
+                    .clipShape(.rect(cornerRadius: 12))
+            }
+        }
+        .task(id: reference) {
+            if let data = await labels.imageData(reference) { image = UIImage(data: data) }
+        }
     }
 }

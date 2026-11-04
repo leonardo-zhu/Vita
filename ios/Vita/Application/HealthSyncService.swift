@@ -1,81 +1,25 @@
 import Foundation
-import SwiftData
+import OSLog
 
-/// Record 正式写入时在同一事务里调用，登记需要同步的变化。
-@MainActor
-protocol RecordChangeObserver: AnyObject {
-    func recordChanged(_ recordID: UUID, deleted: Bool) throws
-}
-
-/// 把已确认的饮食记录同步到 Apple 健康（ADR-009、TDD §6.3）。
+/// 把服务端的饮食记录与称重同步到 Apple 健康（架构设计 §9）。服务端是准的：手机按游标拉取变更流，
+/// 每个变了的对象按最新状态在健康里删旧写新（带同步标识），没变的不用管。
 ///
-/// 每条记录在“健康”里只对应一组 Sample。任何一次同步都先删掉映射里的旧 Sample，再按提交时的快照写新 Sample；
-/// 所以同一条记录积压了多次修改时，只需执行最新的一次，结果就只剩最新版。
-/// 删除失败不清映射；没有写入权限时本地记录照常，同步状态显示为待处理。
+/// 某个对象写失败时游标照样往前走，失败的那个记在本机，下次同步先补它（按最新状态重拉一遍）。
+/// 没有写入权限时本地照常，状态显示为待处理；授权后重新同步就能补上。
 @MainActor
-final class HealthSyncService: RecordChangeObserver {
-    static let metadataSchemaVersion = "1"
+final class HealthSyncService {
+    private static let log = Logger(subsystem: "com.leonardo.vita", category: "health")
+    static let stateName = "health-sync"
 
-    private let context: ModelContext
-    private let store: any HealthDataStore
-    private let now: () -> Date
-    private var isRunning = false
-
-    init(context: ModelContext, store: any HealthDataStore, now: @escaping () -> Date = Date.init) {
-        self.context = context
-        self.store = store
-        self.now = now
+    /// 存在本机的同步进度。
+    struct State: Codable, Equatable, Sendable {
+        /// 已经处理到变更流的哪个位置。
+        var cursor = 0
+        /// 写入成功、现在在健康里的对象（`record:<id>` / `weighing:<id>`）。
+        var written: Set<String> = []
+        /// 还没写成功的对象和原因。
+        var failed: [String: SyncState] = [:]
     }
-
-    // MARK: - 登记（与 Record 同一事务，不单独保存）
-
-    func recordChanged(_ recordID: UUID, deleted: Bool) throws {
-        let samples: [DietarySample]?
-        if deleted {
-            samples = nil
-        } else {
-            guard let record = try context.record(id: recordID) else { return }
-            samples = try Self.samples(for: record)
-        }
-        let last = try context.fetch(FetchDescriptor<HealthSyncOperation>(sortBy: [SortDescriptor(\.sequence, order: .reverse)])).first
-        context.insert(HealthSyncOperation(
-            recordID: recordID, kind: deleted ? .delete : .write,
-            sequence: (last?.sequence ?? 0) + 1, samples: samples, now: now()
-        ))
-    }
-
-    /// 每项营养一条 Sample，值为计入汇总的 Item 之和；为 0 的不写。时间按 TDD §6.4。
-    static func samples(for record: ConsumptionRecord) throws -> [DietarySample] {
-        let eventTime = try record.eventTime()
-        var totals = NutrientValues.zero
-        for item in record.items where item.includeInSummary {
-            totals = totals + (try item.snapshot().values)
-        }
-        var metadata = [
-            "vita.recordID": record.id.uuidString,
-            "vita.recordRevision": String(record.revision),
-            "vita.timePrecision": eventTime.precision.rawValue,
-            "vita.schemaVersion": metadataSchemaVersion,
-        ]
-        switch eventTime.precision {
-        case .mealPeriod:
-            metadata["vita.timeWasRepresentative"] = "true"
-            metadata["vita.mealPeriod"] = eventTime.mealPeriod?.rawValue
-        case .dateOnly:
-            metadata["vita.timeWasRepresentative"] = "true"
-        case .defaultedEntryTime:
-            metadata["vita.timeDefaultedAtEntry"] = "true"
-        case .exact, .approximate:
-            break
-        }
-        return Nutrient.allCases.compactMap { nutrient in
-            let value = nutrient.value(in: totals)
-            guard value > 0 else { return nil }
-            return DietarySample(nutrient: nutrient, value: value, date: eventTime.representativeTimestamp, metadata: metadata)
-        }
-    }
-
-    // MARK: - 执行
 
     struct RunResult: Equatable {
         var synced = 0
@@ -83,92 +27,117 @@ final class HealthSyncService: RecordChangeObserver {
         var waitingForPermission = 0
     }
 
-    /// 启动、回到前台、确认记录后与用户点“重试”时调用。同一时间只跑一次。
+    private let api: VitaAPIClient
+    private let store: any HealthDataStore
+    private let local: any LocalStateStore
+    private var isRunning = false
+    private(set) var state: State
+
+    init(api: VitaAPIClient, store: any HealthDataStore, local: any LocalStateStore) {
+        self.api = api
+        self.store = store
+        self.local = local
+        state = local.load(Self.stateName, as: State.self) ?? State()
+    }
+
+    static func key(_ entity: HealthChangeDTO.Entity, _ id: UUID) -> String { "\(entity.rawValue):\(id.apiString)" }
+
+    /// 启动、回到前台、确认卡片之后、称重之后与用户点“重试”时调用。同一时间只跑一次。
     @discardableResult
     func run() async -> RunResult {
         guard !isRunning else { return RunResult() }
         isRunning = true
         defer { isRunning = false }
         var result = RunResult()
-
-        let operations = (try? latestOperations()) ?? []
-        guard !operations.isEmpty else { return result }
-
-        let authorization = store.isAvailable ? store.writeAuthorization() : .denied
-        guard authorization == .authorized else {
-            // 从未授权时保持待同步，不打扰；被拒绝时标为需要用户处理（TDD §6.3）。
-            for operation in operations where authorization == .denied {
-                mark(operation, .requiresUserResolution, code: "notAuthorized")
-            }
-            result.waitingForPermission = operations.count
-            try? context.save()
+        guard store.isAvailable else { return result }
+        // 两种写入都没允许时什么也写不进去，先不拉，等授权后再同步。
+        guard store.writeAuthorization() == .authorized || store.bodyWriteAuthorization() == .authorized else {
+            result.waitingForPermission = state.failed.count
             return result
         }
 
-        for operation in operations {
-            do {
-                try await execute(operation)
-                result.synced += 1
-            } catch HealthStoreError.notAuthorized {
-                mark(operation, .requiresUserResolution, code: "notAuthorized")
-                result.waitingForPermission += 1
-            } catch {
-                mark(operation, .failedRetryable, code: "healthKit.failed")
-                result.failed += 1
+        // 有失败的对象时从头拉一遍：变更流只按游标给，每个对象只给最新状态，失败的那些就在里面；
+        // 游标之前、已经写好的跳过。没有失败时只拉游标之后的。
+        do {
+            var after = state.failed.isEmpty ? state.cursor : 0
+            var hasMore = true
+            while hasMore {
+                let page: HealthChangesResponseDTO = try await api.get("/v1/health-sync/changes", query: [URLQueryItem(name: "after", value: String(after))])
+                for change in page.changes {
+                    // 重拉时只处理之前失败的和游标之后的新变更，已经写好的不重写。
+                    let key = Self.key(change.entity, change.id)
+                    guard change.seq > state.cursor || state.failed[key] != nil else { continue }
+                    switch await apply(change) {
+                    case .synced: result.synced += 1
+                    case .waitingForPermission: result.waitingForPermission += 1
+                    case .failed: result.failed += 1
+                    }
+                }
+                state.cursor = max(state.cursor, page.cursor)
+                after = page.cursor
+                hasMore = page.hasMore
+                save()
             }
-            try? context.save()
+        } catch {
+            Self.log.error("health sync fetch failed: \(String(describing: error), privacy: .public)")
         }
         return result
     }
 
-    /// 每条记录只保留最新一项操作；更早的已被它覆盖，直接移除。
-    private func latestOperations() throws -> [HealthSyncOperation] {
-        let all = try context.fetch(FetchDescriptor<HealthSyncOperation>(sortBy: [SortDescriptor(\.sequence)]))
-        var latest: [UUID: HealthSyncOperation] = [:]
-        for operation in all {
-            if let previous = latest[operation.recordID] { context.delete(previous) }
-            latest[operation.recordID] = operation
-        }
-        try context.save()
-        return latest.values.sorted { $0.sequence < $1.sequence }
-    }
+    private enum Outcome { case synced, waitingForPermission, failed }
 
-    private func execute(_ operation: HealthSyncOperation) async throws {
-        operation.attempts += 1
-        let recordID = operation.recordID
-        let mapped = try context.fetch(FetchDescriptor<HealthSyncMapping>(predicate: #Predicate { $0.recordID == recordID }))
-        // 先删旧 Sample；成功后才清映射，失败时映射保留以便重试（TDD §6.3）。
-        try await store.delete(mapped.map(\.sampleUUID))
-        mapped.forEach(context.delete)
-        try context.save()
-
-        if operation.kind == .write {
-            let samples = try operation.samples()
-            let ids = try await store.save(samples)
-            for (sample, id) in zip(samples, ids) {
-                context.insert(HealthSyncMapping(recordID: recordID, nutrient: sample.nutrient, sampleUUID: id, now: now()))
+    private func apply(_ change: HealthChangeDTO) async -> Outcome {
+        let key = Self.key(change.entity, change.id)
+        do {
+            switch change.entity {
+            case .record:
+                let samples = change.deleted ? [] : (change.samples ?? []).map {
+                    DietarySample(nutrient: $0.nutrient, value: $0.value, date: $0.date, metadata: $0.metadata)
+                }
+                try await store.replaceDietary(recordID: change.id, with: samples, syncVersion: change.syncVersion)
+                if samples.isEmpty { state.written.remove(key) } else { state.written.insert(key) }
+            case .weighing:
+                let sample = change.deleted ? nil : change.body.map {
+                    BodyMeasurementSample(bodyMassKg: $0.bodyMassKg, bodyFatFraction: $0.bodyFatFraction, leanBodyMassKg: $0.leanBodyMassKg, date: $0.date)
+                }
+                try await store.replaceBody(weighingID: change.id, with: sample, syncVersion: change.syncVersion)
+                if sample == nil { state.written.remove(key) } else { state.written.insert(key) }
             }
+            state.failed[key] = nil
+            return .synced
+        } catch HealthStoreError.notAuthorized {
+            // 从未授权时保持待同步，不打扰；被拒绝时标为需要用户处理（TDD §6.3）。
+            let denied = (change.entity == .record ? store.writeAuthorization() : store.bodyWriteAuthorization()) == .denied
+            state.failed[key] = denied ? .requiresUserResolution : .pending
+            return .waitingForPermission
+        } catch {
+            Self.log.error("health write failed for \(key, privacy: .public): \(String(describing: error), privacy: .public)")
+            state.failed[key] = .failedRetryable
+            return .failed
         }
-        context.insert(AuditEvent(operation: "health.\(operation.kind.rawValue)", targetID: recordID.uuidString, result: .success, createdAt: now()))
-        context.delete(operation)
-        try context.save()
     }
 
-    private func mark(_ operation: HealthSyncOperation, _ state: SyncState, code: String) {
-        operation.state = state
-        operation.lastErrorCode = code
-        operation.updatedAt = now()
-        context.insert(AuditEvent(operation: "health.\(operation.kind.rawValue)", targetID: operation.recordID.uuidString, result: .failure, errorCode: code, createdAt: now()))
+    private func save() {
+        try? local.save(state, as: Self.stateName)
+    }
+
+    /// 迁移完成后从头同步：服务端导入时给每条记录、每次称重都登记了变更。
+    func resetCursor() {
+        state = State()
+        save()
     }
 
     // MARK: - 状态
 
-    /// 记录在“健康”里的同步状态；没有任何需要同步的内容时为空。
-    func state(for recordID: UUID) -> SyncState? {
-        let pending = try? context.fetch(FetchDescriptor<HealthSyncOperation>(predicate: #Predicate { $0.recordID == recordID }))
-        if let operation = pending?.max(by: { $0.sequence < $1.sequence }) { return operation.state }
-        let mapped = (try? context.fetchCount(FetchDescriptor<HealthSyncMapping>(predicate: #Predicate { $0.recordID == recordID }))) ?? 0
-        return mapped > 0 ? .synced : nil
+    /// 记录在“健康”里的同步状态；不需要同步或还不知道时为空。
+    func state(forRecord id: UUID) -> SyncState? {
+        let key = Self.key(.record, id)
+        if let failed = state.failed[key] { return failed }
+        return state.written.contains(key) ? .synced : nil
+    }
+
+    func isInAppleHealth(weighing id: UUID) -> Bool {
+        state.written.contains(Self.key(.weighing, id))
     }
 
     var writeAuthorization: HealthWriteAuthorization {

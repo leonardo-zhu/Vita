@@ -43,10 +43,10 @@ xcodebuild test -project Vita.xcodeproj -scheme Vita -destination 'platform=iOS 
 
 ### 运行
 
-1. 在 Conduit 的应用 Vita 下配好模型别名 `vita-chat`（需支持工具调用）并生成一把密钥。Conduit 地址由 `ios/project.yml` 的 `CONDUIT_BASE_URL` 决定。
-2. 首次打开 App 走完引导后，在 Chat 页左上角“设置”里填写访问令牌（只存本机钥匙串）。
-3. Debug 构建加启动参数 `-VitaSeedSampleData` 可在今天写入样例数据，便于查看 Data 页（不要在真机上用：它会把样例记录同步进 Apple 健康）。
-4. 设置页连点版本号五次可打开调试覆盖（临时换模型别名、超时或系统 prompt）。
+1. App 的数据都在 Vita API（地址由 `ios/project.yml` 的 `VITA_API_BASE_URL` 决定），模型经 API 调 Conduit，手机上没有模型密钥。
+2. 在 Vita Admin 的“设备”页给手机签发设备令牌，首次打开 App 时粘贴进去（只存本机钥匙串）。手机上还有 1.0 的数据时，接着会进入迁移页（架构设计 §13）。
+3. 本地调试：`.claude/launch.json` 里的 `vita-api-local` 起一个本机 API；构建时加 `VITA_API_BASE_URL=http://127.0.0.1:3014`（只有 Debug 构建允许连本机 HTTP），再用服务令牌调 `POST /v1/admin/devices` 签发令牌。不要让模拟器连正式服务：模拟器读到的空健康数据会覆盖服务端存的身体数据。
+4. iOS 27.1 模拟器的 `healthd` 不响应 HealthKit 的同步授权查询，App 会卡在读健康数据处（1.0 同样如此）；在模拟器上调试请用 iOS 18.4 运行时，或用真机。
 
 ### 模拟器提示
 

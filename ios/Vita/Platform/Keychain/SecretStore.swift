@@ -1,9 +1,12 @@
 import Foundation
 import Security
 
-/// 敏感值的键。Conduit 访问令牌只存 Keychain，不进 SwiftData / UserDefaults / 日志（TDD §8）；
-/// 客户端不持有任何上游模型 Key（ADR-013）。
+/// 敏感值的键。设备令牌只存 Keychain，不进 UserDefaults / 日志（架构设计 §8）；
+/// 模型密钥只在服务端，手机上没有（ADR-013）。
 enum SecretKey: String, Sendable {
+    /// Vita API 的设备令牌，在 Admin 的“设备”页签发。
+    case deviceToken = "vita-api.device-token"
+    /// 1.0 的 Conduit 令牌；2.0 不再使用，迁移完成后删掉。
     case conduitToken = "conduit.token"
 }
 

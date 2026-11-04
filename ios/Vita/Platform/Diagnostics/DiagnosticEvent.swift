@@ -51,23 +51,6 @@ struct DiagnosticEvent: Codable, Equatable, Sendable {
     }
 }
 
-extension LLMError {
-    /// 诊断日志里的错误码，不带关联的文字说明。
-    var diagnosticCode: String {
-        switch self {
-        case .missingToken: "llm.missing_token"
-        case .authentication: "llm.authentication"
-        case .quotaExceeded: "llm.quota_exceeded"
-        case .invalidRequest: "llm.invalid_request"
-        case .upstreamUnavailable: "llm.upstream_unavailable"
-        case .upstream: "llm.upstream"
-        case .timeout: "llm.timeout"
-        case .network: "llm.network"
-        case .malformedResponse: "llm.malformed_response"
-        }
-    }
-}
-
 /// 一次上报的批次。
 struct DiagnosticsBatch: Encodable, Sendable {
     var installId: UUID

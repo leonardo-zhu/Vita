@@ -114,22 +114,35 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
         return Self.round(Decimal(seconds / 3600), 1)
     }
 
-    // MARK: - 写入
+    // MARK: - 写入（按 Vita 的同步标识覆盖，架构设计 §9）
 
-    func save(_ samples: [DietarySample]) async throws -> [UUID] {
+    /// 一个对象在健康里的 Sample 都带 `vita:<entity>:<id>:<项>` 的同步标识。写新版前先按标识删掉旧的：
+    /// 某项变成 0 不再写时，旧的那条也要消失。
+    private func deleteSynced(_ identifiers: [String], of types: some Sequence<HKSampleType>) async throws {
+        let predicate = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeySyncIdentifier, allowedValues: identifiers)
+        for type in types {
+            try await store.deleteObjects(of: type, predicate: predicate)
+        }
+    }
+
+    func replaceDietary(recordID: UUID, with samples: [DietarySample], syncVersion: Int) async throws {
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
+        try await deleteSynced(Nutrient.allCases.map { HealthSyncIdentifier.record(recordID, $0) }, of: Self.writeTypes)
+        guard !samples.isEmpty else { return }
         let objects = samples.map { sample -> HKQuantitySample in
             let type = Self.dietaryTypes[sample.nutrient]!
             let unit: HKUnit = sample.nutrient == .energyKcal ? .kilocalorie() : .gram()
+            var metadata: [String: Any] = sample.metadata
+            metadata[HKMetadataKeySyncIdentifier] = HealthSyncIdentifier.record(recordID, sample.nutrient)
+            metadata[HKMetadataKeySyncVersion] = syncVersion
             return HKQuantitySample(
                 type: type,
                 quantity: HKQuantity(unit: unit, doubleValue: NSDecimalNumber(decimal: sample.value).doubleValue),
                 start: sample.date, end: sample.date,
-                metadata: sample.metadata
+                metadata: metadata
             )
         }
         try await store.save(objects)
-        return objects.map(\.uuid)
     }
 
     func delete(_ uuids: [UUID]) async throws {
@@ -154,36 +167,41 @@ final class HealthKitDataStore: HealthDataStore, @unchecked Sendable {
         }
     }
 
-    func saveBodyMeasurement(_ sample: BodyMeasurementSample) async throws -> [UUID] {
+    func replaceBody(weighingID: UUID, with sample: BodyMeasurementSample?, syncVersion: Int) async throws {
         guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
-        let metadata: [String: Any] = [HKMetadataKeyWasUserEntered: false]
+        let kinds = [HealthSyncIdentifier.BodyKind.bodyMass, .bodyFat, .leanMass]
+        try await deleteSynced(kinds.map { HealthSyncIdentifier.weighing(weighingID, $0) }, of: Self.bodyWriteTypes)
+        guard let sample else { return }
+        func metadata(_ kind: HealthSyncIdentifier.BodyKind) -> [String: Any] {
+            [
+                HKMetadataKeyWasUserEntered: false,
+                HKMetadataKeySyncIdentifier: HealthSyncIdentifier.weighing(weighingID, kind),
+                HKMetadataKeySyncVersion: syncVersion,
+            ]
+        }
         var objects = [
             HKQuantitySample(
                 type: HKQuantityType(.bodyMass),
                 quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: NSDecimalNumber(decimal: sample.bodyMassKg).doubleValue),
-                start: sample.date, end: sample.date, metadata: metadata
+                start: sample.date, end: sample.date, metadata: metadata(.bodyMass)
             ),
         ]
         // 体脂率、去脂体重允许单独被拒；被拒的不写。
-        if let fat = sample.bodyFatFraction {
-            if store.authorizationStatus(for: HKQuantityType(.bodyFatPercentage)) == .sharingAuthorized {
-                objects.append(HKQuantitySample(
-                    type: HKQuantityType(.bodyFatPercentage),
-                    quantity: HKQuantity(unit: .percent(), doubleValue: NSDecimalNumber(decimal: fat).doubleValue),
-                    start: sample.date, end: sample.date, metadata: metadata
-                ))
-            }
-            if store.authorizationStatus(for: HKQuantityType(.leanBodyMass)) == .sharingAuthorized {
-                let lean = sample.bodyMassKg * (1 - fat)
-                objects.append(HKQuantitySample(
-                    type: HKQuantityType(.leanBodyMass),
-                    quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: NSDecimalNumber(decimal: lean).doubleValue),
-                    start: sample.date, end: sample.date, metadata: metadata
-                ))
-            }
+        if let fat = sample.bodyFatFraction, store.authorizationStatus(for: HKQuantityType(.bodyFatPercentage)) == .sharingAuthorized {
+            objects.append(HKQuantitySample(
+                type: HKQuantityType(.bodyFatPercentage),
+                quantity: HKQuantity(unit: .percent(), doubleValue: NSDecimalNumber(decimal: fat).doubleValue),
+                start: sample.date, end: sample.date, metadata: metadata(.bodyFat)
+            ))
+        }
+        if let lean = sample.leanBodyMassKg, store.authorizationStatus(for: HKQuantityType(.leanBodyMass)) == .sharingAuthorized {
+            objects.append(HKQuantitySample(
+                type: HKQuantityType(.leanBodyMass),
+                quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: NSDecimalNumber(decimal: lean).doubleValue),
+                start: sample.date, end: sample.date, metadata: metadata(.leanMass)
+            ))
         }
         try await store.save(objects)
-        return objects.map(\.uuid)
     }
 
     func deleteBodyMeasurements(_ uuids: [UUID]) async throws {

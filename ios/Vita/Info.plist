@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>VitaConduitBaseURL</key>
-	<string>$(CONDUIT_BASE_URL)</string>
+	<key>VitaAPIBaseURL</key>
+	<string>$(VITA_API_BASE_URL)</string>
 	<key>VitaRemoteConfigURL</key>
 	<string>$(REMOTE_CONFIG_URL)</string>
 	<key>VitaDiagnosticsURL</key>

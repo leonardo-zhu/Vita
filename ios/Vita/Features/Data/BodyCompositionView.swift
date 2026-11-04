@@ -11,6 +11,7 @@ struct BodyCompositionView: View {
     @State private var profile: HealthSnapshot?
     @State private var latest: Latest?
     @State private var history: [BodyWeighing] = []
+    @State private var calibration = BodyFatCalibrationStatus.none
     @State private var syncedCount = 0
     @State private var manualCount = 0
     @State private var pendingDeletion: BodyWeighing?
@@ -71,7 +72,8 @@ struct BodyCompositionView: View {
             Text(message ?? "")
         }
         .task {
-            reloadHistory()
+            await services.bodyComposition.flushQueue()
+            await reloadHistory()
             // 先问完健康授权再连秤：同步时才弹窗的话，保存一直等着，秤收不到确认就不发实时体重。
             await services.bodyComposition.prepareHealthWrite()
             connection.onFinal = { measurement in Task { await save(measurement) } }
@@ -81,7 +83,7 @@ struct BodyCompositionView: View {
         }
         .onDisappear { connection.stop() }
         // 从详情页回来时，填过的秤读数可能改了校准。
-        .onAppear { reloadHistory() }
+        .onAppear { Task { await reloadHistory() } }
     }
 
     /// 没人站在秤上时只占一行。
@@ -240,7 +242,7 @@ struct BodyCompositionView: View {
     // MARK: - 校准
 
     private var calibrationCard: some View {
-        let status = (try? services.bodyComposition.calibration()) ?? .none
+        let status = calibration
         return VStack(alignment: .leading, spacing: 10) {
             CardHeader(title: "体脂率校准", systemImage: "slider.horizontal.3", tint: VitaTheme.fat) {
                 Text(status.applied == nil ? "\(status.readingCount)/\(BodyFatCalibration.minimumSamples)" : "已校准")
@@ -291,6 +293,8 @@ struct BodyCompositionView: View {
                 Label("已写入 Apple 健康", systemImage: "heart.fill").foregroundStyle(.pink)
             case .manual:
                 manualHint
+            case .queued:
+                Label("暂时连不上 Vita 服务，已存在手机上，有网时自动上传", systemImage: "icloud.and.arrow.up").foregroundStyle(.secondary)
             case nil:
                 Label("正在保存", systemImage: "arrow.down.circle").foregroundStyle(.secondary)
             }
@@ -426,7 +430,7 @@ struct BodyCompositionView: View {
     private func save(_ measurement: ScaleMeasurement) async {
         latest = Latest(measurement: measurement)
         do {
-            let (weighing, destination) = try await services.bodyComposition.record(measurement, source: .live, profile: await loadProfile())
+            let (weighing, destination) = try await services.bodyComposition.record(measurement, source: .live)
             latest?.weighing = weighing
             latest?.destination = destination
         } catch HealthServiceError.invalidMetrics {
@@ -435,18 +439,17 @@ struct BodyCompositionView: View {
             latest?.errorMessage = "保存失败。"
             latest?.canRetry = true
         }
-        reloadHistory()
+        await reloadHistory()
     }
 
     /// 返回 true 时秤会删掉这条：存好了，或读数异常（留着会一直挡住后面的记录）。
     private func saveOffline(_ record: ScaleOfflineRecord) async -> Bool {
         do {
-            let (_, destination) = try await services.bodyComposition.record(
-                record.measurement, recordedAt: record.recordedAt, source: .offline, profile: await loadProfile()
-            )
+            // 连不上服务端时进本机队列，同样算存好了，秤上的这条可以删。
+            let (_, destination) = try await services.bodyComposition.record(record.measurement, recordedAt: record.recordedAt, source: .offline)
             syncedCount += 1
             if destination == .manual { manualCount += 1 }
-            reloadHistory()
+            await reloadHistory()
             return true
         } catch HealthServiceError.invalidMetrics {
             return true
@@ -463,11 +466,13 @@ struct BodyCompositionView: View {
         } catch {
             message = "删除失败，请稍后再试。"
         }
-        reloadHistory()
+        await reloadHistory()
     }
 
-    private func reloadHistory() {
-        history = (try? services.bodyComposition.weighings()) ?? []
+    private func reloadHistory() async {
+        guard let loaded = try? await services.bodyComposition.load() else { return }
+        history = loaded.weighings
+        calibration = loaded.calibration
     }
 
     private func weighAgain() {

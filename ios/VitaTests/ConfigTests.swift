@@ -17,28 +17,6 @@ struct ConfigTests {
         #expect(!config.prompts.system.text.isEmpty)
     }
 
-    /// 工具描述只写在内置默认值里：每个工具都要有，也不能有多余的键（Admin 按这份清单编辑描述）。
-    @Test func builtinDescribesEveryTool() throws {
-        let tools = try builtin().prompts.tools
-        #expect(Set(tools.keys) == AgentToolCatalog.names)
-        #expect(tools.values.allSatisfy { !$0.description.isEmpty })
-    }
-
-    /// 参数 schema 来自打包进 App 的 shared/agent-tools/tool-parameters.json，清单要和代码里的工具一致。
-    @Test func bundledToolSchemasCoverEveryTool() throws {
-        let specs = try AgentToolCatalog.loadSpecs(from: .main)
-        #expect(specs == AgentToolCatalog.specs)
-        #expect(Set(specs.map(\.name)) == AgentToolCatalog.names)
-        #expect(specs.count == AgentToolCatalog.names.count)
-        for spec in specs {
-            guard case .object(let schema) = spec.parameters else {
-                Issue.record("\(spec.name) 的参数不是对象")
-                continue
-            }
-            #expect(schema["type"] == .string("object"))
-        }
-    }
-
     @Test func builtinOnlyResolvesToBuiltinSources() throws {
         let config = try builtin()
         let effective = ConfigResolver.resolve(builtin: config, remote: nil, override: nil)
@@ -134,19 +112,19 @@ struct ConfigTests {
 }
 
 struct BuildEnvironmentTests {
-    @Test func appBundleCarriesConduitBaseURL() throws {
+    @Test func appBundleCarriesAPIBaseURL() throws {
         let environment = try BuildEnvironment.current(bundle: .main)
-        #expect(environment.conduitBaseURL.scheme == "https")
+        #expect(environment.apiBaseURL.absoluteString == "https://vita-api.r4s.leonardo-zhu.me")
         #expect(environment.remoteConfigURL.absoluteString == "https://vita.r4s.leonardo-zhu.me/config/stable.json")
         #expect(environment.diagnosticsURL.absoluteString == "https://vita.r4s.leonardo-zhu.me/api/ingest/events")
     }
 
     @Test func rejectsMissingOrInsecureRemoteConfigURL() {
-        let conduit = [BuildEnvironment.conduitBaseURLKey: "https://conduit.example"]
+        let api = [BuildEnvironment.apiBaseURLKey: "https://vita-api.example"]
         #expect(throws: BuildEnvironmentError.missingRemoteConfigURL) {
-            try BuildEnvironment.load(from: conduit)
+            try BuildEnvironment.load(from: api)
         }
-        let config = conduit.merging([BuildEnvironment.remoteConfigURLKey: "https://config.example/stable.json"]) { $1 }
+        let config = api.merging([BuildEnvironment.remoteConfigURLKey: "https://config.example/stable.json"]) { $1 }
         #expect(throws: BuildEnvironmentError.missingDiagnosticsURL) {
             try BuildEnvironment.load(from: config)
         }
@@ -154,19 +132,19 @@ struct BuildEnvironmentTests {
             try BuildEnvironment.load(from: config.merging([BuildEnvironment.diagnosticsURLKey: "http://diag.example"]) { $1 })
         }
         #expect(throws: BuildEnvironmentError.invalidRemoteConfigURL("http://config.example/stable.json")) {
-            try BuildEnvironment.load(from: conduit.merging([BuildEnvironment.remoteConfigURLKey: "http://config.example/stable.json"]) { $1 })
+            try BuildEnvironment.load(from: api.merging([BuildEnvironment.remoteConfigURLKey: "http://config.example/stable.json"]) { $1 })
         }
     }
 
     @Test func rejectsMissingInsecureAndUnexpandedValues() {
-        #expect(throws: BuildEnvironmentError.missingConduitBaseURL) {
+        #expect(throws: BuildEnvironmentError.missingAPIBaseURL) {
             try BuildEnvironment.load(from: [:])
         }
-        #expect(throws: BuildEnvironmentError.invalidConduitBaseURL("http://example.com")) {
-            try BuildEnvironment.load(from: [BuildEnvironment.conduitBaseURLKey: "http://example.com"])
+        #expect(throws: BuildEnvironmentError.invalidAPIBaseURL("http://example.com")) {
+            try BuildEnvironment.load(from: [BuildEnvironment.apiBaseURLKey: "http://example.com"])
         }
-        #expect(throws: BuildEnvironmentError.invalidConduitBaseURL("$(CONDUIT_BASE_URL)")) {
-            try BuildEnvironment.load(from: [BuildEnvironment.conduitBaseURLKey: "$(CONDUIT_BASE_URL)"])
+        #expect(throws: BuildEnvironmentError.invalidAPIBaseURL("$(VITA_API_BASE_URL)")) {
+            try BuildEnvironment.load(from: [BuildEnvironment.apiBaseURLKey: "$(VITA_API_BASE_URL)"])
         }
     }
 }

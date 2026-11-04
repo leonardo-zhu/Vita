@@ -19,16 +19,24 @@ struct LocalDateArithmeticTests {
 
 @MainActor
 struct WeekDataTests {
-    @Test func averagesOnlyRecordedDays() throws {
-        let services = AppServices(container: try AppContainer.inMemory(), now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
-        let thursday = LocalDate(isoString: "2026-10-29")!
-        try services.records.createRecord(on: thursday, expectedRevision: 0, draft: try .lunch(on: thursday, [.estimate(kcal: 1000, protein: 60)]))
-        try services.records.createRecord(on: Fixtures.day, expectedRevision: 0, draft: try .lunch([.estimate(kcal: 2000, protein: 100)]))
+    @Test func averagesOnlyRecordedDays() async throws {
+        let stub = APIStub()
+        let monday = Fixtures.day.startOfWeek
+        for offset in 0..<7 {
+            let date = monday.adding(days: offset).isoString
+            switch date {
+            case "2026-10-29": stub.on("GET", "/v1/days/\(date)", json: APIFixtures.day(date, kcal: 1000, protein: 60))
+            case Fixtures.day.isoString: stub.on("GET", "/v1/days/\(date)", json: APIFixtures.day(date, kcal: 2000, protein: 100))
+            default: stub.on("GET", "/v1/days/\(date)", json: APIFixtures.emptyDay(date))
+            }
+        }
+        let service = DayDataService(api: stub.client())
 
-        let week = try services.dayData.week(containing: Fixtures.day)
+        let week = try await service.week(containing: Fixtures.day)
         #expect(week.days.count == 7)
         #expect(week.start.isoString == "2026-10-26")
         #expect(week.end.isoString == "2026-11-01")
+        #expect(week.days.map(\.date) == (0..<7).map { monday.adding(days: $0) })
         #expect(week.recordedDays.count == 2)
         #expect(week.average(.energyKcal) == 1500)
         #expect(week.average(.proteinG) == 80)

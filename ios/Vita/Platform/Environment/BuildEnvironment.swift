@@ -1,8 +1,8 @@
 import Foundation
 
 enum BuildEnvironmentError: Error, Equatable {
-    case missingConduitBaseURL
-    case invalidConduitBaseURL(String)
+    case missingAPIBaseURL
+    case invalidAPIBaseURL(String)
     case missingRemoteConfigURL
     case invalidRemoteConfigURL(String)
     case missingDiagnosticsURL
@@ -10,25 +10,26 @@ enum BuildEnvironmentError: Error, Equatable {
 }
 
 /// 由构建配置决定、不可远程修改的值（vita-admin.md §3.2 / §7）。来源是 `project.yml` 中按
-/// Debug / Release 设置的 `CONDUIT_BASE_URL`、`REMOTE_CONFIG_URL` 与 `DIAGNOSTICS_URL`，经 Info.plist 读出。
+/// Debug / Release 设置的 `VITA_API_BASE_URL`、`REMOTE_CONFIG_URL` 与 `DIAGNOSTICS_URL`，经 Info.plist 读出。
 struct BuildEnvironment: Equatable, Sendable {
-    static let conduitBaseURLKey = "VitaConduitBaseURL"
+    static let apiBaseURLKey = "VitaAPIBaseURL"
     static let remoteConfigURLKey = "VitaRemoteConfigURL"
     static let diagnosticsURLKey = "VitaDiagnosticsURL"
 
-    let conduitBaseURL: URL
+    /// Vita API（架构设计 §5）；业务数据与对话都经它。
+    let apiBaseURL: URL
     /// 远程配置只从这一个地址拉取。
     var remoteConfigURL: URL = URL(string: "https://config.invalid/stable.json")!
     /// 诊断日志只上报到这一个地址（ADR-014）。
     var diagnosticsURL: URL = URL(string: "https://diagnostics.invalid/events")!
 
     static func load(from info: [String: Any]) throws -> BuildEnvironment {
-        guard let raw = info[conduitBaseURLKey] as? String, !raw.isEmpty else {
-            throw BuildEnvironmentError.missingConduitBaseURL
+        guard let raw = info[apiBaseURLKey] as? String, !raw.isEmpty else {
+            throw BuildEnvironmentError.missingAPIBaseURL
         }
-        // 请求携带令牌与对话内容，只允许 HTTPS。
-        guard let url = URL(string: raw), url.scheme == "https", url.host() != nil else {
-            throw BuildEnvironmentError.invalidConduitBaseURL(raw)
+        // 请求携带令牌与对话内容，只允许 HTTPS；调试构建可以连本机起的 API（`VITA_API_BASE_URL=http://127.0.0.1:3014`）。
+        guard let url = URL(string: raw), url.host() != nil, url.scheme == "https" || isLocalDevelopment(url) else {
+            throw BuildEnvironmentError.invalidAPIBaseURL(raw)
         }
         guard let rawConfig = info[remoteConfigURLKey] as? String, !rawConfig.isEmpty else {
             throw BuildEnvironmentError.missingRemoteConfigURL
@@ -42,7 +43,15 @@ struct BuildEnvironment: Equatable, Sendable {
         guard let diagnosticsURL = URL(string: rawDiagnostics), diagnosticsURL.scheme == "https", diagnosticsURL.host() != nil else {
             throw BuildEnvironmentError.invalidDiagnosticsURL(rawDiagnostics)
         }
-        return BuildEnvironment(conduitBaseURL: url, remoteConfigURL: configURL, diagnosticsURL: diagnosticsURL)
+        return BuildEnvironment(apiBaseURL: url, remoteConfigURL: configURL, diagnosticsURL: diagnosticsURL)
+    }
+
+    private static func isLocalDevelopment(_ url: URL) -> Bool {
+        #if DEBUG
+        url.scheme == "http" && ["127.0.0.1", "localhost"].contains(url.host() ?? "")
+        #else
+        false
+        #endif
     }
 
     static func current(bundle: Bundle = .main) throws -> BuildEnvironment {

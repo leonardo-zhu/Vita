@@ -87,7 +87,7 @@ struct WeighingDetailView: View {
         do {
             try await services.bodyComposition.setScaleBodyFat(fraction, for: weighing.id)
             readingFocused = false
-            if let updated = try services.bodyComposition.weighings().first(where: { $0.id == weighing.id }) { weighing = updated }
+            if let updated = try await services.bodyComposition.load().weighings.first(where: { $0.id == weighing.id }) { weighing = updated }
             readingText = weighing.scaleBodyFatFraction.map { DisplayFormat.number($0 * 100, digits: 1) } ?? ""
         } catch HealthServiceError.invalidMetrics {
             readingError = "体脂率应在 2% 到 70% 之间。"

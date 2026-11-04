@@ -26,9 +26,6 @@ targets:
       - path: Resources/ReferenceFood
         excludes:
           - "*.md"
-      # 工具参数 schema，与 Admin 共用（vita-admin.md §14）
-      - path: ../shared/agent-tools/tool-parameters.json
-        buildPhase: resources
     entitlements:
       path: Vita/Vita.entitlements
       properties:
@@ -39,27 +36,30 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.leonardo.vita
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_NSHealthShareUsageDescription: Vita 读取身高、体重、体脂率、出生日期、性别、睡眠和活动能量，用来生成每日目标并展示健康数据。
-        INFOPLIST_KEY_NSCameraUsageDescription: Vita 用相机拍营养成分表，照片发给模型读出营养数值，帮你存进个人食品库；原图也存在这台设备上。
+        INFOPLIST_KEY_NSCameraUsageDescription: Vita 用相机拍营养成分表，照片传到你的 Vita 服务并发给模型读出营养数值，帮你存进个人食品库。
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: Vita 把你确认过的饮食记录（能量、蛋白质、脂肪、碳水），以及体脂秤称出的体重、体脂率和去脂体重写入 Apple 健康。
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: Vita 用蓝牙连接阿福体脂秤，读取体重和体脂测量结果。
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: Vita/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: Vita
+        # 迁移到 2.0 时的导出文件放在“文稿”目录，在“文件”App 里能看到、能拷走（架构设计 §13）。
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         TARGETED_DEVICE_FAMILY: "1"
         # 构建脚本要读 git，不能在脚本沙盒里跑。
         ENABLE_USER_SCRIPT_SANDBOXING: NO
-      # Conduit 与远程配置的地址只由构建配置决定，不可远程修改（vita-admin.md §3.2 / §7）。
+      # Vita API 与远程配置的地址只由构建配置决定，不可远程修改（vita-admin.md §3.2 / §7、架构设计 §5）。
       # 目前只有一个实例；有了开发实例后把 Debug 指过去。
       configs:
         Debug:
-          CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
+          VITA_API_BASE_URL: https://vita-api.r4s.leonardo-zhu.me
           REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
           DIAGNOSTICS_URL: https://vita.r4s.leonardo-zhu.me/api/ingest/events
         Release:
-          CONDUIT_BASE_URL: https://conduit.r4s.leonardo-zhu.me
+          VITA_API_BASE_URL: https://vita-api.r4s.leonardo-zhu.me
           REMOTE_CONFIG_URL: https://vita.r4s.leonardo-zhu.me/config/stable.json
           DIAGNOSTICS_URL: https://vita.r4s.leonardo-zhu.me/api/ingest/events
     # 每次构建把构建号（提交数）和提交写进 Info.plist，设置页显示，装到手机上能看出是不是最新的。

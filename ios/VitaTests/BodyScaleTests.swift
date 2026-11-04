@@ -92,146 +92,103 @@ struct ScaleCommandTests {
 
 @MainActor
 struct BodyCompositionServiceTests {
+    let stub = APIStub()
     let store = FakeHealthDataStore()
-    let services: AppServices
-
-    init() throws {
-        var container = try AppContainer.inMemory()
-        container.healthStore = store
-        services = AppServices(container: container, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
-        store.body.heightCm = 170
-        store.body.sex = .male
-        store.body.dateOfBirth = LocalDate(year: 1990, month: 1, day: 1)
-    }
+    let local = InMemoryLocalStateStore()
 
     private let final = ScaleMeasurement(weightKg: Decimal(string: "69.6")!, isStable: true, isFinal: true, impedance: .init(a: 482, b: 432))
 
-    private func record(_ measurement: ScaleMeasurement? = nil, recordedAt: Date? = nil, source: WeighingSource = .live) async throws
-        -> (BodyWeighing, ScaleSaveDestination)
-    {
-        let profile = await services.health.snapshot(on: Fixtures.day)
-        return try await services.bodyComposition.record(measurement ?? final, recordedAt: recordedAt, source: source, profile: profile)
+    private func service(api: VitaAPIClient? = nil) -> BodyCompositionService {
+        let api = api ?? stub.client()
+        return BodyCompositionService(api: api, store: store, local: local, healthSync: HealthSyncService(api: api, store: store, local: local), now: { Fixtures.now })
     }
 
-    @Test func writesWeightAndBodyFatToHealthAndKeepsTheWeighing() async throws {
-        let (weighing, destination) = try await record()
+    private func weighingJSON(_ id: String) -> String {
+        """
+        {"id":"\(id)","measuredAt":"2026-10-30T12:00:00.000Z","weightKg":69.6,"impedance":{"a":482,"b":432},"source":"live","timeReliable":true,
+         "profile":{"heightCm":170,"ageYears":36,"sex":"male"},"scaleBodyFatFraction":null,"bodyFat":{"value":0.2,"source":"estimated"},"bmi":24.1,"metrics":[],"bodyType":null}
+        """
+    }
+
+    private func emptyFeed() {
+        stub.on("GET", "/v1/health-sync/changes", json: #"{"changes":[],"cursor":0,"hasMore":false}"#)
+    }
+
+    @Test func uploadsTheWeighingWithAPhoneGeneratedID() async throws {
+        store.bodyWriteAnswer = .authorized
+        stub.on("POST", "/v1/weighings", status: 201, json: #"{"weighing":\#(weighingJSON(UUID().apiString))}"#)
+        stub.on("GET", "/v1/weighings", json: #"{"weighings":[],"calibration":{"readingCount":0,"model":null,"applied":false}}"#)
+        emptyFeed()
+
+        let (_, destination) = try await service().record(final, source: .live)
         #expect(destination == .appleHealth)
-        #expect(weighing.bodyFatFraction != nil)
-        #expect(weighing.inAppleHealth)
-        #expect(store.bodySamples.map(\.bodyMassKg) == [Decimal(string: "69.6")!])
-        #expect(try services.bodyComposition.weighings() == [weighing])
-        #expect(try services.health.manualMetrics() == nil)
-        // 下次读取就是新称的体重。
-        #expect(await services.health.snapshot(on: Fixtures.day).bodyMassKg.value == Decimal(string: "69.6")!)
+        let body = try #require(stub.requests.first { $0.method == "POST" }).json()
+        let id = try #require(body["id"] as? String)
+        #expect(id == id.lowercased())
+        #expect(body["appleHealthWritable"] as? Bool == true)
+        #expect(body["recordedAt"] is NSNull)
+        #expect((body["impedance"] as? [String: Any])?["b"] as? Int == 432)
     }
 
-    @Test func skipsBodyFatWithoutImpedance() async throws {
-        let (weighing, _) = try await record(ScaleMeasurement(weightKg: 70, isStable: true, isFinal: true, impedance: nil))
-        #expect(weighing.bodyFatFraction == nil)
-        #expect(store.bodySamples.first?.bodyFatFraction == nil)
-    }
-
-    @Test func usesOfflineRecordTimeUnlessInTheFuture() async throws {
-        let earlier = Fixtures.now.addingTimeInterval(-3600)
-        let (timed, _) = try await record(recordedAt: earlier, source: .offline)
-        #expect(timed.measuredAt == earlier)
-        #expect(timed.timeReliable)
-        let (future, _) = try await record(recordedAt: Fixtures.now.addingTimeInterval(3600), source: .offline)
-        #expect(future.measuredAt == Fixtures.now)
-        #expect(!future.timeReliable)
-        #expect(try services.bodyComposition.weighings().map(\.id) == [future.id, timed.id])
-    }
-
-    @Test func fallsBackToManualWhenWriteDenied() async throws {
+    @Test func tellsTheServerWhenHealthCannotTakeIt() async throws {
         store.bodyWriteAnswer = .denied
-        let (weighing, destination) = try await record()
+        stub.on("POST", "/v1/weighings", status: 201, json: #"{"weighing":\#(weighingJSON(UUID().apiString))}"#)
+        stub.on("GET", "/v1/weighings", json: #"{"weighings":[],"calibration":{"readingCount":0,"model":null,"applied":false}}"#)
+        emptyFeed()
+        let (_, destination) = try await service().record(final, source: .live)
         #expect(destination == .manual)
-        #expect(!weighing.inAppleHealth)
-        #expect(store.bodySamples.isEmpty)
-        #expect(try services.health.manualMetrics()?.bodyMassKg == Decimal(string: "69.6")!)
+        #expect(try stub.requests.first { $0.method == "POST" }?.json()["appleHealthWritable"] as? Bool == false)
     }
 
-    @Test func olderOfflineRecordDoesNotOverwriteNewerManualWeight() async throws {
-        store.bodyWriteAnswer = .denied
-        _ = try await record()
-        _ = try await record(ScaleMeasurement(weightKg: 72, isStable: true, isFinal: true, impedance: nil),
-                             recordedAt: Fixtures.now.addingTimeInterval(-86400), source: .offline)
-        #expect(try services.health.manualMetrics()?.bodyMassKg == Decimal(string: "69.6")!)
-        #expect(try services.bodyComposition.weighings().count == 2)
+    @Test func rejectsImplausibleWeightWithoutUploading() async throws {
+        let silly = ScaleMeasurement(weightKg: 900, isStable: true, isFinal: true, impedance: nil)
+        await #expect(throws: HealthServiceError.invalidMetrics) { try await service().record(silly, source: .live) }
+        #expect(stub.requests.isEmpty)
     }
 
-    @Test func rejectsImplausibleWeightWithoutSavingAnything() async throws {
-        await #expect(throws: HealthServiceError.invalidMetrics) {
-            try await record(ScaleMeasurement(weightKg: Decimal(string: "7.45")!, isStable: true, isFinal: true, impedance: nil))
-        }
-        #expect(store.bodySamples.isEmpty)
-        #expect(try services.bodyComposition.weighings().isEmpty)
+    @Test func queuesWhileOfflineAndFlushesLater() async throws {
+        // 没注册的替身：请求连不上。
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let offline = VitaAPIClient(baseURL: URL(string: "https://vita-api.test")!, token: { "t" }, session: URLSession(configuration: configuration))
+
+        let (weighing, destination) = try await service(api: offline).record(final, source: .live)
+        #expect(weighing == nil)
+        #expect(destination == .queued)
+        let queued = try #require(service().queued.first)
+        // 排队的实时称重记下当时的时间，补传时按离线记录交给服务端。
+        #expect(queued.source == .offline)
+        #expect(queued.recordedAt == Fixtures.now)
+
+        stub.on("POST", "/v1/weighings", status: 201, json: #"{"weighing":\#(weighingJSON(queued.id.apiString))}"#)
+        emptyFeed()
+        #expect(await service().flushQueue() == 1)
+        #expect(service().queued.isEmpty)
+        #expect(try stub.requests.first?.json()["id"] as? String == queued.id.apiString)
     }
 
-    @Test func scaleReadingReplacesTheEstimateAndRewritesHealth() async throws {
-        let (weighing, _) = try await record()
-        try await services.bodyComposition.setScaleBodyFat(Decimal(string: "0.214")!, for: weighing.id)
-        let updated = try #require(try services.bodyComposition.weighings().first)
-        #expect(updated.bodyFat?.source == .scaleReading)
-        #expect(updated.bodyFatFraction == Decimal(string: "0.214")!)
-        #expect(store.bodySamples.map(\.bodyFatFraction) == [Decimal(string: "0.214")!])
-        #expect(try services.bodyComposition.calibration().readingCount == 1)
+    @Test func dropsQueuedWeighingsTheServerRejects() async throws {
+        try local.save([WeighingUploadDTO(id: UUID(), weightKg: 70, impedance: nil, source: .offline, recordedAt: Fixtures.now, appleHealthWritable: false)], as: BodyCompositionService.queueName)
+        stub.on("POST", "/v1/weighings", status: 400, json: #"{"error":{"code":"invalidBody","message":"读数不合理"}}"#)
+        #expect(await service().flushQueue() == 0)
+        #expect(service().queued.isEmpty)
     }
 
-    @Test func calibrationAppliesToEveryWeighingOnceItFits() async throws {
-        store.body.heightCm = 175
-        var ids: [UUID] = []
-        for reading in BodyFatCalibrationTests.readings {
-            let measurement = ScaleMeasurement(
-                weightKg: Decimal(reading.weight), isStable: true, isFinal: true, impedance: .init(a: reading.impedance + 60, b: reading.impedance)
-            )
-            ids.append(try await record(measurement).0.id)
-        }
-        let extra = try await record(ScaleMeasurement(weightKg: Decimal(string: "74.8")!, isStable: true, isFinal: true, impedance: .init(a: 575, b: 515))).0
-        #expect(extra.bodyFat?.source == .estimated)
-        for (id, reading) in zip(ids, BodyFatCalibrationTests.readings) {
-            try await services.bodyComposition.setScaleBodyFat(
-                BodyFatCalibrationTests.scaleFormula(weightKg: reading.weight, heightCm: 175, impedance: reading.impedance), for: id
-            )
-        }
-        #expect(try services.bodyComposition.calibration().applied != nil)
-        let calibrated = try #require(try services.bodyComposition.weighings().first { $0.id == extra.id })
-        #expect(calibrated.bodyFat?.source == .calibrated)
-        let expected = BodyFatCalibrationTests.scaleFormula(weightKg: 74.8, heightCm: 175, impedance: 515)
-        #expect(abs(NSDecimalNumber(decimal: calibrated.bodyFatFraction! - expected).doubleValue) < 0.002)
-        // 健康里的那份也换成了校准后的值，没有留下旧 Sample。
-        #expect(store.bodySamples.count == 7)
-        #expect(store.bodySamples.contains { $0.bodyFatFraction == calibrated.bodyFatFraction })
-    }
-
-    @Test func agentReadsBodyComposition() async throws {
-        _ = try await record()
-        let tools = AgentToolRunner(services: services, now: { Fixtures.now }, timeZone: { Fixtures.shanghai })
-        let output = await tools.run(
-            LLMFunctionCall(callID: "c", name: "getBodyComposition", arguments: #"{"days":7}"#), sessionDate: Fixtures.day, requestID: UUID()
-        ).output
-        #expect(output.contains(#""name":"去脂体重""#))
-        #expect(output.contains(#""bodyFatSource":"estimated""#))
-        #expect(output.contains("未校准"))
-        let invalid = await tools.run(LLMFunctionCall(callID: "c", name: "getBodyComposition", arguments: #"{"days":0}"#), sessionDate: Fixtures.day, requestID: UUID())
-        #expect(invalid.output.contains("invalidField"))
-    }
-
-    @Test func deletingAWeighingAlsoDeletesItFromHealth() async throws {
-        let (weighing, _) = try await record()
-        #expect(try await services.bodyComposition.delete(weighing.id) == .deleted)
-        #expect(store.bodySamples.isEmpty)
-        #expect(try services.bodyComposition.weighings().isEmpty)
-    }
-
-    @Test func deletingWithoutHealthAccessKeepsTheHealthCopy() async throws {
-        let (weighing, _) = try await record()
-        store.revokeBodyWrite()
-        #expect(try await services.bodyComposition.delete(weighing.id) == .keptInAppleHealth)
-        #expect(store.bodySamples.count == 1)
-        #expect(try services.bodyComposition.weighings().isEmpty)
+    @Test func loadsHistoryWithTheServerCalibration() async throws {
+        let id = UUID()
+        stub.on("GET", "/v1/weighings", json: """
+        {"weighings":[\(weighingJSON(id.apiString))],"calibration":{"readingCount":6,"model":{"channel":"a","heightSquaredOverImpedance":0.5,"weight":0.1,"constant":-0.2,
+         "sampleCount":6,"meanAbsoluteError":0.002},"applied":true}}
+        """)
+        let (weighings, calibration) = try await service().load()
+        #expect(weighings.map(\.id) == [id])
+        #expect(calibration.readingCount == 6)
+        #expect(calibration.applied?.channel == .a)
+        #expect(weighings.first?.calibration == calibration.applied)
+        #expect(weighings.first?.profile.heightCm == 170)
     }
 }
+
 
 /// 用蚂蚁阿福「身材管理」的样本 A（76.80 kg、体脂 21.4%、男）核对换算（身体成分模块 §3.2）。
 struct BodyCompositionTests {

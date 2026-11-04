@@ -35,6 +35,7 @@ struct GoalSetupForm: View {
     @State private var byPercent = true
     @State private var percent = 85
     @State private var kcal = -400
+    @State private var isCommitting = false
 
     private var adjustment: EnergyPlan.Adjustment {
         kind == .maintain ? .fraction(1) : byPercent ? .fraction(Decimal(percent) / 100) : .kcal(Decimal(kcal))
@@ -70,18 +71,24 @@ struct GoalSetupForm: View {
             }
             .controlSize(.large)
             .glassButton(prominent: true)
-            .disabled(readyRecommendation == nil)
+            .disabled(readyRecommendation == nil || isCommitting)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
         .sheet(item: $editing) { metric in
             ManualMetricForm(metric: metric) { metrics in
-                do {
-                    try services.health.submitManualBodyMetrics(metrics)
-                    editing = nil
-                    Task { await reload() }
-                } catch {
-                    message = "数值不在合理范围内。"
+                Task {
+                    do {
+                        try await services.health.submitManualBodyMetrics(metrics)
+                        editing = nil
+                        await reload()
+                    } catch HealthServiceError.invalidMetrics {
+                        message = "数值不在合理范围内。"
+                    } catch let error as APIError {
+                        message = "保存失败：\(error.userMessage)"
+                    } catch {
+                        message = "保存失败：\(error)"
+                    }
                 }
             }
             .presentationDetents([.medium])
@@ -172,13 +179,20 @@ struct GoalSetupForm: View {
         snapshot = await services.health.snapshot(on: date)
     }
 
+    /// 预览是本机按同一公式算的；服务端按它存的健康数据（`reload` 时刚传上去）重新算一遍再保存。
     private func commit() {
-        guard let recommendation = readyRecommendation else { return }
-        do {
-            try services.goals.commitInitialGoals(recommendation, effectiveFrom: date)
-            onCommitted()
-        } catch {
-            message = "保存目标失败：\(error)"
+        guard readyRecommendation != nil, !isCommitting else { return }
+        isCommitting = true
+        Task {
+            defer { isCommitting = false }
+            do {
+                try await services.goals.commitInitialGoals(kind: kind, adjustment: adjustment, effectiveFrom: date)
+                onCommitted()
+            } catch let error as APIError {
+                message = "保存目标失败：\(error.userMessage)"
+            } catch {
+                message = "保存目标失败：\(error)"
+            }
         }
     }
 }

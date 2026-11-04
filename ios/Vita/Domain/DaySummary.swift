@@ -88,6 +88,20 @@ struct DaySummary: Equatable, Sendable {
         if let energy { self.goal?.targets.energyKcal = energy.targetKcal }
     }
 
+    /// 服务端算好的汇总（`GET /v1/days/:date`）：能量目标随活动计算时，`goal.targets.energyKcal` 已是当天的值。
+    init(
+        totals: NutrientValues, includedItemCount: Int, excludedItemCount: Int, estimatedItemCount: Int,
+        goal: GoalSnapshot?, energy: EnergyTarget?, balance: EnergyBalance?
+    ) {
+        self.totals = totals
+        self.includedItemCount = includedItemCount
+        self.excludedItemCount = excludedItemCount
+        self.estimatedItemCount = estimatedItemCount
+        self.goal = goal
+        self.energy = energy
+        self.balance = balance
+    }
+
     var progress: [Progress] {
         Nutrient.allCases.map {
             Progress(nutrient: $0, consumed: $0.value(in: totals), target: goal?.targets.target(for: $0))

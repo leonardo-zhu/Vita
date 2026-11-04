@@ -1,7 +1,6 @@
 import Foundation
-import SwiftData
 
-/// Data 页与 Agent 读工具使用的只读视图，Presentation 不直接接触 SwiftData（TDD §1.1）。
+/// Data 页显示的一天。
 struct DayData: Equatable, Sendable, Identifiable {
     struct Item: Equatable, Codable, Sendable, Identifiable {
         var id: UUID
@@ -40,94 +39,22 @@ struct DayData: Equatable, Sendable, Identifiable {
     var id: LocalDate { date }
 }
 
+/// Data 页读的一天、一周：服务端算好的记录、汇总、能量目标与收支（`GET /v1/days/:date`）。
+/// 健康里的同步状态是本机的，读的时候补上。
 @MainActor
 final class DayDataService {
-    private let context: ModelContext
-    private let referenceFoods: ReferenceFoodCatalog
-    private let goals: GoalService
-    private let sourceLabels: SourceLabeler
+    private let api: VitaAPIClient
     private let syncState: (UUID) -> SyncState?
-    private let activity: (LocalDate) -> DayActivity?
-    private let now: () -> Date
-    private let timeZone: () -> TimeZone
 
-    init(
-        context: ModelContext,
-        referenceFoods: ReferenceFoodCatalog,
-        goals: GoalService,
-        activity: @escaping (LocalDate) -> DayActivity? = { _ in nil },
-        now: @escaping () -> Date = Date.init,
-        timeZone: @escaping () -> TimeZone = { .current },
-        syncState: @escaping (UUID) -> SyncState? = { _ in nil }
-    ) {
+    init(api: VitaAPIClient, syncState: @escaping (UUID) -> SyncState? = { _ in nil }) {
+        self.api = api
         self.syncState = syncState
-        self.activity = activity
-        self.now = now
-        self.timeZone = timeZone
-        self.context = context
-        self.referenceFoods = referenceFoods
-        self.goals = goals
-        self.sourceLabels = SourceLabeler(context: context, referenceFoods: referenceFoods)
     }
 
-    /// 读取某日数据；没有 Session 时返回空日，不因读取而创建 Session。
-    func day(_ date: LocalDate) throws -> DayData {
-        let session = try context.session(on: date)
-        let records = try (session?.records ?? [])
-            .sorted { ($0.sortTime, $0.createdAt) < ($1.sortTime, $1.createdAt) }
-            .map(makeRecord)
-        let items = records.flatMap(\.items).map { (snapshot: $0.snapshot, includeInSummary: $0.includeInSummary) }
-        let goal = try goals.activeGoal(on: date)
-        var summary = DaySummary(items: items, goal: goal)
-        if let plan = goal?.energyPlan {
-            // 能量目标与收支按当天活动计算（TDD §6.2），不存储。
-            let day = energyDay(date)
-            let activity = activity(date)
-            summary = DaySummary(
-                items: items, goal: goal,
-                energy: EnergyTargetPolicy.target(plan: plan, activity: activity, day: day),
-                balance: EnergyTargetPolicy.balance(
-                    bmrKcal: plan.bmrKcal, activity: activity, day: day, consumedKcal: summary.totals.energyKcal
-                )
-            )
-        }
-        return DayData(date: date, revision: session?.revision ?? 0, records: records, summary: summary)
-    }
-
-    private func energyDay(_ date: LocalDate) -> EnergyTargetPolicy.Day {
-        let zone = timeZone()
-        let today = LocalDate(date: now(), timeZone: zone)
-        if date < today { return .past }
-        if date > today { return .future }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = zone
-        return .today(elapsed: now().timeIntervalSince(calendar.startOfDay(for: now())))
-    }
-
-    private func makeRecord(_ record: ConsumptionRecord) throws -> DayData.Record {
-        DayData.Record(
-            id: record.id,
-            eventTime: try record.eventTime(),
-            mealLabel: record.mealLabel,
-            note: record.note,
-            revision: record.revision,
-            items: try record.orderedItems.map(makeItem),
-            healthSync: syncState(record.id)
-        )
-    }
-
-    private func makeItem(_ item: ConsumptionItem) throws -> DayData.Item {
-        DayData.Item(
-            id: item.id,
-            displayName: item.displayName,
-            groupName: item.groupName,
-            originalAmountText: item.originalAmountText,
-            quantity: try item.quantity(),
-            amountSource: item.amountSource,
-            includeInSummary: item.includeInSummary,
-            snapshot: try item.snapshot(),
-            sourceLabel: try sourceLabels.label(referenceFoodID: item.referenceFoodID, foodVersionID: item.foodVersionID)
-        )
+    /// 读取某日数据；没有记录的日子是空日，revision 为 0。
+    func day(_ date: LocalDate) async throws -> DayData {
+        let response: DayResponseDTO = try await api.get("/v1/days/\(date.isoString)")
+        return try response.domain(healthSync: syncState)
     }
 }
 
@@ -150,8 +77,18 @@ struct WeekData: Equatable, Sendable {
 }
 
 extension DayDataService {
-    func week(containing date: LocalDate) throws -> WeekData {
+    func week(containing date: LocalDate) async throws -> WeekData {
         let monday = date.startOfWeek
-        return WeekData(days: try (0..<7).map { try day(monday.adding(days: $0)) })
+        let api = self.api
+        // 七天并发读，省掉六次往返。
+        let responses = try await withThrowingTaskGroup(of: (Int, DayResponseDTO).self) { group in
+            for offset in 0..<7 {
+                group.addTask { (offset, try await api.get("/v1/days/\(monday.adding(days: offset).isoString)")) }
+            }
+            var collected: [(Int, DayResponseDTO)] = []
+            for try await response in group { collected.append(response) }
+            return collected.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+        return WeekData(days: try responses.map { try $0.domain(healthSync: syncState) })
     }
 }

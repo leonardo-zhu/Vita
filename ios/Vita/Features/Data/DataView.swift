@@ -37,25 +37,41 @@ final class DayDataModel {
 
     var today: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
 
-    func reload() {
+    func reload() async {
+        let (date, mode) = (self.date, self.mode)
         do {
-            state = switch mode {
-            case .day: .day(try service.day(date))
-            case .week: .week(try service.week(containing: date))
+            let loaded: State = switch mode {
+            case .day: .day(try await service.day(date))
+            case .week: .week(try await service.week(containing: date))
             }
+            // 读的过程中切换了日期或视图：这份已经过时，不用。
+            guard date == self.date, mode == self.mode else { return }
+            state = loaded
+        } catch is CancellationError {
+        } catch let error as APIError {
+            guard date == self.date, mode == self.mode else { return }
+            state = .failed(error.userMessage)
         } catch {
+            guard date == self.date, mode == self.mode else { return }
             state = .failed(String(describing: error))
         }
     }
 
-    /// 读健康数据，同时刷新活动缓存（能量目标随活动计算），再按新读数重算页面。周视图刷新这一周。
+    /// 先显示服务端现有的数据，再读健康数据传上去（能量目标随当天活动计算），按新读数刷新一次。周视图传这一周的活动。
+    func load() async {
+        await reload()
+        await loadHealth()
+    }
+
     func loadHealth() async {
-        snapshot = await health.snapshot(on: date)
+        let date = self.date
+        let loaded = await health.snapshot(on: date)
+        if date == self.date { snapshot = loaded }
         if mode == .week {
             let start = date.startOfWeek
             await health.refreshActivity(on: (0..<7).map { start.adding(days: $0) }.filter { $0 <= today })
         }
-        reload()
+        await reload()
     }
 
     func connectHealth() async {
@@ -128,15 +144,12 @@ struct DataView: View {
             .sheet(isPresented: $isSettingGoal) {
                 GoalSetupView(services: services, date: model.date) {
                     isSettingGoal = false
-                    model.reload()
+                    Task { await model.reload() }
                 }
             }
         }
         .tint(VitaTheme.intake)
-        .onAppear { model.reload() }
-        .onChange(of: model.date) { model.reload() }
-        .onChange(of: model.mode) { model.reload() }
-        .task(id: "\(model.date.isoString)-\(model.mode)") { await model.loadHealth() }
+        .task(id: "\(model.date.isoString)-\(model.mode)") { await model.load() }
         // 进入页面与回到前台时补同步，并刷新同步标记。
         .task { await syncHealth() }
         .onChange(of: scenePhase) {
@@ -189,7 +202,7 @@ struct DataView: View {
 
     private func syncHealth() async {
         await services.healthSync.run()
-        model.reload()
+        await model.reload()
     }
 
     private var libraryLink: some View {

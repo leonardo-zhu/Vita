@@ -214,6 +214,8 @@ M1 进度（2026-11-04）：根目录 pnpm workspace（沿用 Admin 原来的 lo
 
 部署（2026-11-04）：`vita-api` 已部署到 R4S（`https://vita-api.r4s.leonardo-zhu.me`），经公网 HTTPS 自检通过（设备令牌、鉴权、读数据、真实参考库）；Admin 随 workspace 改造一起重新部署，正常。同日填入 Conduit 密钥（`CONDUIT_BASE_URL` 走本机 `http://127.0.0.1:3012`），用真实模型跑通了两轮：先澄清生熟与米饭用量（必测场景 1），再生成营养值由服务端计算的确认卡；流式文字分段到达，配置读的是 Admin 发布的版本，第二轮输入约 89% 命中缓存。R4S 侧的操作记录在 HomeLab 的 `notes/2026-11-04-vita-api-部署.md`。部署地址的环境变量用 `VITA_API_HOST`，不用 `HOSTNAME`（很多 shell 会把它设成机器名）。
 
+M3（同日）：iOS 改为调 API。新增 `Platform/API`（按契约手写的模型、SSE 解析，发给 API 的 ID 一律小写）；Chat 经 SSE 跑服务端的 Agent，停止调取消接口，带 `afterConfirm` 的卡片确认后调 `/continue`；Data 页、食品库、目标、确认卡、标签照片都读写 API；本机的 Agent、LLM 客户端、Record / Pending / Food 服务删除。Apple 健康改为拉变更流，Sample 带 `vita:<entity>:<id>:<项>` 同步标识先删后写，本机只存游标与写入结果（`VitaState/health-sync.json`）；称重连不上时进本机队列，回到前台补传。API 新增 `GET /v1/pending/:id`（历史消息里卡片的结局）。迁移：有 1.0 库时连上设备令牌后进迁移页，导出（文件留在“文稿”）→ 导入 → 核对条数与每日能量 → 删 1.0 写进健康的旧 Sample、从头拉变更流重写 → 删本机库；导入核对通过后中途被打断，下次按天读回核对再接着做。iOS 的导出由测试生成 `shared/fixtures/ios-1.0-export.json`，API 的导入测试用它核对两端格式。用模拟器里真实的 1.0 库对本地 API 跑通了导出、导入与核对（4 条记录、10 次称重）；更新健康这一步在 iOS 27.1 模拟器上因 `healthd` 不响应没能跑完（1.0 同样卡住），要在真机上验证。iOS 116 个测试、API 143 个测试。
+
 | 阶段 | 技术内容 |
 | --- | --- |
 | M0 | 评审本文与 ADR-019 至 022 |

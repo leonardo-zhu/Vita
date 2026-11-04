@@ -8,12 +8,27 @@ struct DietarySample: Equatable, Codable, Sendable {
     var metadata: [String: String]
 }
 
-/// 体脂秤测得、写入 Apple 健康的一次称重。
+/// 一次称重写进 Apple 健康的体重、体脂率与去脂体重（服务端算好的，见变更流）。
 struct BodyMeasurementSample: Equatable, Codable, Sendable {
     var bodyMassKg: Decimal
     /// 0–1；没测到阻抗或缺资料时不写。
     var bodyFatFraction: Decimal?
+    var leanBodyMassKg: Decimal? = nil
     var date: Date
+}
+
+/// Vita 写进健康的 Sample 的同步标识（`HKMetadataKeySyncIdentifier`，架构设计 §9）：同一对象的同一项只有一条，
+/// 换手机后经 iCloud 回来的旧数据也认得出。
+enum HealthSyncIdentifier {
+    enum BodyKind: String, Sendable { case bodyMass, bodyFat, leanMass }
+
+    static func record(_ id: UUID, _ nutrient: Nutrient) -> String {
+        "vita:record:\(id.uuidString.lowercased()):\(nutrient.rawValue)"
+    }
+
+    static func weighing(_ id: UUID, _ kind: BodyKind) -> String {
+        "vita:weighing:\(id.uuidString.lowercased()):\(kind.rawValue)"
+    }
 }
 
 enum HealthWriteAuthorization: Equatable, Sendable {
@@ -45,18 +60,18 @@ protocol HealthDataStore: Sendable {
     /// 截至该日中午的前一晚睡眠时长（小时）。
     func sleepHours(endingOn date: LocalDate, timeZone: TimeZone) async throws -> Decimal?
 
-    /// 保存并返回各 Sample 的 UUID，顺序与输入一致。
-    func save(_ samples: [DietarySample]) async throws -> [UUID]
-    /// 删除 Vita 写入过的 Sample；已经不存在的忽略。
+    /// 把一条饮食记录在健康里的 Sample 换成这些（空数组即删除）。按同步标识先删后写。
+    func replaceDietary(recordID: UUID, with samples: [DietarySample], syncVersion: Int) async throws
+    /// 删除 1.0 写入的、没带同步标识的膳食 Sample（迁移时用）；已经不存在的忽略。
     func delete(_ uuids: [UUID]) async throws
 
     /// 体重、体脂率、去脂体重里还有没问过的（新版本加了类型时会这样），需要再申请一次。
     func hasUndeterminedBodyWrite() -> Bool
     /// 体重的写入状态（体脂率随体重一起申请）。
     func bodyWriteAuthorization() -> HealthWriteAuthorization
-    /// 返回写入的 Sample UUID，删除这次称重时用。
-    func saveBodyMeasurement(_ sample: BodyMeasurementSample) async throws -> [UUID]
-    /// 删除 Vita 写入过的体重、体脂率 Sample；已经不存在的忽略。
+    /// 把一次称重在健康里的体重、体脂率、去脂体重换成这一份（nil 即删除）。按同步标识先删后写。
+    func replaceBody(weighingID: UUID, with sample: BodyMeasurementSample?, syncVersion: Int) async throws
+    /// 删除 1.0 写入的、没带同步标识的体重、体脂率 Sample（迁移时用）；已经不存在的忽略。
     func deleteBodyMeasurements(_ uuids: [UUID]) async throws
 }
 
@@ -65,13 +80,13 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     private let lock = NSLock()
     private var _write: HealthWriteAuthorization
     private var _requested = false
-    private var _samples: [UUID: DietarySample] = [:]
+    private var _dietary: [UUID: (samples: [DietarySample], version: Int)] = [:]
+    private var _legacy: Set<UUID> = []
     private var _failuresRemaining = 0
     private var _bodyWrite: HealthWriteAuthorization = .notDetermined
     /// 申请授权时用户对体重写入的答复。
     var bodyWriteAnswer: HealthWriteAuthorization = .authorized
-    private var _bodySamples: [BodyMeasurementSample] = []
-    private var _bodySampleIDs: [UUID: BodyMeasurementSample] = [:]
+    private var _body: [UUID: (sample: BodyMeasurementSample, version: Int)] = [:]
     var body = ManualBodyMetrics(enteredAt: .distantPast)
     var activeEnergy: Decimal?
     /// 按日期给不同的活动能量；没列出的日子用 `activeEnergy`。
@@ -84,13 +99,17 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
 
     var isAvailable: Bool { true }
 
-    /// 当前保存在“健康”里的 Vita Sample。
-    var samples: [UUID: DietarySample] { lock.withLock { _samples } }
+    /// 当前健康里各条记录的膳食 Sample 与版本。
+    var dietary: [UUID: (samples: [DietarySample], version: Int)] { lock.withLock { _dietary } }
+    /// 当前健康里各次称重的 Sample 与版本。
+    var bodySamples: [UUID: (sample: BodyMeasurementSample, version: Int)] { lock.withLock { _body } }
+    /// 1.0 写入的、没带标识的 Sample。
+    var legacySamples: Set<UUID> {
+        get { lock.withLock { _legacy } }
+        set { lock.withLock { _legacy = newValue } }
+    }
 
     func setWriteAuthorization(_ value: HealthWriteAuthorization) { lock.withLock { _write = value } }
-
-    /// 写入过的称重。
-    var bodySamples: [BodyMeasurementSample] { lock.withLock { _bodySamples } }
 
     /// 接下来 `count` 次写入或删除失败（模拟网络、存储错误）。
     func failNext(_ count: Int) { lock.withLock { _failuresRemaining = count } }
@@ -121,22 +140,16 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     func activeEnergyKcal(on date: LocalDate, timeZone: TimeZone) async throws -> Decimal? { activeEnergyByDate[date] ?? activeEnergy }
     func sleepHours(endingOn date: LocalDate, timeZone: TimeZone) async throws -> Decimal? { sleep }
 
-    func save(_ samples: [DietarySample]) async throws -> [UUID] {
+    func replaceDietary(recordID: UUID, with samples: [DietarySample], syncVersion: Int) async throws {
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         try checkFailure()
-        return lock.withLock {
-            samples.map { sample in
-                let id = UUID()
-                _samples[id] = sample
-                return id
-            }
-        }
+        lock.withLock { _dietary[recordID] = samples.isEmpty ? nil : (samples, syncVersion) }
     }
 
     func delete(_ uuids: [UUID]) async throws {
         guard writeAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         try checkFailure()
-        lock.withLock { uuids.forEach { _samples.removeValue(forKey: $0) } }
+        lock.withLock { _legacy.subtract(uuids) }
     }
 
     func bodyWriteAuthorization() -> HealthWriteAuthorization { lock.withLock { _bodyWrite } }
@@ -145,26 +158,22 @@ final class FakeHealthDataStore: HealthDataStore, @unchecked Sendable {
     /// 用户在健康 App 里关掉了体重写入。
     func revokeBodyWrite() { lock.withLock { _bodyWrite = .denied } }
 
-    func saveBodyMeasurement(_ sample: BodyMeasurementSample) async throws -> [UUID] {
+    func replaceBody(weighingID: UUID, with sample: BodyMeasurementSample?, syncVersion: Int) async throws {
         guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         try checkFailure()
-        let ids = (sample.bodyFatFraction == nil ? [UUID()] : [UUID(), UUID()])
         lock.withLock {
-            _bodySamples.append(sample)
-            ids.forEach { _bodySampleIDs[$0] = sample }
-            body.bodyMassKg = sample.bodyMassKg
-            body.bodyFatFraction = sample.bodyFatFraction ?? body.bodyFatFraction
-            body.enteredAt = sample.date
+            _body[weighingID] = sample.map { ($0, syncVersion) }
+            if let sample {
+                body.bodyMassKg = sample.bodyMassKg
+                body.bodyFatFraction = sample.bodyFatFraction ?? body.bodyFatFraction
+                body.enteredAt = sample.date
+            }
         }
-        return ids
     }
 
     func deleteBodyMeasurements(_ uuids: [UUID]) async throws {
         guard bodyWriteAuthorization() == .authorized else { throw HealthStoreError.notAuthorized }
         try checkFailure()
-        lock.withLock {
-            let removed = uuids.compactMap { _bodySampleIDs.removeValue(forKey: $0) }
-            _bodySamples.removeAll { sample in removed.contains(sample) && !_bodySampleIDs.values.contains(sample) }
-        }
+        lock.withLock { _legacy.subtract(uuids) }
     }
 }
