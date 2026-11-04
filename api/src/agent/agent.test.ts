@@ -8,7 +8,7 @@ import type { ChatEvent } from '@vita/contract'
 import { describe, expect, it } from 'vitest'
 
 import { NO_TARGETS } from '../services/goals.ts'
-import { DAY, NOW, ORIGIN, setup } from '../test/support.ts'
+import { DAY, estimate, lunch, NOW, ORIGIN, setup } from '../test/support.ts'
 import { BUILTIN_CONFIG, resolveConfig, StaticConfigSource, TOOL_SPECS } from './config.ts'
 import { LLMError, mapError, requestBody, StreamParser, type LLMClient, type LLMEvent, type LLMRequest } from './llm.ts'
 import { MAX_TOOL_ROUNDS, Orchestrator, type Turn } from './orchestrator.ts'
@@ -176,10 +176,8 @@ describe('上下文', () => {
     const first = await send('中午两个水煮蛋')
     services.pending.confirm(first.pendingId!, ORIGIN)
     await send('谢谢')
-    expect(client.requests[2].input[1]).toEqual({
-      type: 'assistant',
-      text: '请确认卡片。\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］',
-    })
+    expect(client.requests[2].input[1]).toEqual({ type: 'assistant', text: '请确认卡片。' })
+    expect(client.requests[2].input[2]).toEqual({ type: 'system', text: '［系统：上一条助手回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］' })
   })
 
   it('个人食品库整库进系统指令，搜索工具也返回整库', async () => {
@@ -325,7 +323,7 @@ describe('确认后接续', () => {
     // 接续轮把"已确认 + 下一步"作为系统消息放在最后，历史里的卡片注记也已变成已确认。
     const input = client.requests[2].input
     expect(input.at(-1)).toMatchObject({ type: 'system', text: expect.stringContaining('再记一杯牛奶') })
-    expect(input.some((item) => item.type === 'assistant' && item.text.includes('用户已确认，已保存'))).toBe(true)
+    expect(input.some((item) => item.type === 'system' && item.text.includes('用户已确认，已保存'))).toBe(true)
     expect(services.chat.messages(DAY).map((m) => m.role)).toEqual(['user', 'assistant', 'assistant'])
   })
 })
@@ -420,5 +418,33 @@ describe('对话追踪', () => {
     expect(trace).toMatchObject({ kind: 'message', input_text: '我的目标是多少', reply: '还没有目标。', outcome: 'ok', rounds: 2, tokens_in: 200, tokens_cached: 160 })
     expect(JSON.parse(trace.steps as string)).toEqual([{ tool: 'getGoals', arguments: '{}', output: expect.stringContaining('还没有每日目标'), resultCode: 'ok' }])
     expect(trace.created_at).toBe(NOW.toISOString())
+  })
+})
+
+describe('模型声称生成了卡片却没调用工具', () => {
+  it('去掉照抄的注记，并说明什么都没保存', async () => {
+    const { services, send } = make([[text('已根据标签生成鲜牛奶的存库确认卡。\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，用户已确认，已保存。］'), done]])
+    const result = await send('存一下这个牛奶')
+    expect(result.pendingId).toBeNull()
+    expect(result.reply.text).not.toContain('客户端注')
+    expect(result.reply.text).toContain('这次实际没有生成确认卡')
+    expect(services.chat.messages(DAY).at(-1)?.text).toBe(result.reply.text)
+  })
+
+  it('只是提到以前的卡片时不改', async () => {
+    const { send } = make([[text('上一张卡片已经确认保存了，还要记别的吗？'), done]])
+    expect((await send('好')).reply.text).toBe('上一张卡片已经确认保存了，还要记别的吗？')
+  })
+
+  it('历史里卡片的结局作为单独的系统消息，不拼进助手的话', async () => {
+    const { services, client, send } = make([[text('好的'), done]])
+    const pending = services.pending.proposeRecord({ kind: 'create', draft: lunch([estimate(500)]) }, DAY, 0, ORIGIN)
+    services.chat.append(DAY, 'user', '中午吃了外卖', null)
+    services.chat.append(DAY, 'assistant', '请确认下面的卡片。', { type: 'pending', id: pending.id })
+    await send('确认了')
+    const input = client.requests[0].input
+    const index = input.findIndex((item) => item.type === 'assistant')
+    expect(input[index]).toEqual({ type: 'assistant', text: '请确认下面的卡片。' })
+    expect(input[index + 1]).toMatchObject({ type: 'system', text: expect.stringContaining('确认卡') })
   })
 })

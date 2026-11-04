@@ -163,6 +163,14 @@ export class Orchestrator {
       reply = pendingId ? '请确认下面的卡片。' : '好的。'
       emit({ type: 'text', delta: reply })
     }
+    if (!pendingId) {
+      const corrected = guardUnbackedCardClaim(reply)
+      if (corrected !== reply) {
+        // 已推出去的文字收不回来，补一段说明；保存的回复用修正后的，历史里不留假的“已保存”。
+        emit({ type: 'text', delta: corrected.slice(stripFakeNotes(reply).length) })
+        reply = corrected
+      }
+    }
     if (turn.kind === 'message') {
       chat.append(date, 'user', turn.text, null, turn.labelScanIds)
     }
@@ -179,12 +187,16 @@ export class Orchestrator {
    */
   private historyInput(history: ChatMessage[], config: AgentConfig): LLMInputItem[] {
     const limit = Math.max(config.context.maxRecentMessages, 0)
-    return (limit === 0 ? [] : history.slice(-limit)).map((message): LLMInputItem => {
+    return (limit === 0 ? [] : history.slice(-limit)).flatMap((message): LLMInputItem[] => {
       if (message.role === 'user') {
-        return this.userItem(message.text, message.labelScanIds, config)
+        return [this.userItem(message.text, message.labelScanIds, config)]
       }
-      if (message.cardRef?.type !== 'pending') return { type: 'assistant', text: message.text }
-      return { type: 'assistant', text: `${message.text}\n\n［客户端注：这条回复附带一张由提案工具生成的确认卡，${this.cardStatus(message.cardRef)}。］` }
+      if (message.cardRef?.type !== 'pending') return [{ type: 'assistant', text: message.text }]
+      // 卡片的结局单独作为系统消息给出，不拼进助手的话里：拼进去模型会学着在回复里写同样的注记，假装生成了卡片。
+      return [
+        { type: 'assistant', text: message.text },
+        { type: 'system', text: `［系统：上一条助手回复附带一张由提案工具生成的确认卡，${this.cardStatus(message.cardRef)}。］` },
+      ]
     })
   }
 
@@ -365,4 +377,22 @@ function join(first: string, second: string): string {
   if (!first) return second
   if (!second) return first
   return `${first}\n\n${second}`
+}
+
+/** 模型偶尔会照着历史里的格式自己写“［客户端注…］”“［系统…］”，这些只能由服务端加，回复里出现就去掉。 */
+export function stripFakeNotes(reply: string): string {
+  return reply.replace(/\s*［(?:客户端|系统)[^］]*］/g, '').trimEnd()
+}
+
+/**
+ * 这一轮没有生成确认卡、回复却说生成了（或照抄了注记）时，去掉假注记并明确说明什么都没保存（ADR-004：写入只经卡片）。
+ * 没有这类说法时原样返回。
+ */
+export function guardUnbackedCardClaim(reply: string): string {
+  const stripped = stripFakeNotes(reply)
+  // 只认“生成了卡片 / 请确认下面这张”这类说法，提到以前的卡片（“上一张已确认”）不算。
+  const claimsCard = /生成[^。\n]{0,16}(确认)?卡|请确认(下面|这张)|下面的(确认)?卡片/.test(stripped)
+  if (!claimsCard && stripped === reply.trimEnd()) return reply
+  if (!claimsCard) return stripped
+  return `${stripped}\n\n（这次实际没有生成确认卡，没有保存任何数据。请再说一次，或换个说法。）`
 }
