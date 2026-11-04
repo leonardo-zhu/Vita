@@ -323,6 +323,7 @@ describe('确认后接续', () => {
     const { services, client, send } = make([
       [text('先确认这条午餐，确认后我再记牛奶。'), call('c1', 'proposeRecordChange', { ...eggProposal, afterConfirm: '再记一杯牛奶' }), done],
       [text('接着记牛奶。'), done],
+      [text('牛奶其实已经记过了。'), done],
     ])
     const first = await send('中午两个水煮蛋 108g，还喝了一杯牛奶')
     expect(services.pending.get(first.pendingId!).afterConfirm).toBe('再记一杯牛奶')
@@ -334,7 +335,11 @@ describe('确认后接续', () => {
     expect(() => services.pending.claimContinuation(first.pendingId!)).toThrow('pending.alreadyContinued')
 
     const next = await send({ kind: 'continuation', pendingId: first.pendingId!, step: claimed.step })
-    expect(next.reply.text).toBe('接着记牛奶。')
+    // 接续第一轮强制调工具；只说不做时提醒一次，第二轮不再强制。
+    expect(client.requests[1].toolChoice).toBe('required')
+    expect(client.requests[2].toolChoice).toBeUndefined()
+    expect(JSON.stringify(client.requests[2].input)).toContain('还没有调用工具')
+    expect(next.reply.text).toBe('接着记牛奶。\n\n牛奶其实已经记过了。')
     // 接续轮把"已确认 + 下一步"作为系统消息放在最后，历史里的卡片注记也已变成已确认。
     const input = client.requests[1].input
     expect(input.at(-1)).toMatchObject({ type: 'system', text: expect.stringContaining('再记一杯牛奶') })

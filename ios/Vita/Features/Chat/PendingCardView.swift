@@ -130,7 +130,7 @@ private struct FoodPreviewContent: View {
         switch preview.kind {
         case .createProduct: "存入食品库"
         case .addVersion: "更新营养数据"
-        case .updateProduct: "改名称与叫法"
+        case .updateProduct: "更新食品信息"
         }
     }
 
@@ -171,6 +171,10 @@ private struct FoodPreviewContent: View {
             }
             if let previous = preview.previous, previous.brandOrSupplier != preview.brandOrSupplier {
                 Text("品牌：\(previous.brandOrSupplier ?? "无") → \(preview.brandOrSupplier ?? "无")").font(VitaType.meta).foregroundStyle(.secondary)
+            }
+            if let previous = preview.previous, previous.package != preview.package {
+                Text("包装：\(previous.package.map(DisplayFormat.quantity) ?? "未记") → \(preview.package.map(DisplayFormat.quantity) ?? "未记")")
+                    .font(VitaType.body)
             }
             Text(preview.aliases.isEmpty ? "没有常用叫法" : "也叫：" + preview.aliases.joined(separator: "、"))
                 .font(VitaType.body)

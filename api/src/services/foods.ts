@@ -244,7 +244,14 @@ export class FoodService {
         const name = change.name?.trim() || current.name
         const brand = change.brandOrSupplier === undefined ? current.brandOrSupplier : change.brandOrSupplier?.trim() || null
         const aliases = change.aliases === null ? current.aliases : cleanAliases(change.aliases, name)
-        if (name === current.name && brand === current.brandOrSupplier && isDeepStrictEqual(aliases, current.aliases)) {
+        const pack = change.package === undefined ? current.package : change.package
+        if (pack && !(pack.amount > 0)) throw new ServiceError('food', 'invalidPackage')
+        if (
+          name === current.name &&
+          brand === current.brandOrSupplier &&
+          isDeepStrictEqual(aliases, current.aliases) &&
+          isDeepStrictEqual(pack, current.package)
+        ) {
           throw new ServiceError('food', 'nothingToChange')
         }
         return {
@@ -252,17 +259,17 @@ export class FoodService {
             kind: 'updateProduct',
             productName: name,
             brandOrSupplier: brand,
-            package: current.package,
+            package: pack,
             aliases,
-            previous: { name: current.name, brandOrSupplier: current.brandOrSupplier, aliases: current.aliases },
+            previous: { name: current.name, brandOrSupplier: current.brandOrSupplier, aliases: current.aliases, package: current.package },
             basis: current.activeVersion.basis,
             sourceKind: current.activeVersion.sourceKind,
             previousBasis: null,
           },
           commit: () => {
             database
-              .prepare('UPDATE food_products SET name = ?, brand_or_supplier = ?, aliases = ?, updated_at = ? WHERE id = ?')
-              .run(name, brand, aliasesColumn(aliases), this.context.now().toISOString(), current.id)
+              .prepare('UPDATE food_products SET name = ?, brand_or_supplier = ?, aliases = ?, package = ?, updated_at = ? WHERE id = ?')
+              .run(name, brand, aliasesColumn(aliases), pack ? JSON.stringify(pack) : null, this.context.now().toISOString(), current.id)
             return current.id
           },
         }

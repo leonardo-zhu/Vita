@@ -293,6 +293,7 @@ function foodChange(payload: z.infer<typeof FoodChangePayload>, services: Servic
       // 没给品牌就不改；给了空字符串表示清空。
       brandOrSupplier: product.brandOrSupplier === undefined || product.brandOrSupplier === null ? undefined : product.brandOrSupplier,
       aliases: product.aliases ?? null,
+      ...(product.package ? { package: quantity(product.package, 'payload.product.package') } : {}),
     }
   }
   if (!payload.version) throw missing('payload.version')
@@ -384,6 +385,13 @@ function serviceFailure(error: ServiceError): ToolResult {
     case 'record.eventTimeOutsideSession':
       return failure('eventTimeOutsideSession', '事件时间不在当前日期内。')
     case 'record.invalidItem':
+      if (reason.reason === 'packageUnavailable') {
+        return failure(
+          'invalidItem',
+          `第 ${(reason.index ?? 0) + 1} 项不合格：这个食品没有记包装规格，不能按“一袋 / 一盒”换算。用户说了包装多大时，这次用 amountSource userStated 按克数或毫升数记；` +
+            '并在 afterConfirm 里写“给这个食品补上包装规格”，确认后用 proposeFoodChange 的 updateProduct 补上 product.package，下次就能按袋记。用户没说就先问。',
+        )
+      }
       return failure('invalidItem', `第 ${(reason.index ?? 0) + 1} 项不合格：${reason.reason}。`)
     case 'food.activeVersionChanged':
       return failure('revisionConflict', '这个食品在提案后已更新，请重新读取后再提出。')

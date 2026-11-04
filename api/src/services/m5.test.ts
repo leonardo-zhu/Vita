@@ -96,6 +96,15 @@ describe('常用叫法与改名', () => {
     expect(() => services.foods.preview({ kind: 'updateProduct', productId: id, name: null, brandOrSupplier: undefined, aliases: null })).toThrow('food.nothingToChange')
   })
 
+  it('改名卡也能补上包装规格（“一袋是 288 g”）', () => {
+    const { services } = setup()
+    const id = services.foods.apply({ kind: 'createProduct', product: { name: '小笼汤包', brandOrSupplier: null, package: null, note: null }, version: milk({}) }, ORIGIN)
+    const preview = services.foods.preview({ kind: 'updateProduct', productId: id, name: null, brandOrSupplier: undefined, aliases: null, package: { amount: 288, unit: 'g' } })
+    expect(preview).toMatchObject({ kind: 'updateProduct', package: { amount: 288, unit: 'g' }, previous: { package: null } })
+    services.foods.apply({ kind: 'updateProduct', productId: id, name: null, brandOrSupplier: undefined, aliases: null, package: { amount: 288, unit: 'g' } }, ORIGIN)
+    expect(services.foods.product(id).package).toEqual({ amount: 288, unit: 'g' })
+  })
+
   it('App 里直接改叫法', () => {
     const { services } = setup()
     const id = services.foods.apply({ kind: 'createProduct', product: { name: '燕麦奶', brandOrSupplier: null, package: null, note: null }, version: milk({}) }, ORIGIN)

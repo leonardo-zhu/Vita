@@ -339,14 +339,17 @@ export const RecordChangePreview = z.object({
 export type RecordChangePreview = z.infer<typeof RecordChangePreview>
 
 export const FoodChangePreview = z.object({
-  /** updateProduct：改名称、品牌、常用叫法（对话里“这个以后叫 X”），营养值不变，basis 是当前生效版本。 */
+  /** updateProduct：改名称、品牌、常用叫法、包装规格（对话里“这个以后叫 X”“一袋是 288 g”），营养值不变，basis 是当前生效版本。 */
   kind: z.enum(['createProduct', 'addVersion', 'updateProduct']),
   productName: z.string(),
   brandOrSupplier: z.string().nullable(),
   package: Quantity.nullable(),
   aliases: z.array(z.string()).default([]),
   /** updateProduct 改之前的样子，便于对比。 */
-  previous: z.object({ name: z.string(), brandOrSupplier: z.string().nullable(), aliases: z.array(z.string()) }).nullable().default(null),
+  previous: z
+    .object({ name: z.string(), brandOrSupplier: z.string().nullable(), aliases: z.array(z.string()), package: Quantity.nullable().default(null) })
+    .nullable()
+    .default(null),
   basis: FoodVersionBasis,
   sourceKind: FoodVersionSource,
   /** 新版本取代的旧版本基准，便于对比。 */

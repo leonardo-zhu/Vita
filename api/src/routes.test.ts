@@ -290,13 +290,14 @@ describe('对话接口', () => {
     const { call } = await withAgent([
       [{ type: 'textDelta', delta: '确认后我再记牛奶。' }, { type: 'functionCall', call: { callId: 'c1', name: 'proposeRecordChange', arguments: JSON.stringify(proposal) } }, completed],
       [{ type: 'textDelta', delta: '接着记牛奶。' }, completed],
+      [{ type: 'textDelta', delta: '已经记过了。' }, completed],
     ])
     const first = await events(await call(`/v1/days/${DAY}/chat`, 'POST', { text: '中午吃了外卖，还喝了牛奶' }))
     const pendingId = (first.at(-1) as { pendingId: string }).pendingId
     expect((await call(`/v1/pending/${pendingId}/continue`, 'POST')).status).toBe(409)
     await call(`/v1/pending/${pendingId}/confirm`, 'POST')
     const next = await events(await call(`/v1/pending/${pendingId}/continue`, 'POST'))
-    expect(next.at(-1)).toMatchObject({ type: 'done', reply: { text: '接着记牛奶。' } })
+    expect(next.at(-1)).toMatchObject({ type: 'done', reply: { text: '接着记牛奶。\n\n已经记过了。' } })
     const again = await call(`/v1/pending/${pendingId}/continue`, 'POST')
     expect(again.status).toBe(409)
     expect(ErrorResponse.parse(await again.json()).error.code).toBe('alreadyContinued')

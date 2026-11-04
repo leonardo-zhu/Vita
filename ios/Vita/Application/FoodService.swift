@@ -33,6 +33,7 @@ struct FoodChangePreview: Equatable, Codable, Sendable {
         var name: String
         var brandOrSupplier: String?
         var aliases: [String]
+        var package: Quantity?
     }
 
     var kind: Kind

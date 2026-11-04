@@ -105,6 +105,9 @@ export class Orchestrator {
             maxRetries: config.llm.maxRetries,
             streaming: config.llm.streaming,
             reasoningEffort: config.llm.reasoningEffort === 'default' ? null : config.llm.reasoningEffort,
+            // 确认后的接续：下一步几乎总要调工具（出下一张卡或先查一下）。实测（2026-11-05，ark-code-latest）
+            // 不强制时约四分之一只说“现在记……”不调；强制且保留思考时 19/20 调了。不需要再做时它可以查一下再在下一轮说明。
+            toolChoice: turn.kind === 'continuation' && round === 0 ? 'required' : undefined,
             extraBody: config.llm.extraBody,
           },
           signal,
@@ -137,6 +140,12 @@ export class Orchestrator {
           if (!pendingId && !nudged && round < MAX_TOOL_ROUNDS - 1 && claimsCard(roundText)) {
             nudged = true
             input.push({ type: 'system', text: UNBACKED_CARD_NUDGE })
+            continue
+          }
+          // 接续的第一轮就没调任何工具（服务商没严格执行 required 时）：提醒一次。
+          if (turn.kind === 'continuation' && round === 0 && steps.length === 0 && !nudged) {
+            nudged = true
+            input.push({ type: 'system', text: CONTINUATION_NUDGE })
             continue
           }
           break
@@ -416,6 +425,9 @@ function join(first: string, second: string): string {
 export function claimsCard(text: string): boolean {
   return /生成[^。\n]{0,16}(确认)?卡|请确认(下面|这张)|下面的(确认)?卡片/.test(stripFakeNotes(text))
 }
+
+const CONTINUATION_NUDGE =
+  '［系统：你只说了要做什么，还没有调用工具，所以什么都没发生。现在直接调用对应的工具完成这一步（记录用 proposeRecordChange，食品库用 proposeFoodChange），不要重复刚才的文字；确实不需要再做就简短说明。］'
 
 const UNBACKED_CARD_NUDGE =
   '［系统：你刚才说生成了确认卡，但没有调用任何工具，所以用户看不到卡片，也什么都没保存。现在直接调用对应的提案工具（proposeFoodChange / proposeRecordChange 等）生成这张卡，不要再重复刚才的文字。］'

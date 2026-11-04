@@ -47,6 +47,8 @@ export interface LLMRequest {
   streaming: boolean
   /** reasoning.effort；null 表示不传。 */
   reasoningEffort: string | null
+  /** tool_choice；不给时由模型决定（auto）。确认后的接续第一轮用 required，免得模型只说不做。 */
+  toolChoice?: 'auto' | 'required'
   /** 原样合并进请求体的其他参数（配置 llm.extraBody），不能覆盖保留字段。 */
   extraBody: Record<string, unknown>
 }
@@ -117,7 +119,7 @@ export interface LLMClient {
 }
 
 /** 服务端自己填的字段，extraBody 不能覆盖。 */
-export const RESERVED_REQUEST_FIELDS = new Set(['model', 'instructions', 'input', 'tools', 'stream', 'store', 'reasoning', 'previous_response_id'])
+export const RESERVED_REQUEST_FIELDS = new Set(['model', 'instructions', 'input', 'tools', 'stream', 'store', 'reasoning', 'previous_response_id', 'tool_choice'])
 
 /** Responses API 请求体。消息用简写形式（role + content），函数调用与输出用 item 形式。 */
 export function requestBody(request: LLMRequest): Record<string, unknown> {
@@ -151,6 +153,7 @@ export function requestBody(request: LLMRequest): Record<string, unknown> {
     // 不让服务商保存回复：上下文每次都完整提供，用不到 previous_response_id。
     store: false,
     ...(request.reasoningEffort ? { reasoning: { effort: request.reasoningEffort } } : {}),
+    ...(request.toolChoice ? { tool_choice: request.toolChoice } : {}),
     ...extra,
   }
 }

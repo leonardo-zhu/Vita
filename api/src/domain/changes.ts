@@ -66,6 +66,14 @@ export type FoodChange =
   /** 标签、配方或包装变化：同一产品下新建版本并切换生效版本。expectedActiveVersionId 用于发现提案后产品已被更新。 */
   | { kind: 'addVersion'; productId: string; expectedActiveVersionId: string | null; version: FoodVersionDraft }
   /** 对话里改名称、品牌、常用叫法（“这个以后叫 X”）。没给的项不变；aliases 是改后的完整列表。营养值不变。 */
-  | { kind: 'updateProduct'; productId: string; name: string | null; brandOrSupplier: string | null | undefined; aliases: string[] | null }
+  | {
+      kind: 'updateProduct'
+      productId: string
+      name: string | null
+      brandOrSupplier: string | null | undefined
+      aliases: string[] | null
+      /** 补上或改包装规格（如“一袋 288 g”）；不给不变。 */
+      package?: Quantity | null
+    }
 
 export type PendingChange = { type: 'record'; change: RecordChange } | { type: 'food'; change: FoodChange }
