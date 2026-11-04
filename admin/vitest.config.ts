@@ -13,5 +13,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // 本地几十毫秒的用例（写 SQLite、发布配置）在 GitHub 的 runner 上并行跑时偶尔要 7 秒，
+    // 超过默认的 5 秒（2026-11-04 a8ec28d 那次部署）。放宽上限，不改测试本身。
+    testTimeout: 20_000,
   },
 })
