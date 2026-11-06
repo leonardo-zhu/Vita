@@ -11,7 +11,7 @@ import { NO_TARGETS } from '../services/goals.ts'
 import { DAY, estimate, lunch, NOW, ORIGIN, setup } from '../test/support.ts'
 import { BUILTIN_CONFIG, resolveConfig, StaticConfigSource, TOOL_SPECS } from './config.ts'
 import { LLMError, mapError, requestBody, StreamParser, type LLMClient, type LLMEvent, type LLMRequest } from './llm.ts'
-import { MAX_TOOL_ROUNDS, Orchestrator, type Turn } from './orchestrator.ts'
+import { MAX_TOOL_ROUNDS, Orchestrator, announcesChange, type Turn } from './orchestrator.ts'
 
 /** 按脚本回放模型事件，并记下每次请求（深拷贝，之后的修改不影响）。 */
 class ScriptedClient implements LLMClient {
@@ -482,6 +482,31 @@ describe('模型声称生成了卡片却没调用工具', () => {
     expect(result.pendingId).not.toBeNull()
     expect(result.reply.text).not.toContain('这次实际没有生成确认卡')
     expect(JSON.stringify(client.requests[1].input)).toContain('没有调用任何工具')
+  })
+
+  it('只交代了怎么记就停了：提醒一次，模型调用工具后卡片照常生成', async () => {
+    const announce = text('这碗按「鸭血粉丝汤」记为晚餐；无糖可乐按一罐 330 ml 记。')
+    const { client, send } = make([[announce, done], [call('c1', 'proposeRecordChange', eggProposal), done], [text('请确认下面的卡片。'), done]])
+    const result = await send('刚刚吃了一碗鸭血粉丝汤')
+    expect(result.pendingId).not.toBeNull()
+    expect(result.reply.text).not.toContain('这次实际没有生成确认卡')
+    expect(JSON.stringify(client.requests[1].input)).toContain('没有调用任何工具')
+  })
+
+  it('提醒后还是没调用：说明什么都没保存', async () => {
+    const { send } = make([[text('无糖可乐按一罐 330 ml 记。'), done], [text('好的。'), done]])
+    const result = await send('喝了一罐无糖可乐')
+    expect(result.pendingId).toBeNull()
+    expect(result.reply.text).toContain('这次实际没有生成确认卡')
+  })
+
+  it('认得出“要怎么记”的说法，提问或只是提到记录时不算', () => {
+    expect(announcesChange('无糖可乐按一罐 330 ml 记。')).toBe(true)
+    expect(announcesChange('这碗按「鸭血粉丝汤」记为晚餐')).toBe(true)
+    expect(announcesChange('好，按一罐 330 ml 存为「健怡可口可乐」')).toBe(true)
+    expect(announcesChange('要按 100 g 记吗？')).toBe(false)
+    expect(announcesChange('今天的记录里蛋白质已经 80 g。')).toBe(false)
+    expect(announcesChange('按目标还差 300 kcal，记得晚上多吃点蛋白质。')).toBe(false)
   })
 
   it('Admin 排除的消息不再发给模型，追踪和日期列表照常可查', async () => {

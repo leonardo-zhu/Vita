@@ -142,6 +142,12 @@ export class Orchestrator {
             input.push({ type: 'system', text: UNBACKED_CARD_NUDGE })
             continue
           }
+          // 只说了“按……记为晚餐”这类要做的事就停了（2026-11-06 真机：思考里写了要建记录，却没调用）：提醒一次。
+          if (!pendingId && !nudged && round < MAX_TOOL_ROUNDS - 1 && announcesChange(roundText)) {
+            nudged = true
+            input.push({ type: 'system', text: UNBACKED_CHANGE_NUDGE })
+            continue
+          }
           // 接续的第一轮就没调任何工具（服务商没严格执行 required 时）：提醒一次。
           if (turn.kind === 'continuation' && round === 0 && steps.length === 0 && !nudged) {
             nudged = true
@@ -426,6 +432,19 @@ export function claimsCard(text: string): boolean {
   return /生成[^。\n]{0,16}(确认)?卡|请确认(下面|这张)|下面的(确认)?卡片/.test(stripFakeNotes(text))
 }
 
+/**
+ * 回复在交代“这次怎么记 / 怎么存”（“按一罐 330 ml 记”“记为晚餐”“存为……”），却没生成卡片。
+ * 回复里在提问（有问号）时不算：那是先问清楚再记。
+ */
+export function announcesChange(text: string): boolean {
+  const stripped = stripFakeNotes(text)
+  if (/[？?]/.test(stripped)) return false
+  return /记为|记成|记作|记录为|存为|存成|存进|按[^。；！\n]{0,40}?记(?![录得住性忆])/.test(stripped)
+}
+
+const UNBACKED_CHANGE_NUDGE =
+  '［系统：你说了这次要怎么记录或存库，但没有调用任何工具，所以用户看不到确认卡，什么都没保存。现在直接调用对应的提案工具（记录用 proposeRecordChange，食品库用 proposeFoodChange）生成卡片，不要重复刚才的文字；确实不需要生成卡片就简短说明。］'
+
 const CONTINUATION_NUDGE =
   '［系统：你只说了要做什么，还没有调用工具，所以什么都没发生。现在直接调用对应的工具完成这一步（记录用 proposeRecordChange，食品库用 proposeFoodChange），不要重复刚才的文字；确实不需要再做就简短说明。］'
 
@@ -443,7 +462,7 @@ export function stripFakeNotes(reply: string): string {
  */
 export function guardUnbackedCardClaim(reply: string): string {
   const stripped = stripFakeNotes(reply)
-  const claims = claimsCard(stripped)
+  const claims = claimsCard(stripped) || announcesChange(stripped)
   if (!claims && stripped === reply.trimEnd()) return reply
   if (!claims) return stripped
   return `${stripped}\n\n（这次实际没有生成确认卡，没有保存任何数据。请再说一次，或换个说法。）`
