@@ -31,6 +31,10 @@ final class ChatModel {
     private(set) var outgoingImages: [UIImage] = []
     /// 待发送的营养标签照片（已压缩的 JPEG，按添加顺序，最多 `ChatService.maxLabels` 张）；发送时先逐张上传到 Vita 服务，再随消息发出。
     private(set) var attachments: [Data] = []
+    /// 和 `attachments` 一一对应的预览图（长边 400 像素），读照片时一并做好，免得每次刷新界面都解码原图。
+    private(set) var attachmentImages: [UIImage] = []
+    /// 选好、但还在读取压缩的照片张数。相册可能要先从 iCloud 下载原图，要好几秒，先在输入框上方放占位。
+    private(set) var preparingAttachments = 0
     /// 消息里标签照片的缩略图，读到一张显示一张。
     private(set) var thumbnails: [UUID: UIImage] = [:]
     /// 历史消息里卡片的结局。
@@ -52,30 +56,52 @@ final class ChatModel {
 
     var today: LocalDate { LocalDate(date: now(), timeZone: timeZone()) }
     var isSending: Bool { streamingText != nil }
-    var canSend: Bool { !isSending && !isConfirming && (!attachments.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
-    var attachmentImages: [UIImage] { attachments.compactMap(UIImage.init(data:)) }
+    var canSend: Bool { !isSending && !isConfirming && preparingAttachments == 0 && (!attachments.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
     /// 还能再加几张。
-    var remainingAttachments: Int { max(ChatService.maxLabels - attachments.count, 0) }
+    var remainingAttachments: Int { max(ChatService.maxLabels - attachments.count - preparingAttachments, 0) }
 
     /// 选好照片后先放在输入框上方，用户可以再补一句（如品名、喝了多少）再发。可以放好几张，一次录入多个食品。
     func attach(_ image: UIImage) {
-        guard remainingAttachments > 0, let data = Self.compressed(image) else { return }
-        attachments.append(data)
+        attach([{ image }])
+    }
+
+    /// 按顺序读取照片（返回 nil 的跳过）。占位立刻出现，压缩在后台做，不卡界面。
+    func attach(_ loaders: [@MainActor () async -> UIImage?]) {
+        let loaders = Array(loaders.prefix(remainingAttachments))
+        guard !loaders.isEmpty else { return }
+        preparingAttachments += loaders.count
+        Task {
+            for load in loaders {
+                defer { preparingAttachments -= 1 }
+                guard let image = await load(),
+                      let prepared = await Task.detached(priority: .userInitiated, operation: { Self.prepared(image) }).value
+                else { continue }
+                attachments.append(prepared.data)
+                attachmentImages.append(prepared.preview)
+            }
+        }
     }
 
     func removeAttachment(at index: Int) {
         guard attachments.indices.contains(index) else { return }
         attachments.remove(at: index)
+        attachmentImages.remove(at: index)
     }
 
-    private static func scaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+    /// 上传用的 JPEG 和预览图。
+    nonisolated private static func prepared(_ image: UIImage) -> (data: Data, preview: UIImage)? {
+        guard let data = compressed(image) else { return nil }
+        return (data, scaled(image, maxSide: 400))
+    }
+
+    nonisolated private static func scaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
         let scale = min(1, maxSide / max(image.size.width, image.size.height, 1))
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
         return UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
     }
 
     /// 长边压到 2000 像素以内再上传；服务端存这一份作为食品版本的来源依据，发给模型时不再缩放。
-    private static func compressed(_ image: UIImage) -> Data? {
+    nonisolated private static func compressed(_ image: UIImage) -> Data? {
         let longest = max(image.size.width, image.size.height)
         let scale = min(1, 2000 / max(longest, 1))
         let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
@@ -142,11 +168,13 @@ final class ChatModel {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
         let images = attachments
+        let previews = attachmentImages
         draft = ""
         attachments = []
+        attachmentImages = []
         requestedDate = nil
         outgoing = text
-        outgoingImages = images.compactMap(UIImage.init(data:))
+        outgoingImages = previews
         let date = sessionDate
         run { [services] onProgress in
             // attachNutritionLabel：先把照片逐张传到 Vita 服务，再随消息发出（ADR-016）。
@@ -163,7 +191,10 @@ final class ChatModel {
             // 这一轮没有保存，把原文和照片放回输入框，方便重发。
             guard let self else { return }
             if draft.isEmpty { draft = text }
-            if attachments.isEmpty { attachments = images }
+            if attachments.isEmpty {
+                attachments = images
+                attachmentImages = previews
+            }
         }
     }
 
@@ -317,13 +348,12 @@ struct ChatView: View {
             let items = pickedPhotos
             guard !items.isEmpty else { return }
             pickedPhotos = []
-            Task {
-                for item in items {
-                    if let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) {
-                        model.attach(image)
-                    }
+            model.attach(items.map { item in
+                {
+                    guard let data = try? await item.loadTransferable(type: Data.self) else { return nil }
+                    return await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
                 }
-            }
+            })
         }
         .fullScreenCover(isPresented: $isTakingPhoto) {
             CameraPicker { image in model.attach(image) }
@@ -464,7 +494,7 @@ struct ChatView: View {
     /// 输入框与发送按钮放在同一个圆角容器里；多行时按钮贴底。左侧的“+”用来附上营养标签照片。
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !model.attachments.isEmpty {
+            if !model.attachments.isEmpty || model.preparingAttachments > 0 {
                 attachmentPreview(model.attachmentImages)
             }
             HStack(alignment: .bottom, spacing: 2) {
@@ -564,9 +594,20 @@ struct ChatView: View {
                             .padding(.top, 6)
                             .padding(.trailing, 6)
                     }
+                    ForEach(0..<model.preparingAttachments, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.primary.opacity(0.06))
+                            .frame(width: 52, height: 52)
+                            .overlay { ProgressView().controlSize(.small) }
+                            .padding(.top, 6)
+                            .padding(.trailing, 6)
+                            .accessibilityLabel("正在读取照片")
+                    }
                 }
             }
-            Text(images.count > 1
+            Text(images.isEmpty
+                 ? "正在读取照片…"
+                 : images.count > 1
                  ? "\(images.count) 张营养标签，每张一个食品，会逐个生成确认卡；还能加 \(model.remainingAttachments) 张。"
                  : "营养标签：随消息发给模型读取，原图存在你的 Vita 服务上。")
                 .font(VitaType.meta)
