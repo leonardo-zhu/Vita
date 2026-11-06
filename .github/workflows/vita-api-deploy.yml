@@ -121,4 +121,10 @@ jobs:
           export API_TAG="${{ github.sha }}"
           retry docker compose pull
           docker compose up -d --remove-orphans
+
+          # 镜像按 commit SHA 打标签，旧版本一直带着标签，prune -f 删不掉。
+          # 只留最新的两个版本（当前 + 上一个，回滚用）；正在运行的镜像 docker 会拒绝删除，不影响部署
+          docker images "$IMAGE_NAME" --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' \
+            | sort -r | awk -F'\t' 'NR > 2 { print $2 }' \
+            | xargs -r docker rmi || true
           docker image prune -f
