@@ -19,6 +19,7 @@ struct BodyCompositionView: View {
     @State private var trend: BodyMetricKind = .weight
     /// 找了一阵还没找到秤：提示靠近或踩一下。
     @State private var searchIsSlow = false
+    @State private var afterSync: Task<Void, Never>?
 
     /// 趋势图可选的指标。
     private static let trendKinds: [BodyMetricKind] = [.weight, .bodyFat, .leanMass, .muscleMass]
@@ -90,7 +91,8 @@ struct BodyCompositionView: View {
     /// 没人站在秤上时只占一行。
     private var scaleStatus: some View {
         HStack(spacing: 10) {
-            if [.idle, .searching, .connecting].contains(connection.phase) && !connection.seemsBusy {
+            if ([.idle, .searching, .connecting].contains(connection.phase) && !connection.seemsBusy)
+                || (connection.phase == .waiting && connection.isSyncing) {
                 ProgressView().controlSize(.small)
             } else {
                 Image(systemName: connection.phase == .waiting ? "checkmark.circle.fill" : "exclamationmark.circle")
@@ -143,6 +145,8 @@ struct BodyCompositionView: View {
         return switch connection.phase {
         case .idle, .searching, .connecting: searchIsSlow ? "还没找到体脂秤：靠近一些，或踩一下秤面" : "正在连接体脂秤"
         case .unavailable(let reason): reason
+        case .waiting where connection.isSyncing && connection.live == nil:
+            syncedCount > 0 ? "正在同步秤里的离线记录（已同步 \(syncedCount) 条），稍等再站上去" : "已连上，正在和秤同步，稍等再站上去"
         case .waiting:
             connection.live == nil ? "体脂秤已连接，光脚站上去就能称重"
                 : connection.live?.isStable == true ? "读数稳定，正在测量体脂" : "请站稳"
@@ -444,19 +448,30 @@ struct BodyCompositionView: View {
         await reloadHistory()
     }
 
-    /// 返回 true 时秤会删掉这条：存好了，或读数异常（留着会一直挡住后面的记录）。
+    /// 返回 true 时秤会删掉这条：存好了（含进本机队列），或读数异常（留着会一直挡住后面的记录）。
+    /// 存好就返回：秤收不到确认就不发实时体重，刷新列表、写入健康等同步安静下来再做。
     private func saveOffline(_ record: ScaleOfflineRecord) async -> Bool {
         do {
-            // 连不上服务端时进本机队列，同样算存好了，秤上的这条可以删。
-            let (_, destination) = try await services.bodyComposition.record(record.measurement, recordedAt: record.recordedAt, source: .offline)
+            let destination = try await services.bodyComposition.recordOffline(record.measurement, recordedAt: record.recordedAt)
             syncedCount += 1
             if destination == .manual { manualCount += 1 }
-            await reloadHistory()
+            scheduleAfterSync()
             return true
         } catch HealthServiceError.invalidMetrics {
             return true
         } catch {
             return false
+        }
+    }
+
+    /// 最后一条离线记录存好 3 秒后（期间没有新的）写入健康、刷新列表。
+    private func scheduleAfterSync() {
+        afterSync?.cancel()
+        afterSync = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await services.bodyComposition.finishOfflineSync()
+            await reloadHistory()
         }
     }
 

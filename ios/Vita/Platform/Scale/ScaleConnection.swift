@@ -5,6 +5,7 @@ import OSLog
 
 /// 阿福体脂秤的蓝牙连接：只在称重页打开时扫描，拿到一次锁定结果就断开。
 /// 连上后先握手，秤把没连手机时存下的离线记录逐条发来；存好一条才回确认，秤随即删掉它。
+/// 有记录没确认时秤不发实时体重，所以同步完（`isSyncing` 变回 false）才请用户站上去。
 @MainActor
 @Observable
 final class ScaleConnection: NSObject {
@@ -22,6 +23,9 @@ final class ScaleConnection: NSObject {
     private(set) var phase: Phase = .idle
     /// 连过但连不上：秤同一时间只接受一台设备，多半是蚂蚁阿福等 App 还连着它。
     private(set) var seemsBusy = false
+    /// 已连上，但秤还在吐离线记录（或握手没完）。这期间秤不发实时体重，站上去的那次会被它存成离线记录，
+    /// 所以要等同步安静下来再请用户站上去。
+    private(set) var isSyncing = false
     /// 最近一帧（实时变化的体重）。
     private(set) var live: ScaleMeasurement?
     /// 每次连接只回调一次锁定结果。
@@ -45,12 +49,18 @@ final class ScaleConnection: NSObject {
     private var savingRecord: Data?
     /// 握手指令全部发完。真机上见过：握手中途回离线记录的确认，秤会断开、换地址重连后再也不发数据。
     private var handshakeDone = false
+    /// 握手期间收到的离线记录，握手完再处理：不能指望秤一定会重发。
+    private var heldRecord: (record: ScaleOfflineRecord, frame: Data)?
+    private var syncIdleCheck: Task<Void, Never>?
+    /// 最后一条离线记录确认后、或握手完后，这么久没有新记录就当同步完了。
+    private static let syncQuietPeriod: Duration = .seconds(2)
 
     /// 第一次调用时创建 CBCentralManager，系统随之弹出蓝牙授权。
     func start() {
         live = nil
         delivered = false
         seemsBusy = false
+        isSyncing = false
         guard let central else {
             central = CBCentralManager(delegate: self, queue: nil)
             return
@@ -62,10 +72,29 @@ final class ScaleConnection: NSObject {
         central?.stopScan()
         if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         peripheral = nil
+        resetSession()
+        if phase != .finished { phase = .idle }
+    }
+
+    /// 断开或停止时清掉这次连接的状态。
+    private func resetSession() {
         writer = nil
         savingRecord = nil
+        heldRecord = nil
         handshakeDone = false
-        if phase != .finished { phase = .idle }
+        isSyncing = false
+        syncIdleCheck?.cancel()
+    }
+
+    /// 同步安静一阵、没有记录在存，就可以请用户站上去了。
+    private func scheduleSyncIdleCheck() {
+        syncIdleCheck?.cancel()
+        syncIdleCheck = Task {
+            try? await Task.sleep(for: Self.syncQuietPeriod)
+            guard !Task.isCancelled, handshakeDone, savingRecord == nil, heldRecord == nil else { return }
+            if isSyncing { Self.log.info("offline sync idle") }
+            isSyncing = false
+        }
     }
 
     private func scanIfReady(_ central: CBCentralManager) {
@@ -82,6 +111,8 @@ final class ScaleConnection: NSObject {
     }
 
     private func handle(_ measurement: ScaleMeasurement) {
+        // 秤开始发实时体重，说明它已经不在同步了。
+        isSyncing = false
         live = measurement
         guard measurement.isFinal, !delivered else { return }
         delivered = true
@@ -105,20 +136,40 @@ extension ScaleConnection {
             send(command, to: peripheral)
             try? await Task.sleep(for: .milliseconds(60))
         }
-        if self.peripheral === peripheral { handshakeDone = true }
+        guard self.peripheral === peripheral else { return }
+        handshakeDone = true
+        if let held = heldRecord {
+            heldRecord = nil
+            receive(held.record, frame: held.frame, from: peripheral)
+        }
+        scheduleSyncIdleCheck()
     }
 
     private func receive(_ record: ScaleOfflineRecord, frame: Data, from peripheral: CBPeripheral) {
-        // 握手没完成前先不处理：秤没收到确认会每隔一秒多重发。
-        guard handshakeDone, savingRecord == nil, let onOfflineRecord else { return }
+        isSyncing = true
+        scheduleSyncIdleCheck()
+        // 握手没完成前先记下、不确认（握手中途确认会让秤断开），握手完再处理。
+        guard handshakeDone else {
+            heldRecord = (record, frame)
+            return
+        }
+        // 正在存的这条，秤没收到确认会每隔一秒多重发，忽略。
+        guard savingRecord == nil, let onOfflineRecord else { return }
         savingRecord = frame
         Task {
             let saved = await onOfflineRecord(record)
             // 存的时候断开了就不确认，秤下次还会再发。
-            // 没存成功也不确认；这次连接不再重试，记录留在秤里。
-            guard saved, savingRecord == frame, self.peripheral === peripheral else { return }
+            guard savingRecord == frame, self.peripheral === peripheral else { return }
+            guard saved else {
+                // 没存成功：秤不确认就一直卡在这条、也不发实时体重。过一会儿等它重发时再试。
+                Self.log.error("offline record not saved, retrying on the next resend")
+                try? await Task.sleep(for: .seconds(3))
+                if savingRecord == frame { savingRecord = nil }
+                return
+            }
             savingRecord = nil
             send(ScaleCommand.historyAck, to: peripheral)
+            scheduleSyncIdleCheck()
         }
     }
 
@@ -178,9 +229,7 @@ extension ScaleConnection: @preconcurrency CBCentralManagerDelegate {
         guard self.peripheral != nil else { return }
         // 秤息屏会断开；还没拿到结果就接着找。
         self.peripheral = nil
-        writer = nil
-        savingRecord = nil
-        handshakeDone = false
+        resetSession()
         if phase != .finished { scanIfReady(central) }
     }
 }
@@ -208,6 +257,8 @@ extension ScaleConnection: @preconcurrency CBPeripheralDelegate {
             phase = .waiting
             seemsBusy = false
             handshakeDone = false
+            // 秤收到对时就开始吐离线记录；没有记录时握手完 2 秒就算同步完。
+            isSyncing = true
             Task { await handshake(peripheral) }
         }
     }

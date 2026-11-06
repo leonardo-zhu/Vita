@@ -68,6 +68,35 @@ final class BodyCompositionService {
         }
     }
 
+    /// 存下一条秤里的离线记录：只上传（或进本机队列）就返回，好尽快向秤确认。
+    /// 秤收不到确认就不发实时体重，所以写入健康放到同步完后的 `finishOfflineSync()`。
+    /// 除读数不合理外，上传出任何错（含登录还没就绪）都先存在手机上，不让一条记录卡住秤。
+    func recordOffline(_ measurement: ScaleMeasurement, recordedAt: Date?) async throws -> ScaleSaveDestination {
+        guard ManualBodyMetrics(bodyMassKg: measurement.weightKg, enteredAt: now()).isValid else { throw HealthServiceError.invalidMetrics }
+        let writable = await canWriteToHealth()
+        let upload = WeighingUploadDTO(
+            id: UUID(), weightKg: measurement.weightKg,
+            impedance: measurement.impedance.map { .init(a: $0.a, b: $0.b) }, source: .offline,
+            recordedAt: recordedAt, appleHealthWritable: writable
+        )
+        do {
+            let _: WeighingResponseDTO = try await uploader.send("POST", "/v1/weighings", body: upload)
+            return writable ? .appleHealth : .manual
+        } catch APIError.server(let status, _, _) where (400..<500).contains(status) && status != 429 {
+            // 服务端明确拒绝（如读数不合理）：重传也不会成功。
+            throw HealthServiceError.invalidMetrics
+        } catch {
+            Self.log.error("offline weighing upload failed, queued: \(error, privacy: .public)")
+            try enqueue(upload)
+            return .queued
+        }
+    }
+
+    /// 离线记录同步完后把它们写进 Apple 健康。
+    func finishOfflineSync() async {
+        await healthSync.run()
+    }
+
     /// 补传队列里的称重。打开称重页、回到前台时调用；传成功的出队，服务端按 id 去重。
     @discardableResult
     func flushQueue() async -> Int {
