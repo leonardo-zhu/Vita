@@ -172,3 +172,47 @@ enum HealthApp {
         }
     }
 }
+
+/// 记录里一道菜的标题行：菜名与这道菜的能量合计，下面缩进列出它的各项。
+struct ItemGroupHeader: View {
+    let group: ItemGroup
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Label(group.name ?? "", systemImage: "takeoutbag.and.cup.and.straw")
+                .labelStyle(.titleAndIcon)
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+            Text(DisplayFormat.energy(group.energyKcal))
+                .font(.subheadline)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 按菜品分组列出 Item：有菜名的先一行菜名，再缩进列各项；没有的照常一行。
+struct GroupedItems<Row: View>: View {
+    let items: [DayData.Item]
+    var spacing: CGFloat = 8
+    @ViewBuilder let row: (DayData.Item) -> Row
+
+    var body: some View {
+        ForEach(ItemGroup.groups(items)) { group in
+            if group.showsHeader {
+                VStack(alignment: .leading, spacing: spacing) {
+                    ItemGroupHeader(group: group)
+                    ForEach(group.items) { item in
+                        row(item).padding(.leading, 14)
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    // 左侧一条细线，标出哪几项属于这道菜。
+                    Capsule().fill(Color.primary.opacity(0.12)).frame(width: 2).padding(.top, 26)
+                }
+            } else {
+                ForEach(group.items) { row($0) }
+            }
+        }
+    }
+}

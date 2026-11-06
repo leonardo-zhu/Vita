@@ -594,7 +594,7 @@ private struct MealCard: View {
             if record.eventTime.precision != .mealPeriod {
                 Text(DisplayFormat.eventTime(record.eventTime)).font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(record.items) { item in
+            GroupedItems(items: record.items) { item in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(item.displayName)
                     Text(item.originalAmountText).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)

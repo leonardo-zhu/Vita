@@ -45,7 +45,7 @@ private struct RecordPreviewContent: View {
 
     var body: some View {
         header
-        ForEach(preview.items) { ItemLine(item: $0) }
+        GroupedItems(items: preview.items) { ItemLine(item: $0) }
         ForEach(preview.removedItemNames, id: \.self) { name in
             Text(name).strikethrough().foregroundStyle(.secondary)
         }
