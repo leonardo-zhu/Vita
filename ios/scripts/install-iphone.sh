@@ -34,7 +34,7 @@ fi
 echo "==> 生成 Xcode 工程"
 (cd "$ios_dir" && xcodegen generate --quiet)
 
-echo "==> 构建（设备 $device）"
+echo "==> 构建（设备 ${device}）"
 xcodebuild -project "$ios_dir/Vita.xcodeproj" -scheme Vita -configuration Debug \
   -destination "id=$device" -derivedDataPath "$derived" -allowProvisioningUpdates \
   -quiet build

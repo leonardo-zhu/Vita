@@ -15,3 +15,6 @@ __pycache__/
 
 # pnpm workspace
 node_modules/
+
+# Claude Code 的本地配置（预览服务器、导出），只对这台电脑有用
+.claude/
