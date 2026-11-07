@@ -3,8 +3,8 @@
  *
  * - 授权：在 Admin 里发起，要一个授权地址（带 state 与 PKCE）在浏览器里打开；Google 回调到服务端，服务端换 token，
  *   refresh token 加密存库，再跳回 Admin。手机只看状态。
- * - 拉取：今天和前 7 天（服务端用前 7 天算日均）。活动能量用每日汇总；睡眠按手机上的口径：
- *   结束在前一天 18:00 到当天 12:00 之间的睡眠，加起“睡着”的分钟数。
+ * - 拉取：今天和前 7 天（服务端用前 7 天算日均）。活动能量用每日汇总；睡眠和 Google 健康 App 一样按醒来的日期算：
+ *   当天（服务端时区）结束的每一段睡眠，加起“睡着”的分钟数。白天补觉、分两段睡都算进当天。
  * - 拉到的存进 google_day_metrics，读健康数据时优先于手机上传的（HealthService）。只存每天的汇总，不存原始数据。
  */
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
@@ -44,10 +44,13 @@ function base64url(bytes: Buffer): string {
   return bytes.toString('base64url')
 }
 
-/** 睡眠的口径与手机读 Apple 健康时一致：结束在 [前一天 18:00, 当天 12:00) 的睡眠，加起睡着的时长，保留一位小数。 */
+/**
+ * 一天的睡眠与 Google 健康 App 的“总睡眠时长”一致：结束在这一天 [00:00, 次日 00:00) 的每一段，加起睡着的时长，保留一位小数。
+ * 不用手机读 Apple 健康时的“前一天 18:00 到当天 12:00”：中午以后才醒的那一觉会被漏掉。
+ */
 export function sleepHoursFor(date: string, sessions: SleepSession[], timeZone: string): number | null {
-  const from = zonedInstant(addDays(date, -1), 18, 0, 0, timeZone)
-  const to = zonedInstant(date, 12, 0, 0, timeZone)
+  const from = zonedInstant(date, 0, 0, 0, timeZone)
+  const to = zonedInstant(addDays(date, 1), 0, 0, 0, timeZone)
   const minutes = sessions
     .filter((session) => session.end >= from && session.end < to)
     .map((session) => session.minutesAsleep ?? (session.end.getTime() - session.start.getTime()) / 60_000)
@@ -197,7 +200,7 @@ export class GoogleHealthService {
     try {
       const accessToken = await this.currentAccessToken(row)
       const energy = await this.options.client.dailyActiveEnergy(accessToken, first, addDays(today, 1))
-      const sessions = await this.options.client.sleepSessions(accessToken, zonedInstant(addDays(first, -1), 18, 0, 0, zone), zonedInstant(today, 12, 0, 0, zone))
+      const sessions = await this.options.client.sleepSessions(accessToken, zonedInstant(first, 0, 0, 0, zone), zonedInstant(addDays(today, 1), 0, 0, 0, zone))
       const kcalByDate = new Map(energy.map((day) => [day.date, day.kcal]))
       const at = now()
       transaction(database, () => {

@@ -97,15 +97,18 @@ const phoneUpload = {
 } as const
 
 describe('睡眠的口径', () => {
-  // 2026-10-30 的窗口：上海 10-29 18:00 到 10-30 12:00，即 UTC 10-29 10:00 到 10-30 04:00
-  it('结束在前一天 18:00 到当天 12:00 之间的睡眠才算，累加睡着的分钟数', () => {
+  // 2026-10-30 的窗口：上海 10-30 00:00 到 10-31 00:00，即 UTC 10-29 16:00 到 10-30 16:00
+  it('按醒来的日期算：当天结束的每一段都加起来，中午以后才醒的那一觉也算', () => {
     const sessions = [
+      // 上海 10-29 23:00 到 10-30 07:00
       { start: new Date('2026-10-29T15:00:00Z'), end: new Date('2026-10-29T23:00:00Z'), minutesAsleep: 420, nap: false },
-      { start: new Date('2026-10-30T02:00:00Z'), end: new Date('2026-10-30T02:40:00Z'), minutesAsleep: 33, nap: true },
-      // 下午的午睡（上海 14:00 结束）算到第二天
-      { start: new Date('2026-10-30T05:00:00Z'), end: new Date('2026-10-30T06:00:00Z'), minutesAsleep: 60, nap: true },
+      // 上海 11:31 到 15:08，补觉
+      { start: new Date('2026-10-30T03:31:00Z'), end: new Date('2026-10-30T07:08:00Z'), minutesAsleep: 199, nap: false },
+      // 上海 10-29 22:00 结束的那一觉算 10-29
+      { start: new Date('2026-10-29T12:00:00Z'), end: new Date('2026-10-29T14:00:00Z'), minutesAsleep: 110, nap: true },
     ]
-    expect(sleepHoursFor(DAY, sessions, SHANGHAI)).toBe(7.6)
+    expect(sleepHoursFor(DAY, sessions, SHANGHAI)).toBe(10.3)
+    expect(sleepHoursFor('2026-10-29', sessions, SHANGHAI)).toBe(1.8)
     expect(sleepHoursFor('2026-10-28', sessions, SHANGHAI)).toBeNull()
   })
 
