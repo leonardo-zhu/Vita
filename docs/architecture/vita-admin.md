@@ -2,6 +2,7 @@
 
 **状态：M1–M3 已实现并部署到 R4S（2026-11-02），实现见 §14–§16。** §12 的待确认项已全部定下，结论写进了各节。实现见 §14。  
 **2.0 变化（2026-11-04）：** 配置的使用方从 App 变成 Vita API（每轮对话读 Admin 发布到 `/opt/vita-admin/published` 的 `stable.json`，三层合并与校验规则不变）；App 不再拉配置（2026-11-05 删除了 iOS 的远程配置与诊断上报代码，内置默认值挪到 `shared/config/DefaultConfig.json`）。L3 本地调试覆盖随 App 设置页的调试卡片删除，试 prompt 用 Admin 的 Prompt 调试。诊断日志里的对话与工具事件 iOS 不再上报，对话追踪由 API 记录。Admin 新增“设备”页，经 API（服务令牌、本机回环地址）签发与吊销手机的设备令牌；“Admin 不存储、不展示业务数据”在 2.0 改为：Admin 自己不存业务数据，数据管理页（M4）经 API 读写。详见《Vita 2.0 架构设计》§3、§10.2。  
+**Google 健康（2026-11-07）：** 新增“Google 健康”页，经 API 发起 Google 授权（浏览器跳 Google，回调到 API 后跳回本页）、立即同步与断开；服务端拉活动能量与睡眠，详见《Vita 2.0 架构设计》§9a。  
 **2026-11-01 的主要决定：** Admin 与 Conduit 一样部署在 R4S，用 SQLite；配置文件也由 R4S 上的 Caddy 直接提供，不另找静态托管；现阶段不签名，只认固定的 HTTPS 地址；每次回到前台都检查配置；首期只有 `stable` 渠道；诊断日志默认开。  
 **关联：** [ADR](ADR.md)（拟新增 ADR-012）、[TDD](TDD-v0.1.md) §2 / §5 / §8、[模型 Provider 集成规范](../contracts/llm-provider.md)、[Agent 工具契约](../contracts/agent-tools.md)、[Conduit（LLM Gateway）项目设计](llm-gateway-project.md)
 

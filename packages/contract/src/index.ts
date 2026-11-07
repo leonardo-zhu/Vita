@@ -390,7 +390,11 @@ export type PendingResponse = z.infer<typeof PendingResponse>
 
 // MARK: - 健康数据（TDD §6.1）。手机读 Apple 健康后上传，服务端只存最新一份，用于目标与 Agent
 
-export const MetricSource = z.enum(['healthKit', 'manual'])
+/**
+ * googleHealth：服务端从 Google 健康拉的（活动能量、睡眠），见 GoogleHealthStatus。
+ * vitaScale：Vita 体脂秤的称重（体重、体脂率），服务端自己存的，比 Apple 健康里的新时用它。
+ */
+export const MetricSource = z.enum(['healthKit', 'manual', 'googleHealth', 'vitaScale'])
 export type MetricSource = z.infer<typeof MetricSource>
 
 export const BiologicalSex = z.enum(['female', 'male', 'other'])
@@ -445,6 +449,31 @@ export const ManualBodyMetrics = z.object({
   sex: BiologicalSex.nullish(),
 })
 export type ManualBodyMetrics = z.infer<typeof ManualBodyMetrics>
+
+// MARK: - Google 健康：服务端用 Google Health API 拉活动能量与睡眠（Google 健康不往 Apple 健康写这两项）
+
+/**
+ * GET /v1/google-health（手机与 Admin）：连接状态。同步与断开见 /v1/admin/google-health/*。`configured` 为 false 时服务端没配 OAuth 客户端，不能连接。
+ * 连上后服务端定时拉取；拉到的值在 HealthSnapshot 里标为 googleHealth，优先于手机上传的 Apple 健康数据。
+ */
+export const GoogleHealthStatus = z.object({
+  configured: z.boolean(),
+  connected: z.boolean(),
+  connectedAt: z.iso.datetime().nullable(),
+  /** 最近一次成功拉取。 */
+  lastSyncAt: z.iso.datetime().nullable(),
+  /** 最近一次拉取失败的原因码（如 reauthorizationRequired、network）；成功后清空。 */
+  lastError: z.string().nullable(),
+  lastErrorAt: z.iso.datetime().nullable(),
+})
+export type GoogleHealthStatus = z.infer<typeof GoogleHealthStatus>
+
+/**
+ * POST /v1/admin/google-health/authorize（只给 Admin）：开始授权。Admin 在浏览器里打开 `url`，
+ * Google 回调到服务端，服务端换好 token 后跳回 Admin 的 `/admin/google-health?result=connected|failed`。
+ */
+export const GoogleHealthAuthorizeResponse = z.object({ url: z.url() })
+export type GoogleHealthAuthorizeResponse = z.infer<typeof GoogleHealthAuthorizeResponse>
 
 // MARK: - 目标建议与设定
 

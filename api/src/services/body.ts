@@ -11,7 +11,7 @@ import { bmiOf, bodyMetrics, bodyType, estimateBodyFat, fitBodyFat, isUsableMode
 import { ageOn } from '../domain/recommendation.ts'
 import { localDateOf } from '../domain/time.ts'
 import { ServiceError, type ServiceContext, type WriteOrigin } from './context.ts'
-import type { HealthService } from './health.ts'
+import type { HealthService, ScaleReadings } from './health.ts'
 
 /** 合理的体重范围，与手动补录相同；超出多半是没站稳或别的东西压到了秤。 */
 const PLAUSIBLE_WEIGHT_KG = [20, 400] as const
@@ -90,6 +90,22 @@ export class BodyService {
   weighings(): Weighing[] {
     const model = this.appliedModel()
     return this.rows().map((row) => this.toWeighing(row, model))
+  }
+
+  /** 健康数据快照用：最新一次称重的体重，与最新一次算得出体脂率的称重的体脂率（按当前校准）。 */
+  latestReadings(): ScaleReadings {
+    const model = this.appliedModel()
+    const rows = this.rows()
+    const latest = rows[0]
+    let bodyFatFraction: ScaleReadings['bodyFatFraction'] = null
+    for (const row of rows) {
+      const fat = this.toWeighing(row, model).bodyFat
+      if (fat) {
+        bodyFatFraction = { value: fat.value, measuredAt: row.measured_at }
+        break
+      }
+    }
+    return { bodyMassKg: latest ? { value: latest.weight_grams / 1000, measuredAt: latest.measured_at } : null, bodyFatFraction }
   }
 
   get(id: string): Weighing {

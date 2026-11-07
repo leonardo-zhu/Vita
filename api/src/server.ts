@@ -13,6 +13,7 @@ import { createApp } from './app.ts'
 import { dataDir, openDatabase } from './db.ts'
 import { ReferenceCatalog } from './domain/reference.ts'
 import { isTimeZone } from './domain/time.ts'
+import { GoogleHealthClient } from './google/client.ts'
 import { createServices } from './services/index.ts'
 
 function fail(message: string): never {
@@ -36,9 +37,24 @@ try {
 }
 console.log(`公共营养参考库：${reference.count} 条`)
 
+// Google 健康（活动能量与睡眠）：三项都配了才启用，没配时连接接口返回 503，其余照常。
+const googleClientId = process.env.GOOGLE_HEALTH_CLIENT_ID
+const googleClientSecret = process.env.GOOGLE_HEALTH_CLIENT_SECRET
+const googleRedirectUri = process.env.GOOGLE_HEALTH_REDIRECT_URI
+const googleHealth =
+  googleClientId && googleClientSecret && googleRedirectUri
+    ? { client: new GoogleHealthClient({ clientId: googleClientId, clientSecret: googleClientSecret, redirectUri: googleRedirectUri }), secret: serviceToken }
+    : null
+if (!googleHealth) console.warn('没有配置 GOOGLE_HEALTH_CLIENT_ID / GOOGLE_HEALTH_CLIENT_SECRET / GOOGLE_HEALTH_REDIRECT_URI，不能连接 Google 健康')
+
 const database = openDatabase()
 // 标签照片等文件；默认在数据目录下的 files/。
-const services = createServices({ database, reference, now: () => new Date(), timeZone: () => timeZone }, process.env.VITA_API_FILES_DIR)
+const services = createServices({ database, reference, now: () => new Date(), timeZone: () => timeZone }, process.env.VITA_API_FILES_DIR, googleHealth)
+
+// 连了 Google 健康时每 30 分钟拉一次；读数据时过了 10 分钟也会先拉（见 app.ts）。
+const GOOGLE_SYNC_INTERVAL_MS = 30 * 60_000
+const googleTimer = googleHealth ? setInterval(() => void services.googleHealth.sync({ actor: 'system' }), GOOGLE_SYNC_INTERVAL_MS) : null
+googleTimer?.unref()
 // 模型经 Conduit 调用，密钥只在服务端（架构设计 §8）。没配时对话接口返回 503，其余照常。
 const conduitURL = process.env.CONDUIT_BASE_URL
 const conduitKey = process.env.CONDUIT_API_KEY
@@ -53,7 +69,7 @@ const agent =
     : null
 if (!agent) console.warn('没有配置 CONDUIT_BASE_URL / CONDUIT_API_KEY，对话不可用')
 
-const app = createApp({ services, agent, serviceToken, version: process.env.VITA_API_VERSION ?? 'dev' })
+const app = createApp({ services, agent, serviceToken, version: process.env.VITA_API_VERSION ?? 'dev', adminURL: process.env.VITA_ADMIN_PUBLIC_URL })
 const port = Number(process.env.PORT ?? 3014)
 // 不用 HOSTNAME：不少 shell 会把它设成机器名
 const hostname = process.env.VITA_API_HOST ?? '127.0.0.1'
@@ -64,6 +80,7 @@ const server = serve({ fetch: app.fetch, port, hostname }, (info) => {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    if (googleTimer) clearInterval(googleTimer)
     server.close(() => {
       database.close()
       process.exit(0)

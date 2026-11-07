@@ -26,6 +26,8 @@ import {
   GoalRecommendationRequest,
   type GoalRecommendationResponse,
   type GoalResponse,
+  type GoogleHealthAuthorizeResponse,
+  type GoogleHealthStatus,
   type HealthChangesResponse,
   type HealthResponse,
   type HealthSnapshot,
@@ -64,12 +66,37 @@ import { MAX_LABEL_BYTES } from './services/chat.ts'
 import { ServiceError } from './services/context.ts'
 import type { Services } from './services/index.ts'
 
+const PUBLIC_PAGE = (title: string, body: string) => `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>body{font:16px/1.6 -apple-system,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#1a1d1b;background:#fff}
+@media (prefers-color-scheme:dark){body{color:#e8ebe9;background:#0b0d0c}a{color:#6ea8ff}}h1{font-size:24px}h2{font-size:18px;margin-top:28px}</style>
+</head><body>${body}</body></html>`
+
+const HOME_BODY = `<h1>Vita</h1>
+<p>Vita 是个人使用的饮食与身体数据记录 App，由 Leonardo Zhu 自己开发、自己使用，不对外提供服务。</p>
+<p>Vita is a personal nutrition and body-data tracker built and used by one person. It is not offered to the public.</p>
+<p><a href="/privacy">隐私政策 / Privacy policy</a></p>`
+
+const PRIVACY_BODY = `<h1>Vita 隐私政策</h1>
+<p>更新于 2026-11-07。Vita 只给开发者本人使用。</p>
+<h2>Google 健康数据</h2>
+<p>连接 Google 健康后，Vita 的服务端以只读权限读取活动能量（googlehealth.activity_and_fitness.readonly）与睡眠（googlehealth.sleep.readonly），用来计算每天的能量目标与收支。服务端只保存每天的汇总值（当天活动能量、前一晚睡眠时长），不保存原始数据，不写回 Google 健康。</p>
+<p>授权凭据（refresh token）加密后保存在开发者自己的服务器上。数据不出售、不分享给任何第三方，也不用于广告或训练模型。</p>
+<p>在 Vita 的设置里断开 Google 健康时，服务端会撤销授权并删除凭据与读取到的数据；也可以随时在 <a href="https://myaccount.google.com/permissions">Google 账号的第三方访问</a> 里撤销。</p>
+<h2>Use of Google user data</h2>
+<p>Vita reads active energy and sleep from Google Health with read-only scopes, stores only daily totals on the developer's own server, and never shares, sells, or uses the data for advertising or model training. Vita's use of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. Disconnecting in Vita revokes access and deletes the stored token and data.</p>
+<h2>联系</h2>
+<p>leonardo.zhu114@gmail.com</p>`
+
 export interface AppOptions {
   services: Services
   /** 没配 Conduit 时为 null：对话接口返回 503，其余照常。 */
   agent: Orchestrator | null
   serviceToken: string
   version: string
+  /** Admin 的公网地址，Google 授权完成后跳回这里。 */
+  adminURL?: string
 }
 
 type Actor = { kind: 'admin' } | { kind: 'device'; device: Device }
@@ -93,6 +120,7 @@ const SERVICE_FAILURES: Record<string, [ContentfulStatusCode, string]> = {
   unsupportedImage: [415, '只支持 JPEG、PNG 或 HEIC 照片。'],
   imageTooLarge: [413, '照片太大了，请压缩后再传。'],
   invalidMetrics: [422, '读数超出合理范围，没有保存。'],
+  googleHealthNotConfigured: [503, '服务端没有配置 Google 健康的 OAuth 客户端，暂时不能连接。'],
   expired: [409, '这张卡片已过期，没有写入任何数据。'],
   notActive: [409, '这张卡片已经结束了。'],
   revisionConflict: [409, '当天的数据刚有变化，请刷新后再试；确认卡会因此作废，需要重新提出。'],
@@ -132,9 +160,12 @@ async function parseBody<T extends z.ZodType>(c: Context, schema: T): Promise<z.
   return parsed.success ? parsed.data : null
 }
 
-export function createApp({ services, agent, serviceToken, version }: AppOptions) {
+export function createApp({ services, agent, serviceToken, version, adminURL = 'https://vita.r4s.leonardo-zhu.me' }: AppOptions) {
   const { database, now } = services.context
   const app = new Hono<AppEnv>()
+
+  /** 读健康数据、算能量、跑 Agent 之前：Google 健康的数据超过 10 分钟就先拉一次，最多等 5 秒。 */
+  const refreshGoogleHealth = () => services.googleHealth.refreshIfStale(10 * 60_000, 5_000)
 
   app.onError((error, c) => {
     if (error instanceof ServiceError) return serviceFailure(c, error)
@@ -144,6 +175,23 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
   app.notFound((c) => failure(c, 404, 'notFound', '没有这个接口。'))
 
   app.get('/v1/health', (c) => c.json({ ok: true, version } satisfies HealthResponse))
+
+  // Google OAuth 应用发布成 Production 要求首页与隐私政策链接，且在已授权的域名下（架构设计 §9a）。
+  app.get('/', (c) => c.html(PUBLIC_PAGE('Vita', HOME_BODY)))
+  app.get('/privacy', (c) => c.html(PUBLIC_PAGE('Vita 隐私政策', PRIVACY_BODY)))
+
+  /**
+   * Google 授权的回调：浏览器从 Google 跳过来，不带令牌，靠一次性的 state 认人（见 GoogleHealthService）。
+   * 授权由 Admin 发起，处理完跳回 Admin 的 Google 健康页。
+   */
+  app.get('/oauth/google-health/callback', async (c) => {
+    const result = await services.googleHealth.completeAuthorization({
+      code: c.req.query('code'),
+      state: c.req.query('state'),
+      error: c.req.query('error'),
+    })
+    return c.redirect(`${adminURL}/admin/google-health?result=${result}`, 302)
+  })
 
   app.use('/v1/*', async (c, next) => {
     const header = c.req.header('authorization') ?? ''
@@ -173,9 +221,11 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
   // MARK: - 饮食数据
 
   const invalidDate = (c: Context) => failure(c, 400, 'invalidDate', '日期格式应为 YYYY-MM-DD。')
-  app.get('/v1/days/:date', (c) => {
+  app.get('/v1/days/:date', async (c) => {
     const date = c.req.param('date')
-    return isLocalDate(date) ? c.json(services.days.day(date) satisfies DayResponse) : invalidDate(c)
+    if (!isLocalDate(date)) return invalidDate(c)
+    await refreshGoogleHealth()
+    return c.json(services.days.day(date) satisfies DayResponse)
   })
   app.get('/v1/days/:date/pending', (c) => {
     const date = c.req.param('date')
@@ -281,9 +331,28 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
     if (!body) return invalidBody(c, '身体数据超出合理范围')
     return c.json(services.health.submitManualMetrics(body, { actor: actorName(c.get('actor')) }) satisfies ManualBodyMetrics)
   })
-  app.get('/v1/health/snapshot', (c) => {
+  app.get('/v1/health/snapshot', async (c) => {
     const date = queryDate(c)
-    return date ? c.json(services.health.snapshot(date) satisfies HealthSnapshot) : invalidDate(c)
+    if (!date) return invalidDate(c)
+    await refreshGoogleHealth()
+    return c.json(services.health.snapshot(date) satisfies HealthSnapshot)
+  })
+
+  // MARK: - Google 健康：服务端拉活动能量与睡眠
+
+  /** 手机与 Admin 都能看状态；连接、同步、断开只在 Admin 里做（是服务端的配置）。 */
+  app.get('/v1/google-health', (c) => c.json(services.googleHealth.status() satisfies GoogleHealthStatus))
+  app.post('/v1/admin/google-health/authorize', (c) =>
+    c.json({ url: services.googleHealth.startAuthorization({ actor: actorName(c.get('actor')) }) } satisfies GoogleHealthAuthorizeResponse),
+  )
+  /** 立刻拉一次，返回拉完的状态。 */
+  app.post('/v1/admin/google-health/sync', async (c) => {
+    await services.googleHealth.sync({ actor: actorName(c.get('actor')) })
+    return c.json(services.googleHealth.status() satisfies GoogleHealthStatus)
+  })
+  app.delete('/v1/admin/google-health', async (c) => {
+    await services.googleHealth.disconnect({ actor: actorName(c.get('actor')) })
+    return c.body(null, 204)
   })
 
   /** Apple 健康同步：手机拉取 after 之后的变更，处理完把 cursor 存下。 */
@@ -409,6 +478,7 @@ export function createApp({ services, agent, serviceToken, version }: AppOptions
     if (!body.text.trim() && labelScanIds.length === 0) return invalidBody(c, '消息为空')
     if (labelScanIds.length > MAX_LABELS_PER_MESSAGE) return invalidBody(c, `一条消息最多带 ${MAX_LABELS_PER_MESSAGE} 张照片`)
     if (labelScanIds.some((id) => !services.labels.exists(id))) return failure(c, 404, 'labelNotFound', '找不到这张标签照片，请重新上传。')
+    await refreshGoogleHealth()
     return runTurn(c, { kind: 'message', text: body.text.trim(), labelScanIds }, date)
   })
   /** 确认了一张带 afterConfirm 的卡片后，接着跑一轮。每张卡片只能接续一次。 */

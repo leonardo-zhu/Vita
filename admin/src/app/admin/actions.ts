@@ -33,7 +33,14 @@ import type { ValidationIssue } from '@/server/config/validate'
 import { deletePasskey, getPasskey } from '@/server/db'
 import { deleteInstall, setInstallRevoked } from '@/server/diagnostics/query'
 import { conduitConfigured, runTrials, type TrialRun, type TrialSource } from '@/server/trial'
-import { createDevice, revokeDevice, VitaApiError } from '@/server/vita-api'
+import {
+  createDevice,
+  disconnectGoogleHealth,
+  revokeDevice,
+  startGoogleHealthAuthorization,
+  syncGoogleHealth,
+  VitaApiError,
+} from '@/server/vita-api'
 
 export type ActionResult =
   | { ok: true; message?: string; warning?: string }
@@ -246,6 +253,59 @@ function deviceErrorText(t: Messages, error: unknown): string {
     if (error.code === 'notConfigured') return t.devices.errors.notConfigured
     if (error.code === 'unreachable') return t.devices.errors.unreachable
     if (error.code === 'deviceNotFound') return t.devices.errors.notFound
+    return t.devices.errors.api(error.message)
+  }
+  return t.devices.errors.api((error as Error).message)
+}
+
+// ---------------------------------------------------------------------------
+// Google 健康（经 Vita API；授权在浏览器里跳转 Google）
+// ---------------------------------------------------------------------------
+
+/** 返回 Google 授权页地址，页面拿到后整页跳转过去。 */
+export async function startGoogleHealthAction(): Promise<{ ok: true; url: string } | { ok: false; message: string }> {
+  const actor = await requireActor()
+  const t = await getT()
+  try {
+    const url = await startGoogleHealthAuthorization()
+    recordAudit({ actor: actor.name, action: 'google_health_connect', targetType: 'googleHealth', targetId: 'account', ip: actor.ip })
+    return { ok: true, url }
+  } catch (error) {
+    return { ok: false, message: googleHealthErrorText(t, error) }
+  }
+}
+
+export async function syncGoogleHealthAction(): Promise<ActionResult> {
+  const actor = await requireActor()
+  const t = await getT()
+  try {
+    const status = await syncGoogleHealth()
+    recordAudit({ actor: actor.name, action: 'google_health_sync', targetType: 'googleHealth', targetId: 'account', diff: { lastError: status.lastError }, ip: actor.ip })
+    revalidatePath('/admin/google-health')
+    return status.lastError ? { ok: false, message: t.googleHealth.syncFailed(t.googleHealth.errorText(status.lastError)) } : { ok: true, message: t.googleHealth.synced }
+  } catch (error) {
+    return { ok: false, message: googleHealthErrorText(t, error) }
+  }
+}
+
+export async function disconnectGoogleHealthAction(): Promise<ActionResult> {
+  const actor = await requireActor()
+  const t = await getT()
+  try {
+    await disconnectGoogleHealth()
+  } catch (error) {
+    return { ok: false, message: googleHealthErrorText(t, error) }
+  }
+  recordAudit({ actor: actor.name, action: 'google_health_disconnect', targetType: 'googleHealth', targetId: 'account', ip: actor.ip })
+  revalidatePath('/admin/google-health')
+  return { ok: true, message: t.googleHealth.disconnected }
+}
+
+function googleHealthErrorText(t: Messages, error: unknown): string {
+  if (error instanceof VitaApiError) {
+    if (error.code === 'notConfigured') return t.devices.errors.notConfigured
+    if (error.code === 'unreachable') return t.devices.errors.unreachable
+    if (error.code === 'googleHealthNotConfigured') return t.googleHealth.notConfiguredBody
     return t.devices.errors.api(error.message)
   }
   return t.devices.errors.api((error as Error).message)

@@ -134,14 +134,14 @@ describe('称重的保存', () => {
     return { ...ctx, weigh }
   }
 
-  it('按称重当天的资料算出体脂率与指标；手机能写健康时不动手动补录', () => {
+  it('按称重当天的资料算出体脂率与指标；手机能写健康时不动手动补录，快照直接用这次称重', () => {
     const { services, weigh } = context()
     const weighing = weigh()
     expect(weighing.profile).toEqual({ heightCm: 170, ageYears: 36, sex: 'male' })
     expect(weighing.bodyFat).toEqual({ value: estimateBodyFat(69.6, 170, 36, 'male'), source: 'estimated' })
     expect(weighing.metrics.find((metric) => metric.kind === 'leanMass')).toBeDefined()
     expect(services.body.weighings()).toEqual([weighing])
-    expect(services.health.snapshot('2026-10-30').bodyMassKg).toEqual({ status: 'noData' })
+    expect(services.health.snapshot('2026-10-30').bodyMassKg).toEqual({ status: 'value', value: 69.6, source: 'vitaScale', measuredAt: NOW.toISOString() })
   })
 
   it('同一个 id 重传不会重复记录', () => {
@@ -172,10 +172,13 @@ describe('称重的保存', () => {
   it('不能写健康时记为手动补录；更旧的离线记录不覆盖更新的体重', () => {
     const { services, weigh } = context()
     weigh({ appleHealthWritable: false })
-    expect(services.health.snapshot('2026-10-30').bodyMassKg).toMatchObject({ value: 69.6, source: 'manual' })
+    expect(services.health.snapshot('2026-10-30').bodyMassKg).toMatchObject({ value: 69.6 })
     weigh({ weightKg: 72, impedance: null, appleHealthWritable: false, source: 'offline', recordedAt: new Date(NOW.getTime() - 86_400_000).toISOString() })
     expect(services.health.snapshot('2026-10-30').bodyMassKg).toMatchObject({ value: 69.6 })
     expect(services.body.weighings()).toHaveLength(2)
+    // 称重删光后，手动补录的那份还在。
+    for (const weighing of services.body.weighings()) services.body.delete(weighing.id, ORIGIN)
+    expect(services.health.snapshot('2026-10-30').bodyMassKg).toMatchObject({ value: 69.6, source: 'manual' })
   })
 
   it('不合理的体重什么都不存', () => {
@@ -215,6 +218,65 @@ describe('称重的保存', () => {
     services.body.delete(weighing.id, ORIGIN)
     expect(services.body.weighings()).toEqual([])
     expect(() => services.body.delete(weighing.id, ORIGIN)).toThrow('body.weighingNotFound')
+  })
+})
+
+describe('快照里的体重与体脂率：体脂秤与 Apple 健康取较新的', () => {
+  const HOUR = 3600_000
+  const at = (offsetHours: number) => new Date(NOW.getTime() + offsetHours * HOUR).toISOString()
+  const upload = (weight: { value: number; at: string } | null, fat: { value: number; at: string } | null = null): HealthUpload => ({
+    bodyMassKg: weight ? { status: 'value', value: weight.value, source: 'healthKit', measuredAt: weight.at } : { status: 'noData' },
+    heightCm: { status: 'value', value: 170, source: 'healthKit', measuredAt: null },
+    bodyFatFraction: fat ? { status: 'value', value: fat.value, source: 'healthKit', measuredAt: fat.at } : { status: 'noData' },
+    dateOfBirth: { status: 'value', value: '1990-01-01', source: 'healthKit', measuredAt: null },
+    sex: { status: 'value', value: 'male', source: 'healthKit', measuredAt: null },
+    sleepHours: { status: 'noData' },
+    authorizationRequested: true,
+    writeDenied: false,
+  })
+
+  function context(apple: HealthUpload) {
+    const ctx = setup()
+    ctx.services.health.upload(upload(null), ORIGIN)
+    const weighing = ctx.services.body.record(
+      { id: randomUUID(), weightKg: 69.6, impedance: { a: 482, b: 432 }, source: 'offline', recordedAt: at(-2), appleHealthWritable: true },
+      ORIGIN,
+    )
+    ctx.services.health.upload(apple, ORIGIN)
+    return { ...ctx, weighing, snapshot: () => ctx.services.health.snapshot('2026-10-30') }
+  }
+
+  it('称重比 Apple 健康新：用称重，体脂率按服务端算的', () => {
+    const { weighing, snapshot } = context(upload({ value: 71, at: at(-24) }, { value: 0.25, at: at(-24) }))
+    expect(snapshot().bodyMassKg).toEqual({ status: 'value', value: 69.6, source: 'vitaScale', measuredAt: at(-2) })
+    expect(snapshot().bodyFatFraction).toEqual({ status: 'value', value: weighing.bodyFat!.value, source: 'vitaScale', measuredAt: at(-2) })
+  })
+
+  it('Apple 健康读回的就是这次称重（同一时刻、不带毫秒）：以称重为准', () => {
+    const { weighing, snapshot } = context(upload({ value: 69.6, at: at(-2).replace('.000Z', 'Z') }, { value: 0.3, at: at(-2).replace('.000Z', 'Z') }))
+    expect(snapshot().bodyMassKg).toMatchObject({ value: 69.6, source: 'vitaScale' })
+    expect(snapshot().bodyFatFraction).toMatchObject({ value: weighing.bodyFat!.value, source: 'vitaScale' })
+  })
+
+  it('Apple 健康更新（别处记的体重）：用 Apple 健康的；体脂率各自比较', () => {
+    const { weighing, snapshot } = context(upload({ value: 70.4, at: at(-1) }, { value: 0.2, at: at(-30) }))
+    expect(snapshot().bodyMassKg).toEqual({ status: 'value', value: 70.4, source: 'healthKit', measuredAt: at(-1) })
+    expect(snapshot().bodyFatFraction).toMatchObject({ value: weighing.bodyFat!.value, source: 'vitaScale' })
+  })
+
+  it('Apple 健康没有体重：用称重；身高、生日、性别仍用 Apple 健康的', () => {
+    const { snapshot } = context(upload(null))
+    expect(snapshot().bodyMassKg).toMatchObject({ value: 69.6, source: 'vitaScale', measuredAt: at(-2) })
+    expect(snapshot().heightCm).toMatchObject({ value: 170, source: 'healthKit' })
+    expect(snapshot().dateOfBirth).toMatchObject({ value: '1990-01-01', source: 'healthKit' })
+    expect(snapshot().sex).toMatchObject({ value: 'male', source: 'healthKit' })
+  })
+
+  it('最新一次没测到阻抗：体重用它，体脂率用上一次测到的', () => {
+    const { services, weighing, snapshot } = context(upload(null))
+    services.body.record({ id: randomUUID(), weightKg: 70, impedance: null, source: 'offline', recordedAt: at(-1), appleHealthWritable: true }, ORIGIN)
+    expect(snapshot().bodyMassKg).toMatchObject({ value: 70, measuredAt: at(-1) })
+    expect(snapshot().bodyFatFraction).toMatchObject({ value: weighing.bodyFat!.value, measuredAt: at(-2) })
   })
 })
 

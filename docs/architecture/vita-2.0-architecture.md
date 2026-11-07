@@ -146,6 +146,21 @@ Apple 健康本身经 iCloud 在同一 Apple ID 的设备间同步，这不是�
 - **触发**：App 启动与回到前台、确认卡片之后、称重 / 记秤读数 / 删除称重之后、Data 页打开时。
 - **称重**：上传时手机告诉服务端能不能写健康（`appleHealthWritable`）；不能时服务端把体重与体脂率记为手动补录，也不登记变更。
 
+## 9a. Google 健康（2026-11-07）
+
+**问题**：Google 健康 App 会从 Apple 健康读（Vita 写的体重、体脂它能看到），但**不往 Apple 健康写活动能量和睡眠**，手机读 HealthKit 读不到这两项。
+
+**做法**：服务端用 Google Health API（v4，`health.googleapis.com`）自己拉，只拉这两项，只读。
+
+- **授权**：在 Vita Admin 的“Google 健康”页发起（是服务端的配置，手机不参与）。Admin 用服务令牌调 `POST /v1/admin/google-health/authorize` 拿授权页地址（服务端记下一次性 state 与 PKCE verifier，十分钟有效），浏览器整页跳到 Google；Google 回调到服务端的 `/oauth/google-health/callback`（不走令牌，靠 state 认人），服务端换 token 后跳回 Admin 的 `/admin/google-health?result=connected|failed`（Admin 地址由 `VITA_ADMIN_PUBLIC_URL` 配置）。OAuth 客户端是 Web 应用类型；权限是 `googlehealth.activity_and_fitness.readonly` 与 `googlehealth.sleep.readonly`。Google 发布应用要求的首页与隐私政策由 API 提供（`/`、`/privacy`）。
+- **接口**：`GET /v1/google-health`（手机与 Admin 看状态）；`POST /v1/admin/google-health/authorize`、`POST /v1/admin/google-health/sync`、`DELETE /v1/admin/google-health` 只认服务令牌。手机设置页只显示状态。
+- **token**：refresh token 用服务令牌经 HKDF 派生的密钥做 AES-256-GCM 加密，存 `google_health_account`；access token 只在内存。换了服务令牌就解不开，状态显示需要重新连接。
+- **拉取**：今天和前 7 天（服务端用前 7 天算日均）。活动能量用 `active-energy-burned` 的 `dailyRollUp`（按用户在 Google 那边的当地日期）；睡眠没有每日汇总，列出睡眠段后按手机读 Apple 健康时的口径算：结束在前一天 18:00 到当天 12:00 之间的睡眠，加起 `minutesAsleep`。存进 `google_day_metrics`，只存每天的汇总。
+- **触发**：每 30 分钟一次；读一天的数据、读健康数据、开始一轮对话前，距上次超过 10 分钟就先拉（最多等 5 秒，超时先用已有的）；Admin 里的“立即同步”。
+- **合并**：读健康数据时活动能量与睡眠优先用 Google 的，那天 Google 没有才用手机上传的 Apple 健康数据，来源标为 `googleHealth`。体重、体脂率、身高、生日、性别不变，仍是手机读 Apple 健康。
+- **失败**：refresh token 失效（撤销、OAuth 应用停在 Testing 时 7 天到期）记为 `reauthorizationRequired`，手机设置页与 Admin 提示去 Admin 重新连接；连不上记为 `network`，自动重试。已拉到的数据保留。
+- **断开**：尽力撤销 Google 的授权，删掉 token 和 `google_day_metrics`，回到只用 Apple 健康。
+
 ## 10. Agent 在服务端
 
 ### 10.1 一轮请求

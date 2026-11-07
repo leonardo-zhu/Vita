@@ -12,6 +12,8 @@ import {
   ErrorResponse,
   FoodProductResponse,
   FoodsResponse,
+  GoogleHealthAuthorizeResponse,
+  GoogleHealthStatus,
   ListDevicesResponse,
   MessagesResponse,
   TracesResponse,
@@ -146,4 +148,23 @@ export async function labelImage(id: string): Promise<{ bytes: ArrayBuffer; cont
   }).catch(() => null)
   if (!res?.ok) return null
   return { bytes: await res.arrayBuffer(), contentType: res.headers.get('content-type') ?? 'image/jpeg' }
+}
+
+// MARK: - Google 健康（服务端拉活动能量与睡眠；连接在 Admin 里做）
+
+export async function googleHealthStatus() {
+  return call('/v1/google-health', GoogleHealthStatus)
+}
+
+/** Google 授权页地址；在浏览器里打开，授权后 Google 回调到 API，API 再跳回 /admin/google-health。 */
+export async function startGoogleHealthAuthorization() {
+  return (await call('/v1/admin/google-health/authorize', GoogleHealthAuthorizeResponse, { method: 'POST' })).url
+}
+
+export async function syncGoogleHealth() {
+  return call('/v1/admin/google-health/sync', GoogleHealthStatus, { method: 'POST' })
+}
+
+export async function disconnectGoogleHealth() {
+  await call('/v1/admin/google-health', null, { method: 'DELETE' })
 }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 设置：Vita 服务的设备令牌（只进 Keychain）与关于。服务地址来自构建配置，这里只展示、不能改（vita-admin.md §3.2）。
+/// 设置：Vita 服务的设备令牌（只进 Keychain）、Apple 健康、Google 健康与关于。服务地址来自构建配置，这里只展示、不能改（vita-admin.md §3.2）。
 /// 数据都在服务端；要改数据或清数据去 Admin。
 struct SettingsView: View {
     let services: AppServices
@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var isConfirmingDisconnect = false
     @State private var message: String?
     @State private var isResyncing = false
-
+    @State private var google: GoogleHealthStatusDTO?
 
     var body: some View {
         NavigationStack {
@@ -24,6 +24,7 @@ struct SettingsView: View {
                 VStack(spacing: 16) {
                     serviceCard
                     healthCard
+                    googleHealthCard
                     aboutCard
                 }
                 .padding(16)
@@ -52,6 +53,7 @@ struct SettingsView: View {
         .onAppear {
             loadToken()
         }
+        .task { await loadGoogle() }
     }
 
     // MARK: - Vita 服务
@@ -150,6 +152,48 @@ struct SettingsView: View {
             .disabled(isResyncing)
         }
         .vitaCard(padding: 20)
+    }
+
+    // MARK: - Google 健康
+
+    /// Google 健康不往 Apple 健康写活动能量与睡眠，由服务端去 Google 拉。连接、同步、断开都在 Vita Admin 里做（是服务端的配置），这里只看状态。
+    private var googleHealthCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                CardHeader(title: "Google 健康", systemImage: "figure.walk.motion", tint: VitaTheme.protein)
+                Spacer(minLength: 0)
+                if let google, google.configured {
+                    Text(google.connected ? "已连接" : "未连接")
+                        .font(VitaType.meta.weight(.semibold))
+                        .foregroundStyle(google.connected && google.lastError == nil ? VitaTheme.intake : .secondary)
+                }
+            }
+            Text(googleDescription)
+                .font(VitaType.meta)
+                .foregroundStyle(googleNeedsAttention ? VitaTheme.caution : .secondary)
+        }
+        .vitaCard(padding: 20)
+    }
+
+    private var googleNeedsAttention: Bool { google?.connected == true && google?.lastError != nil }
+
+    private var googleDescription: String {
+        guard let google else { return "读不到连接状态。" }
+        guard google.configured else { return "服务端还没有配置 Google 健康。" }
+        guard google.connected else {
+            return "活动能量和睡眠现在用 Apple 健康的。Google 健康不会把这两项写进 Apple 健康；在 Vita Admin 的“Google 健康”页连接后，由 Vita 服务去 Google 读取。"
+        }
+        switch google.lastError {
+        case "reauthorizationRequired": return "Google 的授权失效了，请在 Vita Admin 的“Google 健康”页重新连接。"
+        case .some: return "最近一次从 Google 读取失败，服务端稍后会自动重试。"
+        case nil:
+            let last = google.lastSyncAt.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "还没有"
+            return "活动能量和睡眠来自 Google 健康，由 Vita 服务定时读取。上次同步：\(last)。连接与断开在 Vita Admin 里管理。"
+        }
+    }
+
+    private func loadGoogle() async {
+        google = try? await services.googleHealth.status()
     }
 
     // MARK: - 关于

@@ -1,10 +1,13 @@
 /**
  * 健康数据（TDD §6.1，替代 1.0 的 HealthService）。Apple 健康只能在手机上读：手机把读到的身体数据和每日活动上传，
  * 这里保存最新一份，补上手动补录的兜底，并按活动记录算出 7 日日均。只用于目标与 Agent，不复制成长期业务主数据。
+ * 连了 Google 健康时，活动能量与睡眠用服务端拉到的（google_day_metrics，见 GoogleHealthService），没有的日子再用手机上传的。
+ * 体重与体脂率：体脂秤的称重服务端本来就有（scale_weighings，见 BodyService），不比 Apple 健康里的旧就直接用，
+ * 不必等手机写进 Apple 健康再读回来；Apple 健康更新时（别的秤、别的 App 记的）用 Apple 健康的。
  */
 import Big from 'big.js'
 
-import type { ActivityUpload, HealthSnapshot, HealthUpload, ManualBodyMetrics } from '@vita/contract'
+import type { ActivityUpload, HealthSnapshot, HealthUpload, ManualBodyMetrics, MetricSource } from '@vita/contract'
 
 import { audit, transaction } from '../db.ts'
 import type { DayActivity } from '../domain/energy.ts'
@@ -17,7 +20,7 @@ const MINIMUM_AVERAGE_DAYS = 3
 const NO_DATA = { status: 'noData' } as const
 
 type Reading<T> =
-  | { status: 'value'; value: T; source: 'healthKit' | 'manual'; measuredAt: string | null }
+  | { status: 'value'; value: T; source: MetricSource; measuredAt: string | null }
   | { status: 'noData' }
   | { status: 'failed'; message: string }
 
@@ -27,8 +30,31 @@ function withFallback<T>(reading: Reading<T>, value: T | null | undefined, enter
   return { status: 'value', value, source: 'manual', measuredAt: enteredAt }
 }
 
-function measured(value: number | null): Reading<number> {
-  return value === null ? NO_DATA : { status: 'value', value, source: 'healthKit', measuredAt: null }
+function measured(value: number | null, source: 'healthKit' | 'googleHealth' = 'healthKit'): Reading<number> {
+  return value === null ? NO_DATA : { status: 'value', value, source, measuredAt: null }
+}
+
+/** 体脂秤最新的体重与体脂率，各带称重时间（ISO）。由 BodyService 提供，见 HealthService.useScale。 */
+export interface ScaleReadings {
+  bodyMassKg: { value: number; measuredAt: string } | null
+  bodyFatFraction: { value: number; measuredAt: string } | null
+}
+
+/**
+ * 称重不比 Apple 健康的读数旧时用称重。同一时刻多半就是手机写进 Apple 健康的那份，以服务端为准（体脂率按当前校准算）；
+ * Apple 健康的读数没有时间或读取失败时也用称重。按时刻比较，手机给的 ISO 字符串可能不带毫秒。
+ */
+function newerOf(reading: Reading<number>, scale: ScaleReadings['bodyMassKg']): Reading<number> {
+  if (!scale) return reading
+  if (reading.status === 'value' && reading.measuredAt !== null && Date.parse(reading.measuredAt) > Date.parse(scale.measuredAt)) return reading
+  return { status: 'value', value: scale.value, source: 'vitaScale', measuredAt: scale.measuredAt }
+}
+
+/** 某天的活动能量与来源：Google 健康拉到的优先，没有时用手机上传的。 */
+interface ActivityDay {
+  date: string
+  kcal: number | null
+  source: 'healthKit' | 'googleHealth'
 }
 
 const EMPTY_UPLOAD: HealthUpload = {
@@ -44,9 +70,15 @@ const EMPTY_UPLOAD: HealthUpload = {
 
 export class HealthService {
   private readonly context: ServiceContext
+  private scale: () => ScaleReadings = () => ({ bodyMassKg: null, bodyFatFraction: null })
 
   constructor(context: ServiceContext) {
     this.context = context
+  }
+
+  /** 接上体脂秤的称重。BodyService 要用快照里的身高、年龄、性别，所以不能在构造时互相传入。 */
+  useScale(readings: () => ScaleReadings) {
+    this.scale = readings
   }
 
   /** 保存手机读到的身体数据，覆盖上一份。 */
@@ -106,38 +138,62 @@ export class HealthService {
     return merged
   }
 
-  /** 某天的活动：当天上传的累计，加上之前 7 个完整日里有数据（大于 0）的那些天的日均（不足 3 天为 null）。 */
+  /** 某天的活动：当天的累计，加上之前 7 个完整日里有数据（大于 0）的那些天的日均（不足 3 天为 null）。 */
   activity(date: string): DayActivity {
-    const rows = this.context.database
-      .prepare('SELECT local_date, active_kcal FROM day_activity WHERE local_date BETWEEN ? AND ?')
-      .all(addDays(date, -7), date) as { local_date: string; active_kcal: number | null }[]
-    const byDate = new Map(rows.map((row) => [row.local_date, row.active_kcal]))
-    const previous = rows.filter((row) => row.local_date !== date && row.active_kcal !== null && row.active_kcal > 0).map((row) => row.active_kcal!)
-    const average =
-      previous.length >= MINIMUM_AVERAGE_DAYS
-        ? Number(previous.reduce((sum, value) => sum.plus(value), new Big(0)).div(previous.length).toString())
-        : null
-    return { activeKcal: byDate.get(date) ?? null, dailyAverageKcal: average }
+    const { today, average } = this.activityWithSource(date)
+    return { activeKcal: today.kcal, dailyAverageKcal: average.kcal }
   }
 
-  /** 某天的健康数据：上传的各项，缺的用手动补录兜底；活动按服务端的活动记录。 */
+  /** 同 activity，带上来源：日均里只要有一天来自 Google 健康就标 googleHealth。 */
+  private activityWithSource(date: string): { today: ActivityDay; average: { kcal: number | null; source: ActivityDay['source'] } } {
+    const { database } = this.context
+    const from = addDays(date, -7)
+    const phone = database.prepare('SELECT local_date, active_kcal FROM day_activity WHERE local_date BETWEEN ? AND ?').all(from, date) as {
+      local_date: string
+      active_kcal: number | null
+    }[]
+    const google = database.prepare('SELECT local_date, active_kcal FROM google_day_metrics WHERE local_date BETWEEN ? AND ?').all(from, date) as {
+      local_date: string
+      active_kcal: number | null
+    }[]
+    const days = new Map<string, ActivityDay>()
+    for (const row of phone) days.set(row.local_date, { date: row.local_date, kcal: row.active_kcal, source: 'healthKit' })
+    for (const row of google) {
+      if (row.active_kcal !== null) days.set(row.local_date, { date: row.local_date, kcal: row.active_kcal, source: 'googleHealth' })
+    }
+    const today = days.get(date) ?? { date, kcal: null, source: 'healthKit' }
+    const previous = [...days.values()].filter((day) => day.date !== date && day.kcal !== null && day.kcal > 0)
+    const kcal =
+      previous.length >= MINIMUM_AVERAGE_DAYS
+        ? Number(previous.reduce((sum, day) => sum.plus(day.kcal!), new Big(0)).div(previous.length).toString())
+        : null
+    const source = previous.some((day) => day.source === 'googleHealth') ? 'googleHealth' : 'healthKit'
+    return { today, average: { kcal, source } }
+  }
+
+  /**
+   * 某天的健康数据：上传的各项，缺的用手动补录兜底；体重与体脂率取体脂秤与 Apple 健康里较新的；
+   * 活动按服务端的活动记录，睡眠有 Google 健康的用 Google 的。
+   */
   snapshot(date: string): HealthSnapshot {
-    const row = this.context.database.prepare('SELECT data, uploaded_at FROM health_upload WHERE id = 1').get() as
-      | { data: string; uploaded_at: string }
-      | undefined
+    const { database } = this.context
+    const row = database.prepare('SELECT data, uploaded_at FROM health_upload WHERE id = 1').get() as { data: string; uploaded_at: string } | undefined
     const upload: HealthUpload = row ? JSON.parse(row.data) : EMPTY_UPLOAD
     const manual = this.manualRow()
     const metrics = manual?.metrics
-    const activity = this.activity(date)
+    const { today, average } = this.activityWithSource(date)
+    const scale = this.scale()
+    const googleSleep = database.prepare('SELECT sleep_hours FROM google_day_metrics WHERE local_date = ?').get(date) as { sleep_hours: number | null } | undefined
     return {
       ...upload,
-      bodyMassKg: withFallback(upload.bodyMassKg, metrics?.bodyMassKg, manual?.enteredAt),
+      bodyMassKg: withFallback(newerOf(upload.bodyMassKg, scale.bodyMassKg), metrics?.bodyMassKg, manual?.enteredAt),
       heightCm: withFallback(upload.heightCm, metrics?.heightCm, manual?.enteredAt),
-      bodyFatFraction: withFallback(upload.bodyFatFraction, metrics?.bodyFatFraction, manual?.enteredAt),
+      bodyFatFraction: withFallback(newerOf(upload.bodyFatFraction, scale.bodyFatFraction), metrics?.bodyFatFraction, manual?.enteredAt),
       dateOfBirth: withFallback(upload.dateOfBirth, metrics?.dateOfBirth, manual?.enteredAt),
       sex: withFallback(upload.sex, metrics?.sex, manual?.enteredAt),
-      activeEnergyKcal: measured(activity.activeKcal),
-      averageActiveEnergyKcal: measured(activity.dailyAverageKcal),
+      sleepHours: googleSleep && googleSleep.sleep_hours !== null ? measured(googleSleep.sleep_hours, 'googleHealth') : upload.sleepHours,
+      activeEnergyKcal: measured(today.kcal, today.source),
+      averageActiveEnergyKcal: measured(average.kcal, average.source),
       uploadedAt: row?.uploaded_at ?? null,
     }
   }

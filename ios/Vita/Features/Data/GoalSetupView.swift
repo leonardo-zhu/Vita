@@ -211,7 +211,7 @@ private struct MetricRow: View {
                 Spacer()
                 if let value {
                     Text(value).monospacedDigit().foregroundStyle(.primary)
-                    Text(source == .manual ? "手动" : "健康")
+                    Text(source == .manual ? "手动" : source == .vitaScale ? "体脂秤" : "健康")
                         .font(.caption2)
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 6)

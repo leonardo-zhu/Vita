@@ -102,7 +102,7 @@ private struct MetricCard<Value: Equatable & Codable & Sendable>: View {
                     Text(format(value)).font(.title2.weight(.semibold)).monospacedDigit()
                     Text(unit).font(VitaType.meta).foregroundStyle(.secondary)
                 }
-                Text([footnote, source == .manual ? "手动补录" : measuredAt.map(DisplayFormat.relativeDay)].compactMap { $0 }.joined(separator: " · "))
+                Text([footnote, MetricCardSource.note(source, measuredAt)].compactMap { $0 }.joined(separator: " · "))
                     .font(VitaType.meta)
                     .foregroundStyle(.secondary)
             case .noData:
@@ -117,6 +117,18 @@ private struct MetricCard<Value: Equatable & Codable & Sendable>: View {
         .padding(16)
         .background(VitaTheme.card, in: .rect(cornerRadius: 22))
         .shadow(color: .black.opacity(0.04), radius: 12, y: 4)
+    }
+}
+
+/// 健康卡片下方的来源：手动补录、来自 Google 健康，体脂秤写“体脂秤”和称重日期，Apple 健康的只写测量日期。
+enum MetricCardSource {
+    static func note(_ source: MetricSource, _ measuredAt: Date?) -> String? {
+        switch source {
+        case .manual: "手动补录"
+        case .googleHealth: "Google 健康"
+        case .vitaScale: ["体脂秤", measuredAt.map(DisplayFormat.relativeDay)].compactMap { $0 }.joined(separator: " · ")
+        case .healthKit: measuredAt.map(DisplayFormat.relativeDay)
+        }
     }
 }
 

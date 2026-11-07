@@ -26,6 +26,9 @@ export type AuditAction =
   | 'food_update'
   | 'food_delete'
   | 'food_version'
+  | 'google_health_connect'
+  | 'google_health_sync'
+  | 'google_health_disconnect'
 
 export interface AuditEntry {
   actor: string

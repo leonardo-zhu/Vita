@@ -217,6 +217,30 @@ const MIGRATIONS = [
   ALTER TABLE chat_messages ADD COLUMN excluded_at TEXT;`,
   `-- 食品的常用叫法（PRD v2.0 §4.2）：JSON 字符串数组，给模型匹配用
   ALTER TABLE food_products ADD COLUMN aliases TEXT;`,
+  `-- Google 健康（Google Health API）：服务端用 refresh token 拉活动能量与睡眠。Google 健康不往 Apple 健康写这两项
+  -- 连接的账号，只有一个。refresh token 用服务令牌派生的密钥加密（AES-256-GCM）
+  CREATE TABLE google_health_account (
+    id                 INTEGER PRIMARY KEY CHECK (id = 1),
+    refresh_token_enc  TEXT NOT NULL,
+    scopes             TEXT NOT NULL,
+    connected_at       TEXT NOT NULL,
+    last_sync_at       TEXT,             -- 最近一次成功拉取
+    last_error         TEXT,             -- 最近一次失败的原因码；成功后清空
+    last_error_at      TEXT
+  );
+  -- 授权进行中：state 与 PKCE verifier，回调时取出即删；十分钟后作废
+  CREATE TABLE google_health_oauth_states (
+    state          TEXT PRIMARY KEY,
+    code_verifier  TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+  );
+  -- 每天从 Google 健康拉到的汇总。和手机上传的 day_activity 分开存，读的时候 Google 的优先
+  CREATE TABLE google_day_metrics (
+    local_date   TEXT PRIMARY KEY,
+    active_kcal  REAL,                   -- 没有数据为 NULL
+    sleep_hours  REAL,                   -- 截至当天 12:00 的前一晚，没有数据为 NULL
+    updated_at   TEXT NOT NULL
+  );`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

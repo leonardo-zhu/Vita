@@ -52,6 +52,7 @@ final class AppServices {
     let api: VitaAPIClient
     let healthSync: HealthSyncService
     let health: HealthService
+    let googleHealth: GoogleHealthService
     let bodyComposition: BodyCompositionService
     let dayData: DayDataService
     let goals: GoalService
@@ -68,6 +69,7 @@ final class AppServices {
         let sync = HealthSyncService(api: api, store: container.healthStore, local: container.local)
         healthSync = sync
         health = HealthService(api: api, store: container.healthStore, now: now, timeZone: timeZone)
+        googleHealth = GoogleHealthService(api: api)
         bodyComposition = BodyCompositionService(api: api, store: container.healthStore, local: container.local, healthSync: sync, now: now)
         dayData = DayDataService(api: api) { sync.state(forRecord: $0) }
         goals = GoalService(api: api)

@@ -5,8 +5,10 @@ enum BiologicalSex: String, Codable, Sendable, CaseIterable {
 }
 
 /// 一个身体或活动数据从哪里来（agent-tools.md `getHealthSnapshot`：返回时标注来源）。
+/// googleHealth：服务端从 Google 健康拉的活动能量与睡眠（Google 健康不往 Apple 健康写这两项）。
+/// vitaScale：Vita 体脂秤的称重，服务端直接用自己存的那份（比 Apple 健康里的新时）。
 enum MetricSource: String, Codable, Sendable {
-    case healthKit, manual
+    case healthKit, manual, googleHealth, vitaScale
 }
 
 /// 读取结果必须区分“有数据 / 无数据 / 查询失败”，不能把授权当成数据存在（TDD §6.1）。
@@ -52,7 +54,7 @@ struct HealthSnapshot: Equatable, Codable, Sendable {
     /// 请求过授权但什么都读不到，且写入被拒：基本可以判定用户没有允许，应引导去设置而不是显示一排空数据。
     var accessLikelyDenied: Bool {
         authorizationRequested && writeDenied
-            && bodyMassKg.source != .healthKit && heightCm.source != .healthKit && bodyFatFraction.value == nil
+            && bodyMassKg.source != .healthKit && heightCm.source != .healthKit && bodyFatFraction.source != .healthKit
             && activeEnergyKcal.value == nil && sleepHours.value == nil
     }
 

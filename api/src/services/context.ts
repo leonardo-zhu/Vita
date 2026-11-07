@@ -29,7 +29,7 @@ export class ServiceError extends Error {
   readonly details: Record<string, unknown>
 
   /** `auditDetail` 细分审计码，如 invalidItem 的具体原因：record.invalidItem.unknownReferenceFood。 */
-  constructor(domain: 'record' | 'food' | 'pending' | 'goal' | 'body' | 'label' | 'chat' | 'import', code: string, details: Record<string, unknown> = {}, auditDetail?: string) {
+  constructor(domain: 'record' | 'food' | 'pending' | 'goal' | 'body' | 'label' | 'chat' | 'import' | 'googleHealth', code: string, details: Record<string, unknown> = {}, auditDetail?: string) {
     super(`${domain}.${code}`)
     this.code = code
     this.auditCode = auditDetail ? `${domain}.${code}.${auditDetail}` : `${domain}.${code}`

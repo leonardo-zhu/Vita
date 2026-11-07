@@ -669,3 +669,18 @@ struct HealthChangesResponseDTO: Decodable, Sendable {
     var cursor: Int
     var hasMore: Bool
 }
+
+
+// MARK: - Google 健康（服务端拉活动能量与睡眠）
+
+/// GET /v1/google-health：连接状态（连接与断开在 Vita Admin 里做）。
+struct GoogleHealthStatusDTO: Codable, Equatable, Sendable {
+    /// 服务端配了 OAuth 客户端才能连接。
+    var configured: Bool
+    var connected: Bool
+    var connectedAt: Date?
+    var lastSyncAt: Date?
+    /// reauthorizationRequired / network / googleError / internal；成功后为空。
+    var lastError: String?
+    var lastErrorAt: Date?
+}

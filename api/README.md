@@ -55,6 +55,20 @@ curl -X POST http://127.0.0.1:3014/v1/admin/devices \
 
 `CONDUIT_BASE_URL` 在 R4S 上填 `http://127.0.0.1:3012`：Conduit 只监听本机，直接连，不绕 Caddy 和 TLS。
 
+### 接入 Google 健康（可选）
+
+服务端用 Google Health API 拉活动能量与睡眠（架构设计 §9a）。R4S 本机经 OpenClash 能连上 Google，不用装 gcloud，Google 那边都在 Cloud Console 网页上操作：
+
+1. 打开 <https://developers.google.com/health/setup>，点 **Enable the API and get an OAuth 2.0 Client ID**，新建项目（或选已有的），类型选 **Web Server**。（2026-11-07 已建好，项目 441608430741，已发布为 In production。）
+2. **Authorized redirect URI** 填 `https://vita-api.r4s.leonardo-zhu.me/oauth/google-health/callback`（不是文档示例里的 `https://www.google.com`）。
+3. 记下 Client ID 与 Client Secret。
+4. Google Auth Platform → **Branding**：填 App name、User support email、Developer contact；**Application home page** 填 `https://vita-api.r4s.leonardo-zhu.me/`，**privacy policy** 填 `https://vita-api.r4s.leonardo-zhu.me/privacy`（这两页由 API 提供，发布成 Production 必填）；**Authorized domains** 加 `leonardo-zhu.me`。**不要传 Logo**，传了就必须提交审核。
+5. Google Auth Platform → **Audience**：User type 选 External，点 **Publish app** 改成 **In production**。停在 Testing 时 refresh token 7 天就失效。不用提交验证：未验证的应用最多 100 个用户，授权时会出现“Google 尚未验证此应用”，点“高级 → 继续”即可。
+6. 在 `/opt/stacks/vita-api/.env` 加上 `GOOGLE_HEALTH_CLIENT_ID`、`GOOGLE_HEALTH_CLIENT_SECRET`、`GOOGLE_HEALTH_REDIRECT_URI`（同第 2 步），按下一节重启。Admin 不是默认地址时另加 `VITA_ADMIN_PUBLIC_URL`。
+7. 在 Vita Admin 的“Google 健康”页点连接，登录 Google 并授权，完成后跳回 Admin。手机设置页只显示状态。
+
+refresh token 用 `VITA_API_SERVICE_TOKEN` 派生的密钥加密存库，换了服务令牌要在手机上重新连接。
+
 ### 改了 `.env` 之后重启
 
 compose 里镜像 tag 默认是 `latest`，服务器上没有 GHCR 的拉取凭据，直接 `up` 会报 `unauthorized`。用当前运行的 sha，不拉取（同 Admin）：

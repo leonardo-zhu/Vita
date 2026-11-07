@@ -19,6 +19,7 @@ export function ConsoleNav() {
     { href: '/admin/records', label: t.nav.records },
     { href: '/admin/foods', label: t.nav.foods },
     { href: '/admin/devices', label: t.nav.devices },
+    { href: '/admin/google-health', label: t.nav.googleHealth },
     { href: '/admin/settings', label: t.nav.settings },
   ]
   return (
