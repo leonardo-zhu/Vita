@@ -1,6 +1,7 @@
 import path from 'node:path'
 
 import { dataDir } from '../db.ts'
+import { BmrLog } from './bmrLog.ts'
 import { BodyService } from './body.ts'
 import { ChatService, LabelService } from './chat.ts'
 import type { ServiceContext } from './context.ts'
@@ -28,6 +29,7 @@ export interface Services {
   healthSync: HealthSyncService
   importer: ImportService
   googleHealth: GoogleHealthService
+  bmrLog: BmrLog
 }
 
 /**
@@ -39,7 +41,10 @@ export function createServices(context: ServiceContext, filesDir = path.join(dat
   const foods = new FoodService(context)
   const goals = new GoalService(context)
   const health = new HealthService(context)
-  const days = new DayService(context, goals, health)
+  const bmrLog = new BmrLog(context, health, goals)
+  health.onBodyDataChange((reason) => bmrLog.check(reason))
+  goals.onChange(() => bmrLog.check('goal'))
+  const days = new DayService(context, goals, health, bmrLog)
   const body = new BodyService(context, health)
   health.useScale(() => body.latestReadings())
   return {
@@ -56,5 +61,6 @@ export function createServices(context: ServiceContext, filesDir = path.join(dat
     chat: new ChatService(context),
     labels: new LabelService(context, filesDir),
     googleHealth: new GoogleHealthService(context, googleHealth),
+    bmrLog,
   }
 }

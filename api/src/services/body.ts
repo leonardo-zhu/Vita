@@ -61,7 +61,7 @@ export class BodyService {
       sex: snapshot.sex.status === 'value' ? snapshot.sex.value : null,
     }
 
-    return transaction(database, () => {
+    const recorded = transaction(database, () => {
       database
         .prepare(
           `INSERT INTO scale_weighings (id, measured_at, weight_grams, impedance_a, impedance_b, source, time_reliable, profile, created_at)
@@ -84,6 +84,8 @@ export class BodyService {
       audit(database, { actor: origin.actor, action: 'body.weighing', targetId: upload.id, result: 'success', at })
       return weighing
     })
+    this.health.notifyBodyDataChange('weighing')
+    return recorded
   }
 
   /** 全部称重，新的在前；体脂率按当前校准算。 */
@@ -157,6 +159,7 @@ export class BodyService {
       recordHealthChange(database, 'weighing', id, now())
       audit(database, { actor: origin.actor, action: 'body.weighing.delete', targetId: id, result: 'success', at: now() })
     })
+    this.health.notifyBodyDataChange('weighing')
   }
 
   private appliedModel(): BodyFatModel | null {

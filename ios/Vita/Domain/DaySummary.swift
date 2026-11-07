@@ -72,6 +72,8 @@ struct DaySummary: Equatable, Sendable {
     var energy: EnergyTarget?
     /// 截至现在的热量收支；没有活动数据或没有随活动计算的目标时为 nil。
     var balance: EnergyBalance?
+    /// 这一天基础代谢最近的一次变化（称重、补录等让 BMR 变了）；没变过为 nil。
+    var bmrChange: BmrChange?
 
     init(
         items: [(snapshot: NutritionSnapshot, includeInSummary: Bool)],
@@ -96,8 +98,10 @@ struct DaySummary: Equatable, Sendable {
     /// 服务端算好的汇总（`GET /v1/days/:date`）：能量目标随活动计算时，`goal.targets.energyKcal` 已是当天的值。
     init(
         totals: NutrientValues, includedItemCount: Int, excludedItemCount: Int, estimatedItemCount: Int,
-        goal: GoalSnapshot?, energy: EnergyTarget?, balance: EnergyBalance?, missingExtras: [ExtraNutrient: Int] = [:]
+        goal: GoalSnapshot?, energy: EnergyTarget?, balance: EnergyBalance?, missingExtras: [ExtraNutrient: Int] = [:],
+        bmrChange: BmrChange? = nil
     ) {
+        self.bmrChange = bmrChange
         self.totals = totals
         self.missingExtras = missingExtras
         self.includedItemCount = includedItemCount
@@ -111,6 +115,32 @@ struct DaySummary: Equatable, Sendable {
     var progress: [Progress] {
         Nutrient.allCases.map {
             Progress(nutrient: $0, consumed: $0.value(in: totals), target: goal?.targets.target(for: $0))
+        }
+    }
+}
+
+/// 基础代谢的一次变化（随活动计算的目标每天按最新身体数据重算 BMR，服务端在它变了时记一条）。
+struct BmrChange: Equatable, Sendable {
+    enum Reason: String, Decodable, Sendable {
+        case weighing, appleHealth, manual, goal
+    }
+
+    var previousBmrKcal: Decimal
+    var bmrKcal: Decimal
+    /// 服务端以后可能加新的原因：认不出时为 nil，仍显示数值变化。
+    var reason: Reason?
+    var weightKg: Decimal
+
+    /// Data 页的一行提示，如“称重 72.8 kg，基础代谢 1702 → 1690”。
+    var note: String {
+        let weight = DisplayFormat.number(weightKg, digits: 1)
+        let change = "基础代谢 \(DisplayFormat.number(previousBmrKcal, digits: 0)) → \(DisplayFormat.number(bmrKcal, digits: 0))"
+        switch reason {
+        case .weighing: return "称重 \(weight) kg，\(change)"
+        case .appleHealth: return "Apple 健康里的体重为 \(weight) kg，\(change)"
+        case .manual: return "补录了身体数据，\(change)"
+        case .goal: return "按当前体重 \(weight) kg 重算，\(change)"
+        case nil: return change
         }
     }
 }

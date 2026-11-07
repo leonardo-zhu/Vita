@@ -51,6 +51,15 @@ function newerOf(reading: Reading<number>, scale: ScaleReadings['bodyMassKg']): 
   return { status: 'value', value: scale.value, source: 'vitaScale', measuredAt: scale.measuredAt }
 }
 
+/** 某天的 BMR 与算它用的身体数据。 */
+export interface BmrInputs {
+  bmrKcal: number
+  weightKg: number
+  heightCm: number
+  ageYears: number
+  sex: 'female' | 'male' | 'other'
+}
+
 /** 某天的活动能量与来源：Google 健康拉到的优先，没有时用手机上传的。 */
 interface ActivityDay {
   date: string
@@ -72,6 +81,7 @@ const EMPTY_UPLOAD: HealthUpload = {
 export class HealthService {
   private readonly context: ServiceContext
   private scale: () => ScaleReadings = () => ({ bodyMassKg: null, bodyFatFraction: null })
+  private readonly listeners: ((reason: 'weighing' | 'appleHealth' | 'manual') => void)[] = []
 
   constructor(context: ServiceContext) {
     this.context = context
@@ -92,6 +102,7 @@ export class HealthService {
         .run(JSON.stringify(data), at.toISOString())
       audit(database, { actor: origin.actor, action: 'health.upload', result: 'success', at })
     })
+    this.notifyBodyDataChange('appleHealth')
   }
 
   /** 保存若干天的活动能量；同一天以最后一次上传为准。 */
@@ -111,11 +122,13 @@ export class HealthService {
   submitManualMetrics(metrics: ManualBodyMetrics, origin: WriteOrigin): ManualBodyMetrics {
     const { database, now } = this.context
     const at = now()
-    return transaction(database, () => {
+    const merged = transaction(database, () => {
       const merged = this.writeManual(metrics, at)
       audit(database, { actor: origin.actor, action: 'health.manualMetrics', result: 'success', at })
       return merged
     })
+    this.notifyBodyDataChange('manual')
+    return merged
   }
 
   /**
@@ -205,6 +218,11 @@ export class HealthService {
    * 这样过去日子的目标不会被后来的称重改掉。身高、出生日期、性别取当前的。缺一项返回 null，由调用方用目标里存的。
    */
   bmrOn(date: string): number | null {
+    return this.bmrInputsOn(date)?.bmrKcal ?? null
+  }
+
+  /** 同 bmrOn，带上算它用的身体数据（记录变化用）。 */
+  bmrInputsOn(date: string): BmrInputs | null {
     const snapshot = this.snapshot(date)
     const { heightCm: height, dateOfBirth: birth, sex } = snapshot
     if (height.status !== 'value' || birth.status !== 'value' || sex.status !== 'value') return null
@@ -223,8 +241,18 @@ export class HealthService {
       weight = row ? row.weight_grams / 1000 : null
     }
     if (weight === null) return null
-    const bmr = mifflinStJeor(weight, height.value, ageOn(birth.value, date), sex.value)
-    return Math.round(Number(bmr.toString()) * 10) / 10
+    const ageYears = ageOn(birth.value, date)
+    const bmr = mifflinStJeor(weight, height.value, ageYears, sex.value)
+    return { bmrKcal: Math.round(Number(bmr.toString()) * 10) / 10, weightKg: weight, heightCm: height.value, ageYears, sex: sex.value }
+  }
+
+  /** 身体数据可能变了（称重、上传、补录）：通知监听者（BmrLog）检查基础代谢。在调用方的事务提交之后调用。 */
+  onBodyDataChange(listener: (reason: 'weighing' | 'appleHealth' | 'manual') => void) {
+    this.listeners.push(listener)
+  }
+
+  notifyBodyDataChange(reason: 'weighing' | 'appleHealth' | 'manual') {
+    for (const listener of this.listeners) listener(reason)
   }
 
   private manualRow(): { metrics: ManualBodyMetrics; enteredAt: string } | null {

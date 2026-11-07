@@ -12,6 +12,7 @@ import {
   FoodsResponse,
   GoalRecommendationResponse,
   GoalResponse,
+  GoalChangesResponse,
   HealthSnapshot,
   LabelScanResponse,
   MessagesResponse,
@@ -338,3 +339,17 @@ function scripted(rounds: (LLMEvent[] | LLMError)[]): LLMClient {
     },
   }
 }
+
+describe('目标变更', () => {
+  it('Admin 能看目标历史与基础代谢变化，设备令牌不行', async () => {
+    const { call, services, device } = await withDevice()
+    services.goals.append({ energyKcal: 1900, proteinG: null, fatG: null, carbohydrateG: null }, null, 'manualOnboarding', DAY, { actor: `device:${device.id}` })
+    expect((await call('/v1/admin/goal-changes')).status).toBe(403)
+    const app = createApp({ services, agent: null, serviceToken: SERVICE_TOKEN, version: 'test' })
+    const response = await app.request('/v1/admin/goal-changes', { headers: { authorization: `Bearer ${SERVICE_TOKEN}` } })
+    const body = GoalChangesResponse.parse(await response.json())
+    expect(body.goals).toHaveLength(1)
+    expect(body.goals[0].actor).toBe(`device:${device.id}`)
+    expect(body.bmrChanges).toEqual([])
+  })
+})

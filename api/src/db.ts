@@ -241,6 +241,20 @@ const MIGRATIONS = [
     sleep_hours  REAL,                   -- 截至当天 12:00 的前一晚，没有数据为 NULL
     updated_at   TEXT NOT NULL
   );`,
+  `-- 基础代谢的变化（ADR-018 补充）：随活动计算的目标每天按最新身体数据重算 BMR，变了就记一条，Admin 与 Data 页据此解释目标为什么变了
+  CREATE TABLE bmr_changes (
+    id            INTEGER PRIMARY KEY,
+    local_date    TEXT NOT NULL,         -- 变化发生在哪一天
+    changed_at    TEXT NOT NULL,
+    previous_bmr  REAL NOT NULL,
+    bmr           REAL NOT NULL,
+    reason        TEXT NOT NULL,         -- weighing / appleHealth / manual / goal
+    weight_kg     REAL NOT NULL,
+    height_cm     REAL NOT NULL,
+    age_years     INTEGER NOT NULL,
+    sex           TEXT NOT NULL
+  );
+  CREATE INDEX bmr_changes_date ON bmr_changes(local_date);`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

@@ -230,6 +230,28 @@ export const EnergyBalance = z.object({
 })
 export type EnergyBalance = z.infer<typeof EnergyBalance>
 
+/**
+ * 基础代谢的一次变化（随活动计算的目标每天按最新身体数据重算 BMR）。只在数值真的变了时记一条。
+ * reason：weighing 称重（新增或删除）、appleHealth 手机上传的 Apple 健康数据、manual 补录、goal 设定或修改了目标。
+ */
+export const BmrChangeReason = z.enum(['weighing', 'appleHealth', 'manual', 'goal'])
+export type BmrChangeReason = z.infer<typeof BmrChangeReason>
+export const BmrChange = z.object({
+  /** 变化发生在哪一天（服务端时区）。 */
+  date: LocalDate,
+  changedAt: z.iso.datetime(),
+  /** 变化前用的 BMR；第一次记录时是设定目标时存的值。 */
+  previousBmrKcal: z.number(),
+  bmrKcal: z.number(),
+  reason: BmrChangeReason,
+  /** 算这次 BMR 用的身体数据。 */
+  weightKg: z.number(),
+  heightCm: z.number(),
+  ageYears: z.number().int(),
+  sex: z.enum(['female', 'male', 'other']),
+})
+export type BmrChange = z.infer<typeof BmrChange>
+
 export const DaySummary = z.object({
   totals: NutrientValues,
   includedItemCount: z.number().int(),
@@ -243,6 +265,8 @@ export const DaySummary = z.object({
   energy: EnergyTarget.nullable(),
   /** 没有活动数据或没有随活动计算的目标时为 null。 */
   balance: EnergyBalance.nullable(),
+  /** 这一天基础代谢最近的一次变化（Data 页提示“体重更新了，基础代谢 A → B”）；这天没变过为 null。 */
+  bmrChange: BmrChange.nullable(),
 })
 export type DaySummary = z.infer<typeof DaySummary>
 
@@ -474,6 +498,22 @@ export type GoogleHealthStatus = z.infer<typeof GoogleHealthStatus>
  */
 export const GoogleHealthAuthorizeResponse = z.object({ url: z.url() })
 export type GoogleHealthAuthorizeResponse = z.infer<typeof GoogleHealthAuthorizeResponse>
+
+// MARK: - 目标变更（只给 Admin）
+
+/** GET /v1/admin/goal-changes：目标设置的历史（谁、什么时候、改成什么）与基础代谢的变化，都按时间倒序。 */
+export const GoalChangesResponse = z.object({
+  goals: z.array(
+    z.object({
+      goal: Goal,
+      createdAt: z.iso.datetime(),
+      /** 审计里的发起方：device:<id>、admin、或对话里的 Agent（同样是 device:<id>，看 origin）；查不到为 null。 */
+      actor: z.string().nullable(),
+    }),
+  ),
+  bmrChanges: z.array(BmrChange),
+})
+export type GoalChangesResponse = z.infer<typeof GoalChangesResponse>
 
 // MARK: - 目标建议与设定
 

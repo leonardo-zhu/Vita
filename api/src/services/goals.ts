@@ -37,9 +37,26 @@ interface GoalRow {
 
 export class GoalService {
   private readonly context: ServiceContext
+  private readonly listeners: (() => void)[] = []
 
   constructor(context: ServiceContext) {
     this.context = context
+  }
+
+  /** 目标变了（追加了一条）：通知监听者（BmrLog）。在事务提交之后调用。 */
+  onChange(listener: () => void) {
+    this.listeners.push(listener)
+  }
+
+  /** 全部目标，新的在前，带创建时间与审计里的发起方。给 Admin 的目标变更页。 */
+  history(): { goal: Goal; createdAt: string; actor: string | null }[] {
+    const rows = this.context.database
+      .prepare(
+        `SELECT g.*, (SELECT actor FROM audit_events a WHERE a.action = 'goal.append' AND a.target_id = g.id AND a.result = 'success' LIMIT 1) AS actor
+         FROM daily_goals g ORDER BY g.revision DESC`,
+      )
+      .all() as unknown as (GoalRow & { created_at: string; actor: string | null })[]
+    return rows.map((row) => ({ goal: toGoal(row), createdAt: row.created_at, actor: row.actor }))
   }
 
   /** 某日生效的目标：effectiveFrom 不晚于该日的行中，日期最晚、revision 最高的一行。 */
@@ -98,7 +115,7 @@ export class GoalService {
       audit(database, { actor: origin.actor, action: 'goal.append', result: 'failure', errorCode: 'goal.invalidTargets', requestId: origin.requestId, at: now() })
       throw new ServiceError('goal', 'invalidTargets')
     }
-    return transaction(database, () => {
+    const result = transaction(database, () => {
       const previous = this.active(effectiveFrom)
       const { next } = database.prepare('SELECT coalesce(max(revision), 0) + 1 AS next FROM daily_goals').get() as { next: number }
       const id = randomUUID()
@@ -110,6 +127,8 @@ export class GoalService {
       const current = toGoal(database.prepare('SELECT * FROM daily_goals WHERE id = ?').get(id) as unknown as GoalRow)
       return { previous, current }
     })
+    for (const listener of this.listeners) listener()
+    return result
   }
 
   /** 最近一次自动设定的能量规则，用来从固定目标"改回自动"。 */

@@ -7,6 +7,7 @@ import type { DayItem, DayRecord, DayResponse, DaySummary, Goal } from '@vita/co
 import { energyBalance, energyTarget, type EnergyDay } from '../domain/energy.ts'
 import { missingExtras, sumNutrients } from '../domain/nutrition.ts'
 import { localDateOf, zonedInstant } from '../domain/time.ts'
+import type { BmrLog } from './bmrLog.ts'
 import type { ServiceContext } from './context.ts'
 import type { GoalService } from './goals.ts'
 import type { HealthService } from './health.ts'
@@ -38,11 +39,13 @@ export class DayService {
   private readonly context: ServiceContext
   private readonly goals: GoalService
   private readonly health: HealthService
+  private readonly bmrLog: BmrLog | null
 
-  constructor(context: ServiceContext, goals: GoalService, health: HealthService) {
+  constructor(context: ServiceContext, goals: GoalService, health: HealthService, bmrLog: BmrLog | null = null) {
     this.context = context
     this.goals = goals
     this.health = health
+    this.bmrLog = bmrLog
   }
 
   /** 读取某日数据；没有会话时返回空日，不因读取而创建会话。 */
@@ -90,6 +93,7 @@ export class DayService {
       goal: { ...summary.goal, targets: { ...summary.goal.targets, energyKcal: energy.targetKcal } },
       energy,
       balance: energyBalance(plan.bmrKcal, activity, day, summary.totals.energyKcal),
+      bmrChange: this.bmrLog?.latestOn(date) ?? null,
     }
   }
 
@@ -128,5 +132,6 @@ export function summarize(items: DayItem[], goal: Goal | null = null): DaySummar
     goal,
     energy: null,
     balance: null,
+    bmrChange: null,
   }
 }

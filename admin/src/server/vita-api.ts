@@ -12,6 +12,7 @@ import {
   ErrorResponse,
   FoodProductResponse,
   FoodsResponse,
+  GoalChangesResponse,
   GoogleHealthAuthorizeResponse,
   GoogleHealthStatus,
   ListDevicesResponse,
@@ -167,4 +168,10 @@ export async function syncGoogleHealth() {
 
 export async function disconnectGoogleHealth() {
   await call('/v1/admin/google-health', null, { method: 'DELETE' })
+}
+
+// MARK: - 目标变更（目标设置的历史与基础代谢的变化）
+
+export async function goalChanges() {
+  return call('/v1/admin/goal-changes', GoalChangesResponse)
 }

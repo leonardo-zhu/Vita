@@ -385,7 +385,7 @@ private struct EnergyCard: View {
                         label: (summary.balance?.balanceKcal ?? 0) > 0 ? "热量盈余" : "热量缺口"
                     )
                 }
-                EnergyExplanation(energy: energy, isToday: isToday)
+                EnergyExplanation(energy: energy, isToday: isToday, bmrChange: summary.bmrChange)
             } else {
                 // 固定目标已按每日总消耗（含活动）推算，运动消耗只作参考，不再加进“还可以吃”，避免重复计算。
                 HStack(spacing: 0) {
@@ -440,6 +440,8 @@ private struct BigNumber: View {
 private struct EnergyExplanation: View {
     let energy: EnergyTarget
     let isToday: Bool
+    /// 这一天基础代谢变过时说明为什么（服务端按最新体重重算）。
+    var bmrChange: BmrChange?
 
     private func kcal(_ value: Decimal) -> String { DisplayFormat.number(value, digits: 0) }
 
@@ -459,6 +461,10 @@ private struct EnergyExplanation: View {
             }
             if energy.raisedToBMR {
                 Text("目标不低于基础代谢，已按基础代谢计")
+            }
+            if let bmrChange, bmrChange.reason != .goal {
+                Label(bmrChange.note, systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(VitaTheme.protein)
             }
         }
         .font(VitaType.meta)

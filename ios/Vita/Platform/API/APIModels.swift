@@ -178,14 +178,28 @@ struct DaySummaryDTO: Decodable, Sendable {
     var goal: GoalDTO?
     var energy: EnergyTargetDTO?
     var balance: EnergyBalanceDTO?
+    /// 2.5.0 起；旧服务端没有这个字段。
+    var bmrChange: BmrChangeDTO?
 
     var domain: DaySummary {
         DaySummary(
             totals: totals, includedItemCount: includedItemCount, excludedItemCount: excludedItemCount,
             estimatedItemCount: estimatedItemCount, goal: goal?.domain, energy: energy?.domain,
             balance: balance.map { EnergyBalance(burnedKcal: $0.burnedKcal, consumedKcal: $0.consumedKcal) },
-            missingExtras: missingExtras.map { [.sodiumMg: $0.sodiumMg, .saturatedFatG: $0.saturatedFatG, .sugarG: $0.sugarG] } ?? [:]
+            missingExtras: missingExtras.map { [.sodiumMg: $0.sodiumMg, .saturatedFatG: $0.saturatedFatG, .sugarG: $0.sugarG] } ?? [:],
+            bmrChange: bmrChange?.domain
         )
+    }
+}
+
+struct BmrChangeDTO: Decodable, Sendable {
+    var previousBmrKcal: Decimal
+    var bmrKcal: Decimal
+    var reason: String
+    var weightKg: Decimal
+
+    var domain: BmrChange {
+        BmrChange(previousBmrKcal: previousBmrKcal, bmrKcal: bmrKcal, reason: BmrChange.Reason(rawValue: reason), weightKg: weightKg)
     }
 }
 

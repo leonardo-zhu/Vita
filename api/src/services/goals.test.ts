@@ -256,3 +256,46 @@ describe('BMR 按每天的身体数据重算', () => {
     expect(bmr(services, DAY)).toBe(1700)
   })
 })
+
+describe('基础代谢变化的记录', () => {
+  function context() {
+    const ctx = setup()
+    ctx.services.health.submitManualMetrics({ heightCm: 175, dateOfBirth: '1996-05-20', sex: 'male' }, ORIGIN)
+    return ctx
+  }
+  const weigh = (services: ReturnType<typeof setup>['services'], kg: number) =>
+    services.body.record({ id: randomUUID(), weightKg: kg, impedance: null, source: 'live', recordedAt: null, appleHealthWritable: true }, ORIGIN)
+
+  it('固定目标时不记；随活动计算时称重让 BMR 变了才记一条，Data 页能看到这一天的变化', () => {
+    const { services, clock } = context()
+    weigh(services, 70)
+    expect(services.bmrLog.list()).toHaveLength(0)
+
+    // 设定目标时存的是 1700，按 70 kg 算是 1648.8：记一条，原因是设定目标
+    services.goals.append({ ...NO_TARGETS, energyKcal: 1900 }, plan, 'initialRecommendation', DAY, ORIGIN)
+    expect(services.bmrLog.list()).toMatchObject([{ previousBmrKcal: 1700, bmrKcal: 1648.8, reason: 'goal', weightKg: 70 }])
+
+    // 同样的体重再称一次：不变，不记
+    clock.advance(30)
+    weigh(services, 70)
+    expect(services.bmrLog.list()).toHaveLength(1)
+
+    clock.advance(30)
+    weigh(services, 68)
+    const [latest] = services.bmrLog.list()
+    expect(latest).toMatchObject({ date: DAY, previousBmrKcal: 1648.8, bmrKcal: 1628.8, reason: 'weighing', weightKg: 68, heightCm: 175, ageYears: 30, sex: 'male' })
+    expect(services.days.day(DAY).summary.bmrChange).toEqual(latest)
+    expect(services.days.day(addDays(DAY, 1)).summary.bmrChange).toBeNull()
+  })
+
+  it('目标历史带创建时间与发起方', () => {
+    const { services } = context()
+    services.goals.append({ ...NO_TARGETS, energyKcal: 1900 }, null, 'manualOnboarding', DAY, { actor: 'device:abc' })
+    services.goals.append({ ...NO_TARGETS, energyKcal: 2000 }, null, 'explicitUserCommand', DAY, { actor: 'admin' })
+    expect(services.goals.history().map((entry) => [entry.goal.targets.energyKcal, entry.actor])).toEqual([
+      [2000, 'admin'],
+      [1900, 'device:abc'],
+    ])
+    expect(services.goals.history()[0].createdAt).toBe(NOW.toISOString())
+  })
+})

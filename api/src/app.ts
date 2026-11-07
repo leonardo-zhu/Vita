@@ -26,6 +26,7 @@ import {
   GoalRecommendationRequest,
   type GoalRecommendationResponse,
   type GoalResponse,
+  type GoalChangesResponse,
   type GoogleHealthAuthorizeResponse,
   type GoogleHealthStatus,
   type HealthChangesResponse,
@@ -507,6 +508,12 @@ export function createApp({ services, agent, serviceToken, version, adminURL = '
     if (!file) return failure(c, 404, 'labelNotFound', '找不到这张标签照片。')
     return c.body(new Uint8Array(file.bytes), 200, { 'content-type': file.contentType, 'cache-control': 'private, max-age=86400' })
   })
+
+  // MARK: - 目标变更（只给 Admin）：目标设置的历史与基础代谢的变化
+
+  app.get('/v1/admin/goal-changes', (c) =>
+    c.json({ goals: services.goals.history(), bmrChanges: services.bmrLog.list() } satisfies GoalChangesResponse),
+  )
 
   // MARK: - 对话管理（只给 Admin）
 
