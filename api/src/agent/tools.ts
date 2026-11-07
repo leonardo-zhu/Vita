@@ -349,7 +349,8 @@ function goalOut(goal: Goal, energy: EnergyTarget | null) {
           goalType: plan.kind,
           energyPercent: plan.adjustment.type === 'fraction' ? round(plan.adjustment.value * 100, 0) : undefined,
           energyAdjustmentKcal: plan.adjustment.type === 'kcal' ? round(plan.adjustment.value, 0) : undefined,
-          bmrKcal: round(plan.bmrKcal, 0),
+          // 当天按最新体重重算的 BMR；没有当天数据时用设定目标时存的
+          bmrKcal: round(energy?.bmrKcal ?? plan.bmrKcal, 0),
         }
       : undefined,
     energyToday: energy

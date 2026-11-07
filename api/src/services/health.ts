@@ -11,7 +11,8 @@ import type { ActivityUpload, HealthSnapshot, HealthUpload, ManualBodyMetrics, M
 
 import { audit, transaction } from '../db.ts'
 import type { DayActivity } from '../domain/energy.ts'
-import { addDays } from '../domain/time.ts'
+import { ageOn, mifflinStJeor } from '../domain/recommendation.ts'
+import { addDays, localDateOf, zonedInstant } from '../domain/time.ts'
 import type { ServiceContext, WriteOrigin } from './context.ts'
 
 /** 平时活动至少要有几天的数据。 */
@@ -196,6 +197,34 @@ export class HealthService {
       averageActiveEnergyKcal: measured(average.kcal, average.source),
       uploadedAt: row?.uploaded_at ?? null,
     }
+  }
+
+  /**
+   * 某天的 BMR（Mifflin–St Jeor），每天按当时的身体数据重算，不用设定目标时定格的那个：体重变了，能量目标跟着变。
+   * 体重取这一天结束前最新的一次：当前读数（称重、Apple 健康或补录）在这天之后的，改用这天之前最后一次称重，
+   * 这样过去日子的目标不会被后来的称重改掉。身高、出生日期、性别取当前的。缺一项返回 null，由调用方用目标里存的。
+   */
+  bmrOn(date: string): number | null {
+    const snapshot = this.snapshot(date)
+    const { heightCm: height, dateOfBirth: birth, sex } = snapshot
+    if (height.status !== 'value' || birth.status !== 'value' || sex.status !== 'value') return null
+    const endOfDay = zonedInstant(addDays(date, 1), 0, 0, 0, this.context.timeZone())
+    const current = snapshot.bodyMassKg
+    let weight: number | null = null
+    if (current.status === 'value') {
+      // 没有时间的读数只能当作当前的：今天及以后用，过去的日子不用
+      const usable = current.measuredAt === null ? date >= localDateOf(this.context.now(), this.context.timeZone()) : Date.parse(current.measuredAt) < endOfDay.getTime()
+      if (usable) weight = current.value
+    }
+    if (weight === null) {
+      const row = this.context.database
+        .prepare('SELECT weight_grams FROM scale_weighings WHERE measured_at < ? ORDER BY measured_at DESC LIMIT 1')
+        .get(endOfDay.toISOString()) as { weight_grams: number } | undefined
+      weight = row ? row.weight_grams / 1000 : null
+    }
+    if (weight === null) return null
+    const bmr = mifflinStJeor(weight, height.value, ageOn(birth.value, date), sex.value)
+    return Math.round(Number(bmr.toString()) * 10) / 10
   }
 
   private manualRow(): { metrics: ManualBodyMetrics; enteredAt: string } | null {

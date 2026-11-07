@@ -73,11 +73,15 @@ export class DayService {
     return { date, revision: session?.revision ?? 0, records, summary: this.summarize(date, records.flatMap((record) => record.items)) }
   }
 
-  /** 汇总加上目标。能量目标随活动计算时，按当天活动算出目标与收支，并把目标里的能量换成算出的值。 */
+  /**
+   * 汇总加上目标。能量目标随活动计算时，按当天活动算出目标与收支，并把目标里的能量换成算出的值。
+   * BMR 按这一天的身体数据重算（体重变了目标跟着变）；身体数据不全时用设定目标时存的。
+   */
   private summarize(date: string, items: DayItem[]): DaySummary {
     const summary = summarize(items, this.goals.active(date))
-    const plan = summary.goal?.energyPlan
-    if (!summary.goal || !plan) return summary
+    const stored = summary.goal?.energyPlan
+    if (!summary.goal || !stored) return summary
+    const plan = { ...stored, bmrKcal: this.health.bmrOn(date) ?? stored.bmrKcal }
     const day = this.energyDay(date)
     const activity = this.health.activity(date)
     const energy = energyTarget(plan, activity, day)

@@ -2,6 +2,8 @@
  * 移植自 1.0 的 EnergyTargetTests、HealthTests（目标建议、手动补录、目标历史）与 GoalServiceTests。
  * 例子同设计讨论：BMR 1700、平时活动 500、减脂 85%。
  */
+import { randomUUID } from 'node:crypto'
+
 import type { EnergyPlan, HealthSnapshot, HealthUpload } from '@vita/contract'
 import { describe, expect, it } from 'vitest'
 
@@ -220,5 +222,37 @@ describe('健康数据与每日能量目标', () => {
     expect(summary.goal?.targets.energyKcal).toBe(summary.energy?.targetKcal)
     expect(summary.goal?.targets.proteinG).toBe(120)
     expect(summary.balance).not.toBeNull()
+  })
+})
+
+describe('BMR 按每天的身体数据重算', () => {
+  // 30 岁男性、175 cm：70 kg 时 1648.75，68 kg 时 1628.75。目标设定时存的是 1700。
+  function context(withProfile = true) {
+    const ctx = setup()
+    const { services } = ctx
+    if (withProfile) services.health.submitManualMetrics({ heightCm: 175, dateOfBirth: '1996-05-20', sex: 'male' }, ORIGIN)
+    services.goals.append({ ...NO_TARGETS, energyKcal: 1900, proteinG: 120 }, plan, 'initialRecommendation', addDays(DAY, -5), ORIGIN)
+    return ctx
+  }
+  const bmr = (services: ReturnType<typeof setup>['services'], date: string) => services.days.day(date).summary.energy?.bmrKcal
+
+  it('用这一天结束前最新的称重，体重变了目标跟着变；过去的日子不被后来的称重改掉', () => {
+    const { services } = context()
+    services.body.record({ id: randomUUID(), weightKg: 70, impedance: null, source: 'offline', recordedAt: '2026-10-28T01:00:00.000Z', appleHealthWritable: true }, ORIGIN)
+    services.body.record({ id: randomUUID(), weightKg: 68, impedance: null, source: 'live', recordedAt: null, appleHealthWritable: true }, ORIGIN)
+    expect(bmr(services, DAY)).toBe(1628.8)
+    expect(bmr(services, addDays(DAY, -1))).toBe(1648.8)
+    expect(bmr(services, addDays(DAY, -2))).toBe(1648.8)
+    // 那之前没有称重：用设定目标时存的
+    expect(bmr(services, addDays(DAY, -3))).toBe(1700)
+    // 能量目标与收支都用重算的 BMR
+    const { summary } = services.days.day(DAY)
+    expect(summary.energy?.tdeeKcal).toBe(1628.8 + (summary.energy?.countedActivityKcal ?? 0))
+  })
+
+  it('缺身高、出生日期或性别时用设定目标时存的', () => {
+    const { services } = context(false)
+    services.body.record({ id: randomUUID(), weightKg: 68, impedance: null, source: 'live', recordedAt: null, appleHealthWritable: true }, ORIGIN)
+    expect(bmr(services, DAY)).toBe(1700)
   })
 })
