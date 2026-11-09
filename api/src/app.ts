@@ -430,6 +430,8 @@ export function createApp({ services, agent, serviceToken, version, adminURL = '
     const requestId = randomUUID()
     const actor = actorName(c.get('actor'))
     turns.set(requestId, controller)
+    // 客户端在 x-vita-events 里声明认识的可选事件；没声明的不发，旧版 App 遇到不认识的事件会把整轮当失败。
+    const optional = new Set((c.req.header('x-vita-events') ?? '').split(',').map((name) => name.trim()))
     return streamSSE(c, async (stream) => {
       let open = true
       stream.onAbort(() => {
@@ -438,6 +440,7 @@ export function createApp({ services, agent, serviceToken, version, adminURL = '
       // 写入是异步的：串成一条链保证顺序，结束前等它写完，最后的 done / error 才不会丢。
       let writes = Promise.resolve()
       const emit = (event: ChatEvent) => {
+        if (event.type === 'cardDraft' && !optional.has('cardDraft')) return
         writes = writes.then(async () => {
           if (!open) return
           try {

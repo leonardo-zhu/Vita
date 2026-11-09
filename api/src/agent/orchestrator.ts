@@ -11,6 +11,7 @@ import type { Services } from '../services/index.ts'
 import type { AgentConfig, ConfigSource } from './config.ts'
 import { TOOL_SPECS } from './config.ts'
 import { LLMError, type LLMClient, type LLMImage, type LLMInputItem } from './llm.ts'
+import { PROPOSAL_TOOLS } from './proposals.ts'
 import { ToolRunner } from './tools.ts'
 
 /** 一轮里最多来回几次工具调用，防止模型陷入循环。 */
@@ -94,6 +95,8 @@ export class Orchestrator {
         usage.rounds = round + 1
         let roundText = ''
         const calls = []
+        // 这一轮已经让客户端显示骨架卡的提案工具；提案没成功时要收起。
+        let drafting: string | null = null
         const stream = client.send(
           {
             model: config.llm.modelId,
@@ -123,6 +126,12 @@ export class Orchestrator {
               emit({ type: 'text', delta: !roundText && reply ? '\n\n' + event.delta : event.delta })
               roundText += event.delta
               break
+            case 'functionCallStarted':
+              if (!drafting && PROPOSAL_TOOLS.has(event.name)) {
+                drafting = event.name
+                emit({ type: 'cardDraft', tool: event.name, status: 'drafting' })
+              }
+              break
             case 'functionCall':
               calls.push(event.call)
               break
@@ -136,6 +145,8 @@ export class Orchestrator {
         reply = join(reply, roundText)
         if (roundText) input.push({ type: 'assistant', text: roundText })
         if (calls.length === 0) {
+          // 开始了调用却没有完整的调用（流里只有 added）：同样收起。
+          if (drafting) emit({ type: 'cardDraft', tool: drafting, status: 'cleared' })
           // 模型有时只在文字里说“已生成确认卡”却没调用工具：提醒一次，让它真的调用。
           if (!pendingId && !nudged && round < MAX_TOOL_ROUNDS - 1 && claimsCard(roundText)) {
             nudged = true
@@ -175,6 +186,8 @@ export class Orchestrator {
           if (outcome.requestedDate) requestedDate = outcome.requestedDate
           goalChanged ||= outcome.goalChanged
         }
+        // 提案没有生成卡片（参数不合法等）：先收起骨架卡，模型改正后重试时会再发 drafting。
+        if (drafting && !roundPending) emit({ type: 'cardDraft', tool: drafting, status: 'cleared' })
         // 卡片生成成功就结束这一轮：再请求一次只是为了写一句“请确认卡片”，却要多等十几秒（每轮首字 10–15 秒）。
         // 卡片前的说明已经在这一轮的文字里；没有文字时用默认的一句。确认后的下一步走 afterConfirm。
         if (roundPending && !roundFailed) break

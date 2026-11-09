@@ -342,6 +342,47 @@ describe('按标签存库必须带净含量', () => {
   })
 })
 
+describe('确认卡占位', () => {
+  const started = (name: string): LLMEvent => ({ type: 'functionCallStarted', name })
+  const drafts = (events: ChatEvent[]) => events.flatMap((event) => (event.type === 'cardDraft' ? [event.status] : []))
+
+  it('开始调用提案工具时先发 drafting；提案成功不再发，紧接着结束这一轮', async () => {
+    const { events, send } = make([[text('记成午餐。'), started('proposeRecordChange'), call('c1', 'proposeRecordChange', eggProposal), done]])
+    const result = await send('中午两个水煮蛋 108g')
+    expect(result.pendingId).not.toBeNull()
+    expect(events.filter((event) => event.type === 'cardDraft')).toEqual([{ type: 'cardDraft', tool: 'proposeRecordChange', status: 'drafting' }])
+    // drafting 在工具真正运行之前发出。
+    const types = events.map((event) => event.type)
+    expect(types.indexOf('cardDraft')).toBeLessThan(types.indexOf('step'))
+  })
+
+  it('提案失败时收起，模型重试时再发 drafting', async () => {
+    const { events, send } = make([
+      [started('proposeRecordChange'), call('c1', 'proposeRecordChange', {}), done],
+      [started('proposeRecordChange'), call('c2', 'proposeRecordChange', eggProposal), done],
+    ])
+    const result = await send('中午两个水煮蛋 108g')
+    expect(result.pendingId).not.toBeNull()
+    expect(drafts(events)).toEqual(['drafting', 'cleared', 'drafting'])
+  })
+
+  it('查询工具不发；只说不做（没开始任何调用）也不发', async () => {
+    const { events, send } = make([
+      [started('searchReferenceFoods'), call('c1', 'searchReferenceFoods', { query: '水煮蛋' }), done],
+      [text('没查到水煮蛋。'), done],
+    ])
+    await send('水煮蛋多少热量')
+    expect(drafts(events)).toEqual([])
+  })
+
+  it('开始了调用却没有完整的调用时收起', async () => {
+    const { events, send } = make([[text('好的。'), started('proposeFoodChange'), done]])
+    const result = await send('存一下')
+    expect(result.pendingId).toBeNull()
+    expect(drafts(events)).toEqual(['drafting', 'cleared'])
+  })
+})
+
 describe('确认后接续', () => {
   it('确认带下一步的卡片后接着跑一轮，不保存用户消息；只能接续一次', async () => {
     const { services, client, send } = make([
@@ -423,6 +464,8 @@ describe('Responses 接口', () => {
       line({ type: 'response.output_item.added', item: { type: 'reasoning' } }),
       line({ type: 'response.reasoning_summary_text.delta', delta: '想想' }),
       line({ type: 'response.output_text.delta', delta: '你好' }),
+      line({ type: 'response.output_item.added', item: { type: 'function_call', call_id: 'c1', name: 'getGoals', status: 'in_progress' } }),
+      line({ type: 'response.function_call_arguments.delta', delta: '{}' }),
       line({ type: 'response.output_item.done', item: { type: 'function_call', call_id: 'c1', name: 'getGoals', arguments: '{}' } }),
       'event: ignored',
       line({
@@ -438,7 +481,8 @@ describe('Responses 接口', () => {
       }),
     ].flatMap((l) => parser.consume(l))
     parser.finish()
-    expect(events.map((e) => e.type)).toEqual(['reasoning', 'reasoning', 'textDelta', 'functionCall', 'functionCall', 'completed'])
+    expect(events.map((e) => e.type)).toEqual(['reasoning', 'reasoning', 'textDelta', 'functionCallStarted', 'functionCall', 'functionCall', 'completed'])
+    expect(events[3]).toEqual({ type: 'functionCallStarted', name: 'getGoals' })
     expect(events.at(-1)).toEqual({ type: 'completed', info: { responseId: 'r1', inputTokens: 10, outputTokens: 2, cachedTokens: 8 } })
   })
 

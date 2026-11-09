@@ -244,10 +244,10 @@ describe('对话接口', () => {
       serviceToken: SERVICE_TOKEN,
       version: 'test',
     })
-    const call = (path: string, method = 'GET', body?: unknown, contentType = 'application/json') =>
+    const call = (path: string, method = 'GET', body?: unknown, contentType = 'application/json', extra: Record<string, string> = {}) =>
       app.request(path, {
         method,
-        headers: { authorization: `Bearer ${SERVICE_TOKEN}`, ...(body === undefined ? {} : { 'content-type': contentType }) },
+        headers: { authorization: `Bearer ${SERVICE_TOKEN}`, ...(body === undefined ? {} : { 'content-type': contentType }), ...extra },
         body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body),
       })
     return { ...context, call }
@@ -285,6 +285,22 @@ describe('对话接口', () => {
     const stream = await events(await call(`/v1/days/${DAY}/chat`, 'POST', { text: '早' }))
     expect(stream.at(-1)).toMatchObject({ type: 'error', code: 'quotaExceeded' })
     expect(MessagesResponse.parse(await (await call(`/v1/days/${DAY}/messages`)).json()).messages).toEqual([])
+  })
+
+  it('确认卡占位只发给在 x-vita-events 里声明了 cardDraft 的客户端', async () => {
+    const round = () => [
+      { type: 'functionCallStarted', name: 'proposeRecordChange' } as const,
+      { type: 'functionCall', call: { callId: 'c1', name: 'proposeRecordChange', arguments: JSON.stringify(proposal) } } as const,
+      completed,
+    ]
+    const { call } = await withAgent([round(), round(), [{ type: 'textDelta', delta: '今天已经有一张卡在等你确认。' }, completed]])
+    // 先发声明了的请求：一天只有一张待确认卡，第二次提案会失败（没声明时连 cleared 也不发）。
+    const aware = await events(await call(`/v1/days/${DAY}/chat`, 'POST', { text: '中午吃了外卖' }, 'application/json', { 'x-vita-events': 'cardDraft' }))
+    expect(aware.filter((e) => e.type === 'cardDraft')).toEqual([{ type: 'cardDraft', tool: 'proposeRecordChange', status: 'drafting' }])
+    expect(aware.map((e) => e.type).slice(0, 3)).toEqual(['started', 'cardDraft', 'step'])
+    const legacy = await events(await call(`/v1/days/${DAY}/chat`, 'POST', { text: '中午吃了外卖' }))
+    expect(legacy.some((e) => e.type === 'cardDraft')).toBe(false)
+    expect(legacy.at(-1)).toMatchObject({ type: 'done' })
   })
 
   it('确认带下一步的卡片后接续一次；再接续返回 409', async () => {

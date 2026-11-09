@@ -757,6 +757,13 @@ export const ChatEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), delta: z.string() }),
   /** 一次工具调用：先 running，结束时 done 或 failed（工具返回错误，模型通常会据此改正）。 */
   z.object({ type: z.literal('step'), index: z.number().int(), tool: z.string(), status: z.enum(['running', 'done', 'failed']) }),
+  /**
+   * 确认卡占位（2.2）：drafting 表示模型刚开始调用提案工具（参数还在生成，通常要两三秒），客户端先显示骨架卡；
+   * cleared 表示这次提案失败了（模型多半会改正后重试，届时再发 drafting），收起骨架卡。提案成功不另发事件，
+   * 紧接着就是 done。一轮结束（done / error）后骨架卡一律收起，以重新读到的待确认卡为准。
+   * 只发给请求头 `x-vita-events` 里声明了 `cardDraft` 的客户端：旧版 App 遇到不认识的事件会把整轮当失败。
+   */
+  z.object({ type: z.literal('cardDraft'), tool: z.string(), status: z.enum(['drafting', 'cleared']) }),
   z.object({
     type: z.literal('done'),
     /** 保存后的助手回复；附带确认卡时 cardRef 指向它。 */

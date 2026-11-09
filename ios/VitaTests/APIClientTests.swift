@@ -124,6 +124,25 @@ struct ChatServiceTests {
         #expect(body["labelScanId"] == nil)
     }
 
+    @Test func cardDraftEventsDriveTheSkeletonAndUnknownEventsAreIgnored() async throws {
+        let stub = APIStub()
+        stub.onStream("/v1/days/2026-10-30/chat", events: [
+            #"{"type":"started","requestId":"\#(UUID().apiString)"}"#,
+            #"{"type":"text","delta":"记成午餐。"}"#,
+            #"{"type":"cardDraft","tool":"proposeRecordChange","status":"drafting"}"#,
+            #"{"type":"somethingNew","value":1}"#,
+            #"{"type":"cardDraft","tool":"proposeRecordChange","status":"cleared"}"#,
+            #"{"type":"cardDraft","tool":"proposeRecordChange","status":"drafting"}"#,
+            #"{"type":"done","reply":\#(reply("记成午餐。")),"pendingId":null,"requestedDate":null,"goalChanged":false}"#,
+        ])
+        var seen: [Bool] = []
+        _ = try await ChatService(api: stub.client()).send("中午吃了鸡胸肉", on: Fixtures.day) { seen.append($0.draftingCard) }
+
+        // started、文字之后依次是 drafting、cleared、drafting；不认识的事件不触发进度回调。
+        #expect(seen == [false, false, true, false, true])
+        #expect(try #require(stub.requests.first).headers["x-vita-events"] == "cardDraft")
+    }
+
     @Test func errorEventsThrowWithTheServerMessage() async throws {
         let stub = APIStub()
         stub.onStream("/v1/days/2026-10-30/chat", events: [

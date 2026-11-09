@@ -180,6 +180,8 @@ struct VitaAPIClient: Sendable {
                     var request = try request("POST", path)
                     request.timeoutInterval = 300
                     request.setValue("text/event-stream", forHTTPHeaderField: "accept")
+                    // 声明认识的可选事件，服务端只给声明了的客户端发（契约 `ChatEvent`）。
+                    request.setValue(Self.optionalEvents, forHTTPHeaderField: "x-vita-events")
                     if let data = try encoded.get() {
                         request.setValue("application/json", forHTTPHeaderField: "content-type")
                         request.httpBody = data
@@ -228,6 +230,9 @@ struct VitaAPIClient: Sendable {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    /// 这个版本认识的可选 SSE 事件。
+    static let optionalEvents = "cardDraft"
 
     static func decodeEvent(_ payload: String) throws -> ChatEventDTO {
         do {

@@ -25,6 +25,8 @@ final class ChatModel {
     private(set) var thinking = ""
     /// 这一轮调用过的工具；不保存。
     private(set) var steps: [ChatProgress.Step] = []
+    /// 模型正在生成确认卡：底部先放骨架卡。只属于进行中的这一轮，结束并重新读取后一律收起。
+    private(set) var draftingCard = false
     /// 发送中的用户消息：一轮成功后服务端才和回复一起保存，先在界面上显示。
     private(set) var outgoing: String?
     /// 发送中消息附带的标签照片，只用于显示。
@@ -212,6 +214,7 @@ final class ChatModel {
                     self?.activity = progress.activity
                     self?.thinking = progress.thinking
                     self?.steps = progress.steps
+                    self?.draftingCard = progress.draftingCard
                 }
                 requestedDate = result.requestedDate
             } catch {
@@ -233,6 +236,8 @@ final class ChatModel {
             thinking = ""
             steps = []
             await reload()
+            // 读到真正的卡片之后再收起骨架卡，中间不闪一下空白。
+            draftingCard = false
         }
     }
 
@@ -412,6 +417,7 @@ struct ChatView: View {
             .onChange(of: model.thinking) { scrollToBottom(proxy, animated: false) }
             .onChange(of: model.steps.count) { scrollToBottom(proxy) }
             .onChange(of: model.pending?.id) { scrollToBottom(proxy) }
+            .onChange(of: model.draftingCard) { scrollToBottom(proxy) }
             .onAppear { scrollToBottom(proxy, animated: false) }
         }
     }
@@ -466,7 +472,10 @@ struct ChatView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
-            if let pending = model.pending {
+            if model.draftingCard {
+                PendingCardSkeleton()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let pending = model.pending {
                 PendingCardView(
                     pending: pending,
                     onConfirm: { inputFocused = false; model.confirm() },
@@ -489,6 +498,7 @@ struct ChatView: View {
             .allowsHitTesting(false)
         }
         .animation(.smooth, value: model.pending?.id)
+        .animation(.smooth, value: model.draftingCard)
     }
 
     /// 输入框与发送按钮放在同一个圆角容器里；多行时按钮贴底。左侧的“+”用来附上营养标签照片。

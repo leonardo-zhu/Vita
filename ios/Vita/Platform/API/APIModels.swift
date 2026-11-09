@@ -622,6 +622,10 @@ enum ChatEventDTO: Decodable, Sendable {
     case reasoning(String)
     case text(String)
     case step(index: Int, tool: String, status: String)
+    /// 确认卡占位：`drafting` 时先显示骨架卡，`cleared` 时收起（这次提案失败了）。
+    case cardDraft(tool: String, drafting: Bool)
+    /// 以后新增、这个版本还不认识的事件：忽略，不让整轮失败。
+    case unknown(String)
     case done(reply: ChatMessageDTO, pendingID: UUID?, requestedDate: LocalDate?, goalChanged: Bool)
     case error(code: String, message: String)
 
@@ -637,6 +641,8 @@ enum ChatEventDTO: Decodable, Sendable {
         case "text": self = .text(try c.decode(String.self, forKey: .delta))
         case "step":
             self = .step(index: try c.decode(Int.self, forKey: .index), tool: try c.decode(String.self, forKey: .tool), status: try c.decode(String.self, forKey: .status))
+        case "cardDraft":
+            self = .cardDraft(tool: try c.decode(String.self, forKey: .tool), drafting: try c.decode(String.self, forKey: .status) == "drafting")
         case "done":
             self = .done(
                 reply: try c.decode(ChatMessageDTO.self, forKey: .reply),
@@ -645,7 +651,7 @@ enum ChatEventDTO: Decodable, Sendable {
                 goalChanged: try c.decodeIfPresent(Bool.self, forKey: .goalChanged) ?? false
             )
         case "error": self = .error(code: try c.decode(String.self, forKey: .code), message: try c.decode(String.self, forKey: .message))
-        case let other: throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "Unknown event \(other)")
+        case let other: self = .unknown(other)
         }
     }
 }

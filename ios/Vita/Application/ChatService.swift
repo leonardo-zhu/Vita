@@ -96,6 +96,8 @@ struct ChatProgress: Equatable, Sendable {
     var activity: Activity?
     /// 本次请求里模型的推理摘要，只在思考时展示。
     var thinking = ""
+    /// 模型正在生成确认卡的参数：界面先显示骨架卡，真正的卡片在这一轮结束、重新读取后出现。
+    var draftingCard = false
 }
 
 /// 这一轮服务端没有保存（用户消息也没有），界面把原文放回输入框。
@@ -168,6 +170,10 @@ final class ChatService {
                 }
                 // 工具结束后模型重新开始思考，推理摘要从头显示。
                 progress.thinking = ""
+            case .cardDraft(_, let drafting):
+                progress.draftingCard = drafting
+            case .unknown:
+                continue
             case .done(let reply, let pendingID, let requestedDate, let goalChanged):
                 return ChatTurnResult(reply: reply.domain, pendingID: pendingID, requestedDate: requestedDate, goalChanged: goalChanged)
             case .error(let code, let message):

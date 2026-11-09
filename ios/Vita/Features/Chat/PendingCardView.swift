@@ -314,3 +314,60 @@ private extension Array where Element: Hashable {
     }
 }
 #endif
+
+/// 确认卡的骨架：模型正在生成卡片参数时先占住位置（通常两三秒），版式与真卡片一致，真卡片读到后替换它。
+/// 按钮不可点；这一轮结束后不管成没成都会收起。
+struct PendingCardSkeleton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dimmed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle().fill(Self.fill).frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 6) {
+                    bar(width: 120, height: 14)
+                    bar(width: 72, height: 10)
+                }
+                Spacer(minLength: 8)
+                Capsule().fill(Self.fill).frame(width: 72, height: 24)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                bar(height: 12)
+                bar(width: 180, height: 12)
+            }
+            // 与真卡片一样：取消在左、中间是倒计时的位置、确认在右。
+            HStack {
+                Capsule().fill(Self.fill).frame(width: 64, height: 34)
+                Spacer()
+                Text("正在生成确认卡…")
+                    .font(VitaType.meta)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Capsule().fill(Self.fill).frame(width: 88, height: 34)
+            }
+        }
+        .padding(16)
+        .glassCard()
+        .opacity(dimmed ? 0.55 : 1)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dimmed = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("正在生成确认卡")
+    }
+
+    private static let fill = Color.primary.opacity(0.08)
+
+    private func bar(width: CGFloat? = nil, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: height / 2)
+            .fill(Self.fill)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    }
+}
+
+#Preview("骨架卡") {
+    PendingCardSkeleton().padding()
+}

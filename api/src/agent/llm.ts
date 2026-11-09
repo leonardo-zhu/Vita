@@ -65,6 +65,8 @@ export type LLMEvent =
   /** 推理摘要增量（可能为空，只表示开始推理）。只在生成过程中展示，不回传给模型。 */
   | { type: 'reasoning'; delta: string }
   | { type: 'textDelta'; delta: string }
+  /** 模型开始生成一次函数调用，只知道名字，参数还在生成。只在流式响应里有。 */
+  | { type: 'functionCallStarted'; name: string }
   | { type: 'functionCall'; call: LLMFunctionCall }
   | { type: 'completed'; info: LLMResponseInfo }
 
@@ -242,7 +244,10 @@ export class StreamParser {
       case 'response.reasoning_summary_text.delta':
         return [{ type: 'reasoning', delta: event.delta ?? '' }]
       case 'response.output_item.added':
-        return event.item?.type === 'reasoning' ? [{ type: 'reasoning', delta: '' }] : []
+        if (event.item?.type === 'reasoning') return [{ type: 'reasoning', delta: '' }]
+        // 参数要等 output_item.done 才完整；先报一下名字，客户端可以提前显示“正在生成确认卡”。
+        if (event.item?.type === 'function_call' && event.item.name) return [{ type: 'functionCallStarted', name: event.item.name }]
+        return []
       case 'response.output_item.done':
         return this.emit(functionCall(event.item))
       case 'response.completed':

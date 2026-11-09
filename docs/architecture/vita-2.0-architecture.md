@@ -174,6 +174,7 @@ Apple 健康本身经 iCloud 在同一 Apple ID 的设备间同步，这不是�
 
 - 1.0 `ChatOrchestrator`、`AgentToolRunner`、`ProposalToolHandler` 的逻辑整体移植，行为不变：最多 8 轮工具、`afterConfirm` 接续、历史里卡片结局的注记、客户端状态作为系统消息放在用户消息之前（便于缓存）。
 - 确认 / 取消：`POST /v1/pending/{id}/confirm`、`/cancel`。`afterConfirm` 存进数据库，不再只放在内存里。实现上确认接口本身不接续：卡片带 `afterConfirm` 时，手机确认后再调 `POST /v1/pending/{id}/continue`（每张卡只能接续一次），进度同样用 SSE 推回。历史消息里卡片的结局用 `GET /v1/pending/{id}` 读。
+- 确认卡骨架（2026-11-09）：模型说完话后还要两三秒生成提案参数（实测 2.8–3.4 秒），这段时间里服务端一收到提案工具的 `output_item.added`（此时只有工具名）就发 `cardDraft: drafting`，App 在确认卡的位置先放骨架卡；提案失败发 `cleared` 收起，模型重试时再发 drafting。骨架卡只属于进行中的这一轮，`done` / `error` 后 App 重新读取，有真卡片就换成真卡片，没有就什么都不显示；模型只说不调工具时上游不会发这个事件，骨架卡不会出现。`cardDraft` 是可选事件，只发给请求头 `x-vita-events` 里声明了它的客户端（旧版 App 遇到不认识的事件会把整轮当失败）；新版 App 起不认识的事件一律忽略。非流式响应（`llm.streaming: false`）没有这个事件。
 - 手机断线：这一轮在服务端跑完并保存，手机重连后读取历史即可看到。手机点"停止"时用 `started` 事件里的 `requestId` 调 `POST /v1/chat-turns/{requestId}/cancel`，这一轮什么都不保存，原文放回输入框。
 
 ### 10.2 远程配置
