@@ -197,6 +197,7 @@ Apple 健康本身经 iCloud 在同一 Apple ID 的设备间同步，这不是�
 - **扩展营养素**：营养值增加可选的钠（mg）、饱和脂肪（g）、糖（g）；四项主营养素仍然必填。
 - **修改来源**：审计记录区分 `agent`（经确认卡）、`app`（用户在 App 里编辑）、`admin`。
 - **`afterConfirm`**：存进 `PendingAction`。
+- **餐次名**（2026-11-10）：`consumption_records.meal_label` 只存 `早餐` / `午餐` / `晚餐` / `加餐` 或空（`MealLabel`），不再是自由文本。
 - **幂等**：创建类请求（称重上传、标签上传）由客户端生成 ID，服务端按 ID 去重，弱网重试不会重复写入。
 - **Google 健康**（2026-11-07）：新增 `google_health_account`（加密的 refresh token）、`google_health_oauth_states`（一次性授权状态）、`google_day_metrics`（每天的活动能量与睡眠汇总），见 §9a。
 - **基础代谢变化记录**（2026-11-08）：新增 `bmr_changes`，每条记变化日期与时间、前后数值、原因（`weighing` / `appleHealth` / `manual` / `goal`）和当时的体重、身高、年龄、性别。随活动计算的目标每天按这一天结束前最新的体重重算 BMR（Mifflin–St Jeor，`HealthService.bmrOn`；过去的日子用当时的称重，不被后来的称重改写；身体数据不全时用设定目标时存的），称重、删称重、手机上传、补录、改目标之后算一次今天的 BMR，和上次记下的不同才追加一条（活动带来的变化不记）。Admin 的“目标变更”页经 `GET /v1/admin/goal-changes` 读取；`DaySummary.bmrChange` 带上这一天最近的一次变化，Data 页能量卡据此说明目标为什么变了。决定见 ADR-018 补充。
@@ -276,6 +277,8 @@ Google 健康（2026-11-07，App 2.4.0）：服务端从 Google Health API 拉�
 基础代谢每天重算（2026-11-08，App 2.5.0）：随活动计算的能量目标不再用设定那天定格的 BMR，改为按这一天的最新体重重算；变化记进 `bmr_changes`，Admin 新增“目标变更”页，Data 页能量卡说明变化原因，见 §11 与 ADR-018 补充。
 
 确认卡骨架（2026-11-09）：模型生成提案参数的两三秒里先显示骨架卡，新增可选的 `cardDraft` 事件，见 §10.1。App 版本未变。
+
+餐次名改为枚举（2026-11-10，服务端，App 不变）：记录的 `mealLabel`（卡片标题）只能是 `早餐` / `午餐` / `晚餐` / `加餐`（`@vita/contract` 的 `MealLabel`），之前是自由文本，模型会照着 `eventTime.mealPeriod` 写出 `dinner`、`snack`。工具参数加了枚举，自拟的名字当轮以 `malformedArguments` 拒绝；`PATCH` 编辑接口同样只收这几个；第 13 版迁移把库里认识的旧名字（中英文、早饭 / 晚饭 / 零食 / 夜宵等）转成中文，其他的清空，1.0 导入时也一样。存的仍是中文字符串，旧版 App 照样把它直接当标题显示，没有标题时按时间段显示。
 
 | 阶段 | 技术内容 |
 | --- | --- |

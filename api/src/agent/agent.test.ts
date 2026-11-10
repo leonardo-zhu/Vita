@@ -106,6 +106,14 @@ describe('工具循环与确认门', () => {
     expect(services.chat.messages(DAY).map((m) => m.role)).toEqual(['user', 'assistant'])
   })
 
+  it('餐次名只能从枚举里选，自拟的（如 dinner）当轮拒绝', async () => {
+    const english = { ...eggProposal, payload: { ...eggProposal.payload, record: { ...eggProposal.payload.record, mealLabel: 'dinner' } } }
+    const { services, client, send } = make([[call('c1', 'proposeRecordChange', english), done], [text('好'), done]])
+    await send('晚上吃了两个鸡蛋')
+    expect(JSON.parse(outputs(client.requests[1])[0]).error).toMatchObject({ code: 'malformedArguments', message: expect.stringContaining('mealLabel') })
+    expect(services.pending.active(DAY)).toBeNull()
+  })
+
   it('别的日期只提示切换，不写', async () => {
     const { services, send } = make([[call('c1', 'proposeRecordChange', { ...eggProposal, sessionDate: '2026-10-29' }), done], [text('这是昨天的内容，要切到昨天记录吗？'), done]])
     const result = await send('昨天中午吃了两个鸡蛋')

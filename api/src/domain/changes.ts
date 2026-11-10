@@ -2,7 +2,7 @@
  * 写入的"意图"：记录与食品库的变更。确认卡保存的就是它，确认时原样执行（TDD §5.1）。
  * 这些类型只在 API 内部使用，模型的工具参数（M2）先解析成它们再交给服务。
  */
-import type { AmountSource, EventTime, FoodVersionBasis, FoodVersionSource, NutrientValues, Quantity } from '@vita/contract'
+import type { AmountSource, EventTime, FoodVersionBasis, FoodVersionSource, MealLabel, NutrientValues, Quantity } from '@vita/contract'
 
 /** 一个 Item 的营养从哪里来：命中数据源时只给引用，数值由服务端计算；只有 AI 估算才带数值与依据。 */
 export type NutritionInput =
@@ -24,7 +24,7 @@ export interface ItemDraft {
 
 export interface RecordDraft {
   eventTime: EventTime
-  mealLabel: string | null
+  mealLabel: MealLabel | null
   note: string | null
   items: ItemDraft[]
 }

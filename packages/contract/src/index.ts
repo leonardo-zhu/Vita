@@ -118,6 +118,28 @@ export type TimePrecision = z.infer<typeof TimePrecision>
 
 export const MealPeriod = z.enum(['breakfast', 'lunch', 'dinner', 'snack', 'other'])
 export type MealPeriod = z.infer<typeof MealPeriod>
+/** 时间段的中文名，和 App 里 MealPeriod.label 一致。 */
+export const MEAL_PERIOD_LABEL: Record<MealPeriod, string> = { breakfast: '早餐', lunch: '午餐', dinner: '晚餐', snack: '加餐', other: '其他' }
+
+/**
+ * 记录的餐次名（卡片标题）。只能是这几个，模型不能自拟；不给时 App 按时间段显示。
+ * 存的就是中文，旧版 App 直接把它当标题显示。
+ */
+export const MealLabel = z.enum(['早餐', '午餐', '晚餐', '加餐'])
+export type MealLabel = z.infer<typeof MealLabel>
+
+/** 把旧数据里的任意餐次名归到 MealLabel：认识的中英文名转成对应枚举，其他的返回 null（回落到按时间段显示）。 */
+export function normalizeMealLabel(raw: string | null | undefined): MealLabel | null {
+  const value = raw?.trim().toLowerCase()
+  if (!value) return null
+  const map: Record<string, MealLabel> = {
+    早餐: '早餐', 早饭: '早餐', breakfast: '早餐',
+    午餐: '午餐', 午饭: '午餐', lunch: '午餐',
+    晚餐: '晚餐', 晚饭: '晚餐', dinner: '晚餐', supper: '晚餐',
+    加餐: '加餐', 零食: '加餐', 夜宵: '加餐', snack: '加餐',
+  }
+  return map[value] ?? null
+}
 
 /** 摄入发生的本地语义：精度决定哪些字段存在，"中午"不会被写成 12:00。 */
 export const EventTime = z.object({
@@ -150,7 +172,7 @@ export type DayItem = z.infer<typeof DayItem>
 export const DayRecord = z.object({
   id: z.uuid(),
   eventTime: EventTime,
-  mealLabel: z.string().nullable(),
+  mealLabel: MealLabel.nullable(),
   note: z.string().nullable(),
   revision: z.number().int(),
   items: z.array(DayItem),
@@ -912,7 +934,7 @@ export type ImportResponse = z.infer<typeof ImportResponse>
 export const RecordUpdateRequest = z.object({
   expectedRevision: z.number().int(),
   eventTime: EventTime.optional(),
-  mealLabel: z.string().max(40).nullish(),
+  mealLabel: MealLabel.nullish(),
   note: z.string().max(500).nullish(),
 })
 export type RecordUpdateRequest = z.infer<typeof RecordUpdateRequest>

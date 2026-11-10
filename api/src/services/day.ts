@@ -2,7 +2,7 @@
  * 某一天的只读视图，给 Data 页与 Agent 的读工具用（移植自 1.0 的 DayDataService）。
  * 汇总、能量目标与收支每次重算，不存储（TDD §4.2、§6.2）。
  */
-import type { DayItem, DayRecord, DayResponse, DaySummary, Goal } from '@vita/contract'
+import { normalizeMealLabel, type DayItem, type DayRecord, type DayResponse, type DaySummary, type Goal } from '@vita/contract'
 
 import { energyBalance, energyTarget, type EnergyDay } from '../domain/energy.ts'
 import { missingExtras, sumNutrients } from '../domain/nutrition.ts'
@@ -66,7 +66,7 @@ export class DayService {
       return {
         id: record.id,
         eventTime: JSON.parse(record.event_time),
-        mealLabel: record.meal_label,
+        mealLabel: normalizeMealLabel(record.meal_label),
         note: record.note,
         revision: record.revision,
         items,

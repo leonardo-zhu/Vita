@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
-import type { CardRef, ChatEvent, ChatMessage } from '@vita/contract'
+import { MEAL_PERIOD_LABEL, type CardRef, type ChatEvent, type ChatMessage } from '@vita/contract'
 
 import { localDateOf, localParts, addDays } from '../domain/time.ts'
 import type { Services } from '../services/index.ts'
@@ -329,7 +329,7 @@ export class Orchestrator {
     } else {
       lines.push('- 当天的记录（修改时用 ID；需要用量与营养细节时调用 getDaySummary）：')
       for (const record of day.records) {
-        const label = record.mealLabel ?? record.eventTime.mealPeriod ?? record.eventTime.precision
+        const label = record.mealLabel ?? (record.eventTime.mealPeriod ? MEAL_PERIOD_LABEL[record.eventTime.mealPeriod] : '未说明餐次')
         const items = record.items.map((item) => `${item.displayName}［${item.id}］${item.originalAmountText}`).join('；')
         lines.push(`  - ${label}［${record.id}］：${items}`)
       }

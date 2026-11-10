@@ -255,6 +255,14 @@ const MIGRATIONS = [
     sex           TEXT NOT NULL
   );
   CREATE INDEX bmr_changes_date ON bmr_changes(local_date);`,
+  `-- 餐次名改为枚举（早餐 / 午餐 / 晚餐 / 加餐）：之前是自由文本，模型会写出 dinner、snack 这类英文。认识的转成中文，其他的清空，回落到按时间段显示
+  UPDATE consumption_records SET meal_label = CASE lower(trim(meal_label))
+    WHEN '早餐' THEN '早餐' WHEN '早饭' THEN '早餐' WHEN 'breakfast' THEN '早餐'
+    WHEN '午餐' THEN '午餐' WHEN '午饭' THEN '午餐' WHEN 'lunch' THEN '午餐'
+    WHEN '晚餐' THEN '晚餐' WHEN '晚饭' THEN '晚餐' WHEN 'dinner' THEN '晚餐' WHEN 'supper' THEN '晚餐'
+    WHEN '加餐' THEN '加餐' WHEN '零食' THEN '加餐' WHEN '夜宵' THEN '加餐' WHEN 'snack' THEN '加餐'
+    ELSE NULL END
+  WHERE meal_label IS NOT NULL;`,
 ]
 
 /** 在调用方的事务里登记一次变化，供手机同步到 Apple 健康。 */

@@ -186,7 +186,9 @@
                     "$ref": "#/$defs/eventTime"
                   },
                   "mealLabel": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": ["早餐", "午餐", "晚餐", "加餐"],
+                    "description": "卡片标题，只能从这几个里选；拿不准就不填，App 会按时间段显示"
                   },
                   "note": {
                     "type": "string"

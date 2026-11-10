@@ -3,6 +3,7 @@
  * 用量单位由服务端标准化，个人食品与参考库的营养值由服务端计算（模型给了也不采用），
  * 摄入时间按会话日期与时区构造，没表达时间则注入 defaultedEntryTime。只会创建或替换确认卡，不写正式数据。
  */
+import { MealLabel } from '@vita/contract'
 import { z } from 'zod'
 
 import type { FoodChange, FoodVersionDraft, ItemDraft, RecordChange } from '../domain/changes.ts'
@@ -81,7 +82,7 @@ const RecordChangePayload = z.object({
   recordId: z.string().nullish(),
   itemId: z.string().nullish(),
   record: z
-    .object({ eventTime: EventTimeArgs.nullish(), mealLabel: z.string().nullish(), note: z.string().nullish(), items: z.array(ItemArgs) })
+    .object({ eventTime: EventTimeArgs.nullish(), mealLabel: MealLabel.nullish(), note: z.string().nullish(), items: z.array(ItemArgs) })
     .nullish(),
   items: z.array(ItemArgs).nullish(),
   item: ItemArgs.nullish(),

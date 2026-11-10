@@ -6,7 +6,7 @@
  */
 import { randomUUID } from 'node:crypto'
 
-import type { DayItem, EventTime, NutritionSnapshot, Quantity, RecordChangePreview } from '@vita/contract'
+import type { DayItem, EventTime, MealLabel, NutritionSnapshot, Quantity, RecordChangePreview } from '@vita/contract'
 
 import { audit, recordHealthChange, transaction } from '../db.ts'
 import { recordAuditAction, type ItemDraft, type RecordChange } from '../domain/changes.ts'
@@ -122,7 +122,7 @@ export class RecordService {
     date: string,
     expectedRevision: number,
     recordId: string,
-    changes: { eventTime?: EventTime; mealLabel?: string | null; note?: string | null },
+    changes: { eventTime?: EventTime; mealLabel?: MealLabel | null; note?: string | null },
     origin: WriteOrigin,
   ) {
     this.edit('record.edit', recordId, origin, () => {
@@ -135,7 +135,7 @@ export class RecordService {
         .run(
           JSON.stringify(eventTime),
           representativeTimestamp(eventTime).toISOString(),
-          changes.mealLabel === undefined ? record.meal_label : changes.mealLabel?.trim() || null,
+          changes.mealLabel === undefined ? record.meal_label : changes.mealLabel,
           changes.note === undefined ? this.noteOf(recordId) : changes.note?.trim() || null,
           recordId,
         )

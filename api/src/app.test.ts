@@ -127,4 +127,21 @@ describe('数据库迁移', () => {
     expect(second.prepare('SELECT count(*) AS n FROM devices').get()).toEqual({ n: 1 })
     second.close()
   })
+
+  it('餐次名改成枚举时，旧的自由文本转成中文，认不出的清空', () => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), 'vita-api-')), 'vita-api.db')
+    const first = openDatabase(file)
+    const version = (first.prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+    first.exec("INSERT INTO day_sessions (local_date, time_zone, revision, created_at, updated_at) VALUES ('2026-11-10', 'Asia/Shanghai', 0, 'now', 'now')")
+    const insert = first.prepare(
+      "INSERT INTO consumption_records (id, session_date, event_time, sort_time, meal_label, revision, created_at, updated_at) VALUES (?, '2026-11-10', '{}', 'now', ?, 0, 'now', 'now')",
+    )
+    for (const [id, label] of [['a', 'dinner'], ['b', ' Snack '], ['c', '午餐'], ['d', '下午茶'], ['e', null]]) insert.run(id, label)
+    first.exec(`PRAGMA user_version = ${version - 1}`)
+    first.close()
+
+    const second = openDatabase(file)
+    expect(second.prepare('SELECT meal_label AS label FROM consumption_records ORDER BY id').all().map((row) => row.label)).toEqual(['晚餐', '加餐', '午餐', null, null])
+    second.close()
+  })
 })

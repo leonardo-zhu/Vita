@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-import type { ImportBundle, ImportResponse } from '@vita/contract'
+import { normalizeMealLabel, type ImportBundle, type ImportResponse } from '@vita/contract'
 
 import { audit, recordHealthChange, transaction } from '../db.ts'
 import { representativeTimestamp } from '../domain/eventTime.ts'
@@ -65,7 +65,7 @@ export class ImportService {
             .prepare(
               'INSERT INTO consumption_records (id, session_date, event_time, sort_time, meal_label, note, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             )
-            .run(r.id, r.sessionDate, JSON.stringify(r.eventTime), representativeTimestamp(r.eventTime).toISOString(), r.mealLabel, r.note, r.revision, r.createdAt, r.updatedAt)
+            .run(r.id, r.sessionDate, JSON.stringify(r.eventTime), representativeTimestamp(r.eventTime).toISOString(), normalizeMealLabel(r.mealLabel), r.note, r.revision, r.createdAt, r.updatedAt)
           for (const i of r.items) {
             database
               .prepare(
