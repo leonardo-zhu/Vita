@@ -12,7 +12,7 @@ Vita 是一个个人 AI 健康助理：用自然语言记录饮食，追踪营�
 | --- | --- | --- |
 | 本 README | 项目是什么、现状、仓库结构、怎么跑起来 | 当前 |
 | [PRD v2.0](docs/product/Vita-PRD-v2.0.md) | 2.0 在产品上改了什么、为什么；没提到的规则沿用 PRD v0.6 | 已评审，M1–M5 已实现 |
-| [Vita 2.0 架构设计](docs/architecture/vita-2.0-architecture.md) | 服务端、App 改造、Apple 健康同步、迁移；§16 是 M1–M5 的进度记录 | 已评审，M1–M5 已实现 |
+| [Vita 2.0 架构设计](docs/architecture/vita-2.0-architecture.md) | 服务端、App 改造、Apple 健康同步、迁移、Google 健康（§9a）；§16 是 M1–M5 及之后的进度记录 | 已评审，M1–M5 已实现 |
 
 **二、决策与 Agent**
 
@@ -45,9 +45,9 @@ PRD v0.6、TDD、实施计划的正文与现状不一致是正常的；以现状
 
 ## 当前技术基线
 
-- iOS 原生应用：Swift、SwiftUI、HealthKit；最低部署版本为 iOS 17，当前版本 2.3.5。业务数据不存手机，只存设备令牌（Keychain）、Apple 健康的同步进度与没传上去的称重；不拉配置、不上报诊断日志。
-- Vita API（`api/`）：Node 24 + TypeScript + Hono + `node:sqlite`，部署在 R4S（`https://vita-api.r4s.leonardo-zhu.me`）。记录、食品库、目标、对话、确认卡、称重、标签照片都以它为准；Agent 的工具循环与确认门也在这里跑，经 Conduit 调模型，模型密钥只在服务端。
-- Vita Admin（`admin/`，`https://vita.r4s.leonardo-zhu.me/admin`）：发布模型参数与 prompt（Vita API 每轮读取）、Prompt 调试、设备令牌；对话追踪与 rewind、饮食记录、食品库（含营养值版本）的管理经 API。诊断页只剩 1.0 时期的历史数据。
+- iOS 原生应用：Swift、SwiftUI、HealthKit；最低部署版本为 iOS 17，当前版本 2.5.0。业务数据不存手机，只存设备令牌（Keychain）、Apple 健康的同步进度与没传上去的称重；不拉配置、不上报诊断日志。
+- Vita API（`api/`）：Node 24 + TypeScript + Hono + `node:sqlite`，部署在 R4S（`https://vita-api.r4s.leonardo-zhu.me`）。记录、食品库、目标、对话、确认卡、称重、标签照片都以它为准；Agent 的工具循环与确认门也在这里跑，经 Conduit 调模型，模型密钥只在服务端。活动能量与睡眠由服务端从 Google 健康拉取（Apple 健康里没有这两项）；随活动计算的能量目标每天按最新体重重算基础代谢，变化会记录下来。
+- Vita Admin（`admin/`，`https://vita.r4s.leonardo-zhu.me/admin`）：发布模型参数与 prompt（Vita API 每轮读取）、Prompt 调试、设备令牌、Google 健康授权、目标变更（基础代谢与目标历史，只读）；对话追踪与 rewind、饮食记录、食品库（含营养值版本）的管理经 API。诊断页只剩 1.0 时期的历史数据。
 - 模型经 Conduit（`https://conduit.r4s.leonardo-zhu.me`）调用，当前别名 `vita-chat` → `ark-code-latest`。确认门不变：模型只能查询和提出变更，用户在 App 里确认后才写入（ADR-004）；用户在 App 或 Admin 里直接改数据不经确认卡。
 - 请求 / 响应定义在 `packages/contract`（zod），API 与 Admin 共用；iOS 按它手写 Swift 模型。
 
