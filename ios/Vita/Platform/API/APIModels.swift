@@ -265,9 +265,13 @@ struct RecordChangePreviewDTO: Decodable, Sendable {
     var eventTime: EventTimeDTO
     var items: [DayData.Item]
     var removedItemNames: [String]
+    var regroupedItems: [DayData.Item]?
 
     func domain() throws -> ChangePreview {
-        ChangePreview(kind: kind, recordLabel: recordLabel, eventTime: try eventTime.domain(), items: items, removedItemNames: removedItemNames)
+        ChangePreview(
+            kind: kind, recordLabel: recordLabel, eventTime: try eventTime.domain(), items: items,
+            removedItemNames: removedItemNames, regroupedItems: regroupedItems
+        )
     }
 }
 

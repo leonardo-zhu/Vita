@@ -1004,7 +1004,11 @@
       "canonicalName": "大豆油",
       "aliases": [
         "大豆油",
-        "豆油"
+        "豆油",
+        "植物油",
+        "食用油",
+        "烹调油",
+        "炒菜油"
       ],
       "category": "oil",
       "preparationState": "asSold",

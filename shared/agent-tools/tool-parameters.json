@@ -214,6 +214,25 @@
               "item": {
                 "$ref": "#/$defs/item"
               },
+              "regroup": {
+                "type": "array",
+                "description": "appendItems 可选：同一条记录里已有的项顺带改分组，和追加的项在一张卡里确认。如追加“红烧用油”（groupName “红烧罗非鱼”）时，把已有的鱼也改到“红烧罗非鱼”下。groupName 省略表示移出分组",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "itemId": {
+                      "type": "string",
+                      "description": "已有 Item 的 ID"
+                    },
+                    "groupName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "itemId"
+                  ]
+                }
+              },
               "replacesPendingId": {
                 "type": "string"
               }

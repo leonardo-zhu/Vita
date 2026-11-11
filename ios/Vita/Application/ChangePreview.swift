@@ -15,6 +15,9 @@ struct ChangePreview: Equatable, Codable, Sendable {
     var items: [DayData.Item]
     /// 被替换、移除或随删除消失的 Item 名称。
     var removedItemNames: [String]
+    /// 追加时顺带改了分组的已有 Item（groupName 是改后的）。不是新吃的，不计入合计。
+    /// 可选：2026-11-11 之前的服务端和本地缓存里没有这一项。
+    var regroupedItems: [DayData.Item]? = nil
 
     var totals: NutrientValues {
         items.filter(\.includeInSummary).reduce(.zero) { $0 + $1.snapshot.values }

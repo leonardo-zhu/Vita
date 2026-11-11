@@ -213,3 +213,40 @@ describe('必测场景', () => {
     })
   })
 })
+
+describe('追加时顺带改已有项的分组', () => {
+  it('预览列出改分组的已有项但不计入合计；确认后分组改好，新项照常追加', () => {
+    const { services } = setup()
+    const { records, days } = services
+    const recordId = records.apply({ kind: 'create', draft: lunch([reference('vita.reference.chicken-breast.cooked', 150, '鸡胸肉')]) }, DAY, 0, ORIGIN)
+    const chickenId = days.day(DAY).records[0].items[0].id
+    const oil = { ...estimate(90, 0), displayName: '炒菜用油', groupName: '炒鸡胸' }
+    const change = { kind: 'appendItems' as const, recordId, items: [oil], regroup: [{ itemId: chickenId, groupName: '炒鸡胸' }] }
+
+    const preview = records.preview(change, DAY, 1)
+    expect(preview.items.map((item) => item.displayName)).toEqual(['炒菜用油'])
+    expect(preview.regroupedItems.map((item) => [item.id, item.groupName])).toEqual([[chickenId, '炒鸡胸']])
+    expect(preview.totals.energyKcal).toBe(90)
+
+    records.apply(change, DAY, 1, ORIGIN)
+    const items = days.day(DAY).records[0].items
+    expect(items.map((item) => [item.displayName, item.groupName])).toEqual([['鸡胸肉', '炒鸡胸'], ['炒菜用油', '炒鸡胸']])
+    expect(days.day(DAY).summary.totals.energyKcal).toBe(247.5 + 90)
+  })
+
+  it('分组没变的略过；不属于这条记录或重复的 ID 被拒绝，什么都不写', () => {
+    const { services } = setup()
+    const { records, days } = services
+    const recordId = records.apply({ kind: 'create', draft: lunch([{ ...reference('vita.reference.chicken-breast.cooked', 150, '鸡胸肉'), groupName: '炒鸡胸' }]) }, DAY, 0, ORIGIN)
+    const otherId = records.apply({ kind: 'create', draft: lunch([reference('vita.reference.rice.white.cooked', 200, '米饭')]) }, DAY, 1, ORIGIN)
+    const [chicken] = days.day(DAY).records.find((record) => record.id === recordId)!.items
+    const [rice] = days.day(DAY).records.find((record) => record.id === otherId)!.items
+    const oil = estimate(90, 0)
+
+    expect(records.preview({ kind: 'appendItems', recordId, items: [oil], regroup: [{ itemId: chicken.id, groupName: '炒鸡胸' }] }, DAY, 2).regroupedItems).toEqual([])
+    for (const regroup of [[{ itemId: rice.id, groupName: '炒鸡胸' }], [{ itemId: chicken.id, groupName: 'A' }, { itemId: chicken.id, groupName: 'B' }]]) {
+      expect(() => records.apply({ kind: 'appendItems', recordId, items: [oil], regroup }, DAY, 2, ORIGIN)).toThrow()
+    }
+    expect(days.day(DAY).revision).toBe(2)
+  })
+})

@@ -380,6 +380,11 @@ export const RecordChangePreview = z.object({
   items: z.array(DayItem),
   /** 被替换、移除或随删除消失的 Item 名称。 */
   removedItemNames: z.array(z.string()),
+  /**
+   * appendItems 顺带改了分组的已有 Item，groupName 是改后的（2026-11-11 起）。不是新吃的，不计入 totals。
+   * 旧版 App 不认识这个字段，卡片上只显示新增的项，确认后分组照样会改。
+   */
+  regroupedItems: z.array(DayItem).default([]),
   totals: NutrientValues,
 })
 export type RecordChangePreview = z.infer<typeof RecordChangePreview>

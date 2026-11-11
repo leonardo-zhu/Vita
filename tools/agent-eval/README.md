@@ -19,7 +19,11 @@ CONDUIT_KEY=$(security find-generic-password -a vita -s vita-chat-test -w) node 
   - 标签缺净含量：小笼汤包（照片里净含量看不清，应先问；读出了必须是 288 g）
   - 名称简短：摩可纳咖啡（不能照抄标签全称）
   - 归组：拿铁（咖啡和牛奶都要填 `groupName` “拿铁”）
-  - 归组：单独的几样不归组（水煮蛋 + 牛奶，都不应填 `groupName`）
+  - 归组：单独的几样不归组（水煮蛋 + 牛奶，都不应填 `groupName`，也不该加油）
+  - 多样漏项：罗非鱼 + 小白菜 + 米饭（卡上三样都要在；先再查一次算合理）
+  - 烹调用油：清炒小白菜（要计油并和小白菜归一组）
+  - 上面两个的“已查到油”变体（历史里已有一次植物油查询，必须出卡）
+  - 补项并归组：红烧鱼补油（用 `regroup` 把已记的鱼和新加的油归到同一组）
   - 历史里有假出卡：重发牛奶（历史里有“已生成确认卡”的假回复，这次要真的出卡，带 950 ml 与钠 60 mg）
 
   ```bash
@@ -28,7 +32,7 @@ CONDUIT_KEY=$(security find-generic-password -a vita -s vita-chat-test -w) node 
     node tools/agent-eval/run.mjs --runs 10 --model vita-chat,ark-agent-plan/doubao-seed-2.1-lite
   ```
 
-  参数：`--runs` 每个用例几次（默认 5），`--model` 逗号分隔的模型（默认 `vita-chat`），`--case` 只跑名称含这段文字的用例，`--effort` 推理强度（默认 low）。新的问题出现后，把那次对话补成一个用例。
+  参数：`--runs` 每个用例几次（默认 5），`--model` 逗号分隔的模型（默认 `vita-chat`），`--case` 只跑名称含这段文字的用例，`--effort` 推理强度（默认 low），`--dump` 打出失败那几次的原始响应（状态、输出类型、文字、推理结尾）。新的问题出现后，把那次对话补成一个用例。
 
 - `continuation.mjs [次数]`：确认后接续这一轮（“牛奶已存，接着记拿铁”）。每种参数跑 N 次（默认 20，5 个并发），统计是否真的调了 `proposeRecordChange`、用量与食品 ID 是否都对、耗时与推理 token。系统 prompt 与工具描述读 `shared/config/DefaultConfig.json`，所以改 prompt 后直接重跑就能对比。
 

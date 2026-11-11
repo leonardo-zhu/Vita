@@ -45,7 +45,10 @@ private struct RecordPreviewContent: View {
 
     var body: some View {
         header
-        GroupedItems(items: preview.items) { ItemLine(item: $0) }
+        // 改分组的已有项放在新项前面，和新项一起按菜名归组；它们只是挪进这道菜，不算这次新吃的。
+        let regrouped = preview.regroupedItems ?? []
+        let regroupedIDs = Set(regrouped.map(\.id))
+        GroupedItems(items: regrouped + preview.items) { ItemLine(item: $0, isExisting: regroupedIDs.contains($0.id)) }
         ForEach(preview.removedItemNames, id: \.self) { name in
             Text(name).strikethrough().foregroundStyle(.secondary)
         }
@@ -244,6 +247,8 @@ private struct FoodPreviewContent: View {
 
 private struct ItemLine: View {
     let item: DayData.Item
+    /// 已经记过、这次只是改到某道菜下的项。
+    var isExisting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -254,9 +259,15 @@ private struct ItemLine: View {
                 Text(DisplayFormat.energy(item.snapshot.values.energyKcal))
                     .monospacedDigit()
                     .strikethrough(!item.includeInSummary)
+                    .foregroundStyle(isExisting ? .secondary : .primary)
             }
             HStack(spacing: 6) {
-                SourceBadge(source: item.snapshot.nutritionSource)
+                if isExisting {
+                    Label("已记录，归入这道菜", systemImage: "arrow.turn.down.right")
+                        .labelStyle(.titleAndIcon)
+                } else {
+                    SourceBadge(source: item.snapshot.nutritionSource)
+                }
                 if let quantity = item.quantity {
                     Text(DisplayFormat.quantity(quantity))
                 }
@@ -266,7 +277,7 @@ private struct ItemLine: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            if let basis = item.snapshot.estimateBasis {
+            if !isExisting, let basis = item.snapshot.estimateBasis {
                 Text(basis).font(.caption).foregroundStyle(.secondary)
             }
         }

@@ -29,9 +29,16 @@ export interface RecordDraft {
   items: ItemDraft[]
 }
 
+/** 把已有 Item 改到某个菜名下；groupName 为 null 表示移出分组。 */
+export interface ItemRegroup {
+  itemId: string
+  groupName: string | null
+}
+
 export type RecordChange =
   | { kind: 'create'; draft: RecordDraft }
-  | { kind: 'appendItems'; recordId: string; items: ItemDraft[] }
+  /** regroup：同一条记录里已有的 Item 顺带改分组（如追加“红烧用油”时把已有的鱼也归到“红烧罗非鱼”下）；2026-11-11 之前的 Pending 没有这个字段。 */
+  | { kind: 'appendItems'; recordId: string; items: ItemDraft[]; regroup?: ItemRegroup[] }
   | { kind: 'replaceItem'; recordId: string; itemId: string; item: ItemDraft }
   | { kind: 'removeItem'; recordId: string; itemId: string }
   | { kind: 'deleteRecord'; recordId: string }

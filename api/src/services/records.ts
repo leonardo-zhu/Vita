@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import type { DayItem, EventTime, MealLabel, NutritionSnapshot, Quantity, RecordChangePreview } from '@vita/contract'
 
 import { audit, recordHealthChange, transaction } from '../db.ts'
-import { recordAuditAction, type ItemDraft, type RecordChange } from '../domain/changes.ts'
+import { recordAuditAction, type ItemDraft, type ItemRegroup, type RecordChange } from '../domain/changes.ts'
 import { representativeTimestamp } from '../domain/eventTime.ts'
 import {
   computedSnapshot,
@@ -45,6 +45,19 @@ class Rejection extends Error {
     super(reason)
     this.reason = reason
   }
+}
+
+interface ExistingItemRow {
+  id: string
+  display_name: string
+  group_name: string | null
+  original_amount_text: string
+  quantity: string | null
+  amount_source: DayItem['amountSource']
+  include_in_summary: number
+  snapshot: string
+  food_version_id: string | null
+  reference_food_id: string | null
 }
 
 interface SessionRow {
@@ -280,11 +293,21 @@ export class RecordService {
       case 'appendItems': {
         const record = this.locate(change.recordId, date, expectedRevision)
         const items = this.resolveAll(change.items)
+        const regroup = this.regroupTargets(record.id, change.regroup ?? [])
         return {
-          preview: this.recordPreview('appendItems', record, items.map((item) => this.previewItem(item)), []),
+          preview: this.recordPreview(
+            'appendItems',
+            record,
+            items.map((item) => this.previewItem(item)),
+            [],
+            regroup.map(({ item, groupName }) => ({ ...item, groupName })),
+          ),
           commit: () => {
             const at = this.now()
             const { next } = database.prepare('SELECT coalesce(max(position), -1) + 1 AS next FROM consumption_items WHERE record_id = ?').get(record.id) as { next: number }
+            for (const { item, groupName } of regroup) {
+              database.prepare('UPDATE consumption_items SET group_name = ?, updated_at = ? WHERE id = ?').run(groupName, at, item.id)
+            }
             this.insertItems(items, record.id, next, at)
             this.touch(record.id, at)
             this.bump(date, at)
@@ -418,8 +441,39 @@ export class RecordService {
       )
   }
 
-  private recordPreview(kind: RecordChangePreview['kind'], record: RecordRow, items: DayItem[], removed: string[]): RecordChangePreview {
-    return makePreview(kind, record.meal_label, JSON.parse(record.event_time), items, removed)
+  private recordPreview(kind: RecordChangePreview['kind'], record: RecordRow, items: DayItem[], removed: string[], regrouped: DayItem[] = []): RecordChangePreview {
+    return makePreview(kind, record.meal_label, JSON.parse(record.event_time), items, removed, regrouped)
+  }
+
+  /** 要改分组的已有 Item：必须属于这条记录，同一项只能出现一次，分组没变的略过。 */
+  private regroupTargets(recordId: string, regroup: ItemRegroup[]): { item: DayItem; groupName: string | null }[] {
+    if (!regroup.length) return []
+    const rows = this.context.database
+      .prepare('SELECT * FROM consumption_items WHERE record_id = ? ORDER BY position')
+      .all(recordId) as unknown as ExistingItemRow[]
+    const seen = new Set<string>()
+    const targets: { item: DayItem; groupName: string | null }[] = []
+    for (const entry of regroup) {
+      const row = rows.find((candidate) => candidate.id === entry.itemId)
+      if (!row || seen.has(row.id)) throw new ServiceError('record', 'itemNotFound')
+      seen.add(row.id)
+      if ((row.group_name ?? null) === entry.groupName) continue
+      targets.push({
+        item: {
+          id: row.id,
+          displayName: row.display_name,
+          groupName: row.group_name,
+          originalAmountText: row.original_amount_text,
+          quantity: row.quantity ? JSON.parse(row.quantity) : null,
+          amountSource: row.amount_source,
+          includeInSummary: row.include_in_summary === 1,
+          snapshot: JSON.parse(row.snapshot),
+          sourceLabel: sourceLabel(this.context, row.reference_food_id, row.food_version_id),
+        },
+        groupName: entry.groupName,
+      })
+    }
+    return targets
   }
 
   private previewItem(item: ResolvedItem): DayItem {
@@ -537,7 +591,9 @@ function makePreview(
   eventTime: RecordChangePreview['eventTime'],
   items: DayItem[],
   removedItemNames: string[],
+  regroupedItems: DayItem[] = [],
 ): RecordChangePreview {
+  // 改分组的已有项不是新吃的，不进合计。
   const totals = sumNutrients(items.filter((item) => item.includeInSummary).map((item) => item.snapshot.values))
-  return { kind, recordLabel, eventTime, items, removedItemNames, totals }
+  return { kind, recordLabel, eventTime, items, removedItemNames, regroupedItems, totals }
 }

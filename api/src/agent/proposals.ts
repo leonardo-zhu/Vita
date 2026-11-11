@@ -86,6 +86,8 @@ const RecordChangePayload = z.object({
     .nullish(),
   items: z.array(ItemArgs).nullish(),
   item: ItemArgs.nullish(),
+  /** appendItems 用：同一条记录里已有的 Item 顺带改分组。 */
+  regroup: z.array(z.object({ itemId: z.string(), groupName: z.string().nullish() })).nullish(),
   replacesPendingId: z.string().nullish(),
 })
 
@@ -203,8 +205,15 @@ function recordChange(payload: z.infer<typeof RecordChangePayload>, sessionDate:
         },
       }
     }
-    case 'appendItems':
-      return { kind: 'appendItems', recordId: require(payload.recordId, 'payload.recordId'), items: require(payload.items, 'payload.items').map(item) }
+    case 'appendItems': {
+      const regroup = (payload.regroup ?? []).map((entry) => ({ itemId: entry.itemId, groupName: entry.groupName?.trim() || null }))
+      return {
+        kind: 'appendItems',
+        recordId: require(payload.recordId, 'payload.recordId'),
+        items: require(payload.items, 'payload.items').map(item),
+        ...(regroup.length ? { regroup } : {}),
+      }
+    }
     case 'replaceItem':
       return {
         kind: 'replaceItem',

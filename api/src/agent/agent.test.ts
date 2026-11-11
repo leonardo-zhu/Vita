@@ -114,6 +114,27 @@ describe('工具循环与确认门', () => {
     expect(services.pending.active(DAY)).toBeNull()
   })
 
+  it('追加时 regroup 把已有项改到同一个菜名下，卡片预览带上这些项', async () => {
+    const rounds: LLMEvent[][] = []
+    const { services, send } = make(rounds)
+    const recordId = services.records.apply({ kind: 'create', draft: lunch([estimate(140, 12)]) }, DAY, 0, ORIGIN)
+    const [existing] = services.days.day(DAY).records[0].items
+    const oil = {
+      displayName: '煎蛋用油',
+      groupName: '煎蛋',
+      originalAmountText: '煎蛋的油',
+      quantity: { amount: 5, unit: 'g' },
+      amountSource: 'aiEstimated',
+      nutrition: { source: 'aiEstimated', values: { energyKcal: 45, proteinG: 0, fatG: 5, carbohydrateG: 0 }, estimateBasis: '一个煎蛋约 5 g 油' },
+    }
+    const append = { sessionDate: DAY, payload: { intent: 'appendItems', recordId, items: [oil], regroup: [{ itemId: existing.id, groupName: ' 煎蛋 ' }] } }
+    rounds.push([call('c1', 'proposeRecordChange', append), done], [text('好'), done])
+    await send('其实是煎的，补上油')
+    const preview = services.pending.active(DAY)?.preview
+    expect(preview?.type === 'record' && preview.record.regroupedItems.map((item) => [item.id, item.groupName])).toEqual([[existing.id, '煎蛋']])
+    expect(preview?.type === 'record' && preview.record.totals.energyKcal).toBe(45)
+  })
+
   it('别的日期只提示切换，不写', async () => {
     const { services, send } = make([[call('c1', 'proposeRecordChange', { ...eggProposal, sessionDate: '2026-10-29' }), done], [text('这是昨天的内容，要切到昨天记录吗？'), done]])
     const result = await send('昨天中午吃了两个鸡蛋')

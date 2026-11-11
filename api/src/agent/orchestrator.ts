@@ -330,7 +330,7 @@ export class Orchestrator {
       lines.push('- 当天的记录（修改时用 ID；需要用量与营养细节时调用 getDaySummary）：')
       for (const record of day.records) {
         const label = record.mealLabel ?? (record.eventTime.mealPeriod ? MEAL_PERIOD_LABEL[record.eventTime.mealPeriod] : '未说明餐次')
-        const items = record.items.map((item) => `${item.displayName}［${item.id}］${item.originalAmountText}`).join('；')
+        const items = record.items.map((item) => `${item.displayName}［${item.id}］${item.originalAmountText}${item.groupName ? `（属于“${item.groupName}”）` : ''}`).join('；')
         lines.push(`  - ${label}［${record.id}］：${items}`)
       }
     }

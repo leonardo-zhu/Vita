@@ -86,6 +86,12 @@ const text = (body) =>
     .join('')
 const foodProposal = (body) => calls(body).find((c) => c.name === 'proposeFoodChange')?.args?.payload
 
+const searchTurn = (id, query, match) => [
+  { type: 'function_call', call_id: id, name: 'searchReferenceFoods', arguments: JSON.stringify({ query }) },
+  { type: 'function_call_output', call_id: id, output: JSON.stringify({ matches: [match] }) },
+]
+const OIL_SEARCH = searchTurn('call_oil', '植物油', { referenceFoodId: 'vita.reference.oil.soybean', name: '大豆油', aliases: ['大豆油', '豆油'], preparationState: 'asSold', per100g: { energyKcal: 899, proteinG: 0, fatG: 99.9, carbohydrateG: 0 } })
+
 // MARK: - 用例：每个都来自一次真实出过的问题
 
 const CASES = [
@@ -174,7 +180,96 @@ const CASES = [
       if (!call) return [false, `没出卡：${text(body).slice(0, 50)}`]
       const items = call.args.payload?.record?.items ?? call.args.payload?.items ?? []
       const named = items.map((i) => i.groupName).filter(Boolean)
+      if (items.some((i) => /油/.test(i.displayName ?? ''))) return [false, '水煮也加了油']
       return named.length === 0 ? [true] : [false, `乱加了 groupName：${named.join('、')}`]
+    },
+  },
+  {
+    name: '多样漏项：罗非鱼 + 小白菜 + 米饭',
+    source: '2026-11-11 推理里说要记三样，提案只带了第一样（doubao-seed-2.1-lite）',
+    build: () => {
+      return {
+        instructions: instructions(['milk', 'coffee']),
+        input: [
+          state({ date: '2026-11-11', revision: 1, records: ['  - 加餐［7a1e0000-0000-4000-8000-000000000021］：拿铁（摩可纳 8 号、小象鲜牛奶）'] }),
+          { role: 'user', content: '刚吃了红烧罗非鱼，大概一斤重（净肉含量我不知道，你自己估算）。\n还有 300g 清炒小白菜，以及 100g 生重的大米饭。' },
+          ...searchTurn('call_1', '罗非鱼', { referenceFoodId: 'vita.reference.tilapia.raw', name: '罗非鱼（生）', aliases: ['罗非鱼'], preparationState: 'raw', per100g: { energyKcal: 98, proteinG: 18.4, fatG: 1.5, carbohydrateG: 2.8 } }),
+          ...searchTurn('call_2', '小白菜', { referenceFoodId: 'vita.reference.bok-choy.raw', name: '小白菜（生）', aliases: ['小白菜', '青菜'], preparationState: 'raw', per100g: { energyKcal: 14, proteinG: 1.4, fatG: 0.3, carbohydrateG: 2.4 } }),
+          ...searchTurn('call_3', '大米', { referenceFoodId: 'vita.reference.rice.white.raw', name: '大米（生）', aliases: ['大米', '稻米', '白米', '生米'], preparationState: 'raw', per100g: { energyKcal: 346, proteinG: 7.9, fatG: 0.9, carbohydrateG: 77.2 } }),
+        ],
+      }
+    },
+    check(body) {
+      const call = calls(body).find((c) => c.name === 'proposeRecordChange')
+      // 先问估算口径、或再查一样（如烹调用油）都算合理，单独标出来；只说不做才算失败。
+      if (!call) {
+        const other = calls(body).map((c) => c.name)
+        if (other.length) return [true, `还在查：${[...new Set(other)].join('、')}`]
+        return /[？?]/.test(text(body)) ? [true, '先问了'] : [false, `没出卡：${text(body).slice(0, 50)}`]
+      }
+      const items = call.args.payload?.record?.items ?? call.args.payload?.items ?? []
+      // 鱼按参考库还是按熟食估算都行，只看三样是否都在。
+      const names = items.map((i) => i.displayName ?? '').join('、')
+      const missing = [/鱼/, /白菜|青菜/, /米/].filter((re) => !re.test(names))
+      return missing.length === 0 ? [true] : [false, `漏项：只有 ${names}`]
+    },
+  },
+  {
+    name: '烹调用油：清炒小白菜',
+    source: '2026-11-11 红烧罗非鱼、清炒小白菜都没计油，热量少算约两三百千卡',
+    build: () => {
+      return {
+        instructions: instructions(['milk']),
+        input: [
+          state({ date: '2026-11-11' }),
+          { role: 'user', content: '中午吃了 300g 清炒小白菜，还有 100g 生重的大米饭' },
+          ...searchTurn('call_1', '小白菜', { referenceFoodId: 'vita.reference.bok-choy.raw', name: '小白菜（生）', aliases: ['小白菜', '青菜'], preparationState: 'raw', per100g: { energyKcal: 14, proteinG: 1.4, fatG: 0.3, carbohydrateG: 2.4 } }),
+          ...searchTurn('call_2', '大米', { referenceFoodId: 'vita.reference.rice.white.raw', name: '大米（生）', aliases: ['大米', '稻米', '白米', '生米'], preparationState: 'raw', per100g: { energyKcal: 346, proteinG: 7.9, fatG: 0.9, carbohydrateG: 77.2 } }),
+        ],
+      }
+    },
+    check(body) {
+      const call = calls(body).find((c) => c.name === 'proposeRecordChange')
+      if (!call) {
+        const queries = calls(body).filter((c) => c.name === 'searchReferenceFoods').map((c) => c.args?.query ?? '')
+        if (queries.some((q) => /油/.test(q))) return [true, '去查油了']
+        return [false, queries.length ? `还在查：${queries.join('、')}` : `没出卡：${text(body).slice(0, 50)}`]
+      }
+      const items = call.args.payload?.record?.items ?? call.args.payload?.items ?? []
+      const oil = items.find((i) => /油/.test(i.displayName ?? ''))
+      const veg = items.find((i) => /白菜|青菜/.test(i.displayName ?? '') || /白菜/.test(i.groupName ?? ''))
+      if (!oil) return [false, `没计油：${items.map((i) => i.displayName).join('、')}`]
+      if (!veg || !oil.groupName || oil.groupName !== veg.groupName) return [false, `油没和小白菜归一组：${oil.groupName ?? '空'} / ${veg?.groupName ?? '空'}`]
+      if (items.some((i) => /米/.test(i.displayName ?? '') && i.groupName === oil.groupName)) return [false, '米饭也被归进了菜里']
+      return [true, `${oil.quantity?.amount ?? '?'} g 油`]
+    },
+  },
+  {
+    name: '补项并归组：红烧鱼补油',
+    source: '2026-11-11 补记时只给新加的油分组，已记的鱼留在组外（“红烧罗非鱼”组里只有油）',
+    build: () => ({
+      instructions: instructions(['milk', 'coffee']),
+      input: [
+        state({
+          date: '2026-11-11',
+          revision: 2,
+          records: ['  - 晚餐［36899d47-780a-4c48-9e42-ddafeb034ef9］：红烧罗非鱼［d097de45-272a-4455-bd9b-e5628c29d419］大概一斤重（净肉含量我自己估算）'],
+        }),
+        { role: 'user', content: '你漏记了，晚餐漏了 300g 清炒小白菜和 100g 生重的大米，红烧鱼和清炒小白菜的油也补上，归到各自的菜名下' },
+        ...searchTurn('call_1', '小白菜', { referenceFoodId: 'vita.reference.bok-choy.raw', name: '小白菜（生）', aliases: ['小白菜', '青菜'], preparationState: 'raw', per100g: { energyKcal: 14, proteinG: 1.4, fatG: 0.3, carbohydrateG: 2.4 } }),
+        ...searchTurn('call_2', '大米', { referenceFoodId: 'vita.reference.rice.white.raw', name: '大米（生）', aliases: ['大米', '稻米', '白米', '生米'], preparationState: 'raw', per100g: { energyKcal: 346, proteinG: 7.9, fatG: 0.9, carbohydrateG: 77.2 } }),
+        ...OIL_SEARCH,
+      ],
+    }),
+    check(body) {
+      const call = calls(body).find((c) => c.name === 'proposeRecordChange')
+      if (!call) return [false, `没出卡：${text(body).slice(0, 50)}`]
+      const payload = call.args.payload ?? {}
+      if (payload.intent !== 'appendItems') return [false, `intent 是 ${payload.intent}`]
+      const fish = (payload.regroup ?? []).find((r) => r.itemId === 'd097de45-272a-4455-bd9b-e5628c29d419')
+      if (!fish) return [false, '没把已有的鱼改分组']
+      const fishOil = (payload.items ?? []).find((i) => /油/.test(i.displayName ?? '') && i.groupName === fish.groupName)
+      return fishOil ? [true, fish.groupName] : [false, `鱼改到了“${fish.groupName}”，但没有油在同一组`]
     },
   },
   {
@@ -203,6 +298,31 @@ const CASES = [
     },
   },
 ]
+
+// “已查到油”变体：历史里已有一次植物油查询，只看最后出的卡（v12 起模型会先去查油，第一次回应看不到卡）。
+// 这时再“还在查”就算失败；罗非鱼那条还要求卡上有油。
+const withOil = (base, name, needsOil) => ({
+  ...base,
+  name,
+  build: () => {
+    const built = base.build()
+    return built && { ...built, input: [...built.input, ...OIL_SEARCH] }
+  },
+  check(body) {
+    const [ok, note] = base.check(body)
+    if (!ok || /还在查|去查油|先问了/.test(note ?? '')) return [false, note ?? '没出卡']
+    if (needsOil) {
+      const call = calls(body).find((c) => c.name === 'proposeRecordChange')
+      const items = call.args.payload?.record?.items ?? call.args.payload?.items ?? []
+      if (!items.some((i) => /油/.test(i.displayName ?? ''))) return [false, '没计油']
+    }
+    return [ok, note]
+  },
+})
+CASES.push(
+  withOil(CASES.find((c) => c.name.startsWith('多样漏项')), '多样漏项（已查到油）：罗非鱼 + 小白菜 + 米饭', true),
+  withOil(CASES.find((c) => c.name.startsWith('烹调用油')), '烹调用油（已查到油）：清炒小白菜', false),
+)
 
 // MARK: - 运行
 
@@ -247,6 +367,17 @@ for (const model of MODELS) {
     const seconds = (results.reduce((sum, r) => sum + r.seconds, 0) / results.length).toFixed(1)
     const notes = [...new Set(verdicts.map(([, note]) => note).filter(Boolean))].slice(0, 4).join('；')
     console.log(`- ${testCase.name}：${passed}/${RUNS}，平均 ${seconds} 秒${notes ? `（${notes}）` : ''}`)
+    // --dump：打出失败那几次的响应概况，看模型到底返回了什么。
+    if ('dump' in args) {
+      results.forEach((r, i) => {
+        if (verdicts[i][0]) return
+        const b = r.body
+        const reasoning = (b.output ?? []).filter((o) => o.type === 'reasoning').flatMap((o) => o.summary ?? o.content ?? []).map((c) => c.text ?? '').join('')
+        console.log(`  · status=${b.status} incomplete=${JSON.stringify(b.incomplete_details ?? null)} output=[${(b.output ?? []).map((o) => o.type).join(',')}] tokens_out=${b.usage?.output_tokens}`)
+        console.log(`    文字：${JSON.stringify(text(b).slice(0, 200))}`)
+        console.log(`    推理结尾：${JSON.stringify(reasoning.slice(-300))}`)
+      })
+    }
   }
   console.log()
 }
