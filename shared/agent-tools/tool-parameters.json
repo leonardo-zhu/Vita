@@ -271,7 +271,7 @@
               },
               "groupName": {
                 "type": "string",
-                "description": "可选的菜品名，如“番茄炒蛋”"
+                "description": "这一项所属的菜或饮品名，如“拿铁”下的咖啡和牛奶都填“拿铁”。只在几项合起来是一道菜 / 一杯饮品时填，同一道菜的各项填同一个名字；单独吃的食品不填"
               },
               "originalAmountText": {
                 "type": "string",

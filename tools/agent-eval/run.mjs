@@ -27,9 +27,11 @@ const tools = params.tools.map((t) => ({ type: 'function', name: t.name, descrip
 
 const MILK = { product: '5b0c2f0e-1111-4c1a-9b1e-000000000001', version: '5b0c2f0e-1111-4c1a-9b1e-0000000000a1' }
 const COFFEE = { product: '5b0c2f0e-2222-4c1a-9b1e-000000000002', version: '5b0c2f0e-2222-4c1a-9b1e-0000000000a2' }
+const EGG = { product: '5b0c2f0e-3333-4c1a-9b1e-000000000003', version: '5b0c2f0e-3333-4c1a-9b1e-0000000000a3' }
 const LIBRARY_LINES = {
   milk: `  - 小象鲜牛奶［productId ${MILK.product}］；品牌 小象超市；包装 950 ml；foodVersionId ${MILK.version}；每 100 ml：67.4 kcal、蛋白质 3.3 g、脂肪 3.9 g、碳水 4.8 g、钠 60 mg`,
   coffee: `  - 摩可纳 8 号［productId ${COFFEE.product}］；品牌 摩可纳；也叫 摩可纳冻干咖啡；包装 100 g；foodVersionId ${COFFEE.version}；每 100 g：321.85 kcal、蛋白质 19.3 g、脂肪 0 g、碳水 59.9 g`,
+  egg: `  - 水煮蛋［productId ${EGG.product}］；包装 1 个 50 g；foodVersionId ${EGG.version}；每 100 g：144 kcal、蛋白质 13.3 g、脂肪 8.8 g、碳水 2.8 g`,
 }
 
 function instructions(library) {
@@ -140,6 +142,39 @@ const CASES = [
       if (name.length > 10 || /固体饮料|速溶/.test(name)) return [false, `名称太长：${name}`]
       if (!payload.product?.package) return [false, `名称 ${name}，但没带净含量`]
       return [true, name]
+    },
+  },
+  {
+    name: '归组：拿铁',
+    source: '2026-11-11 拿铁记成两项单独的咖啡和牛奶，没有 groupName，卡片上看不出是一杯拿铁',
+    build: () => ({
+      instructions: instructions(['coffee', 'milk']),
+      input: [state(), { role: 'user', content: '刚喝了杯拿铁，用了两克的冻干咖啡，加上170ml 的鲜牛奶吧' }],
+      toolChoice: 'required',
+    }),
+    check(body) {
+      const call = calls(body).find((c) => c.name === 'proposeRecordChange')
+      if (!call) return [false, `没出卡：${text(body).slice(0, 50)}`]
+      const items = call.args.payload?.record?.items ?? call.args.payload?.items ?? []
+      const groups = [...new Set(items.map((i) => i.groupName ?? ''))]
+      if (items.length < 2) return [false, `只有 ${items.length} 项`]
+      return groups.length === 1 && groups[0].includes('拿铁') ? [true, groups[0]] : [false, `groupName：${JSON.stringify(groups)}`]
+    },
+  },
+  {
+    name: '归组：单独的几样不归组',
+    source: '2026-11-11 加归组规则时的反例：防止把一顿里的几样硬编成一道菜',
+    build: () => ({
+      instructions: instructions(['milk', 'egg']),
+      input: [state(), { role: 'user', content: '早上吃了一个水煮蛋，喝了 250ml 鲜牛奶' }],
+      toolChoice: 'required',
+    }),
+    check(body) {
+      const call = calls(body).find((c) => c.name === 'proposeRecordChange')
+      if (!call) return [false, `没出卡：${text(body).slice(0, 50)}`]
+      const items = call.args.payload?.record?.items ?? call.args.payload?.items ?? []
+      const named = items.map((i) => i.groupName).filter(Boolean)
+      return named.length === 0 ? [true] : [false, `乱加了 groupName：${named.join('、')}`]
     },
   },
   {

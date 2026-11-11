@@ -101,6 +101,7 @@
 ```
 
 - `mealLabel`（卡片标题）只能是 `早餐` / `午餐` / `晚餐` / `加餐`，可省略（App 按时间段显示）；其他值（包括 `dinner` 这类英文）返回 `malformedArguments`（2026-11-10 起，之前是自由文本）。
+- `groupName`（可选）：几项合起来是一道菜或一杯饮品时（拿铁 = 咖啡 + 牛奶），这几项填同一个菜名，App 把它们归在这个名字下显示；单独吃的食品不填。服务端不校验是否该填（2026-11-11 起参数描述与 prompt v11 写明了这条）。
 - `eventTime` 省略表示用户没表达时间，由客户端注入 `defaultedEntryTime`；模型不能自己声明该精度。`exact` / `approximate` 用 `time: "HH:mm"`，日期与时区取当前 Session。
 - `quantity.unit` 可用 g / kg / mg / 斤 / 两 / ml / L 及中文写法，由客户端标准化为 g / ml；计数单位（个、碗）须由模型换算或省略用量走估算。
 - `nutrition.source` 为 `referenceFood` / `personalFoodVersion` 时只看 ID，附带的 `values` 一律忽略；`aiEstimated` 必须带 `values` 与 `estimateBasis`。
